@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { strFromU8, unzipSync } from 'fflate'
 
-import { annotationFor, buildAnnotatedTex, buildProjectZip, buildUpdatedBib, mergeEntries, slug } from '../src/lib/authorExport.ts'
+import { annotationFor, buildAnnotatedTex, buildProjectZip, buildUpdatedBib, MAX_FIGURE_COPY_BYTES, mergeEntries, slug } from '../src/lib/authorExport.ts'
 import { parseBib } from '../src/lib/bibtex.ts'
 import type { Citation, Draft } from '../src/types/draftCheck.ts'
 import { MAIN_BIB, RELATED_WORK_TEX } from './fixtures/thesis.ts'
@@ -120,6 +120,49 @@ test('buildProjectZip holds every project file with its current text', () => {
     assert.deepEqual(Object.keys(files).sort(), ['main.bib', 'related-work.tex'])
     assert.equal(strFromU8(files['related-work.tex']), RELATED_WORK_TEX)
   })
+})
+
+test('buildProjectZip adds the draft figures at their paths, bytes unchanged', () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00])
+  return buildProjectZip(draft, [{ name: 'figures/posv.png', content: png }])
+    .arrayBuffer()
+    .then((buffer) => {
+      const files = unzipSync(new Uint8Array(buffer))
+      assert.deepEqual(Object.keys(files).sort(), ['figures/posv.png', 'main.bib', 'related-work.tex'])
+      assert.deepEqual([...files['figures/posv.png']], [...png])
+    })
+})
+
+test('buildProjectZip also puts a figure where \\includegraphics names it, so the export compiles', () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 7])
+  const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46, 8])
+  const tex = [
+    '\\includegraphics[width=0.5\\textwidth]{figures/posv}', // no extension, found by file name
+    '\\includegraphics{./plots/arch.pdf}',
+    '\\includegraphics{../outside/posv}', // outside the project: no entry for it
+    String.raw`\includegraphics{figures\plots/posv}`, // backslashes are not portable ZIP separators
+    '% \\includegraphics{commented/posv}',
+    '\\includegraphics{missing}',
+  ].join('\n')
+  const withTex: Draft = { ...draft, files: [{ name: 'main.tex', kind: 'tex', content: tex }] }
+  return buildProjectZip(withTex, [{ name: 'posv.png', content: png }, { name: 'arch.pdf', content: pdf }])
+    .arrayBuffer()
+    .then((buffer) => {
+      const files = unzipSync(new Uint8Array(buffer))
+      assert.deepEqual(Object.keys(files).sort(), ['arch.pdf', 'figures/posv.png', 'main.tex', 'plots/arch.pdf', 'posv.png'])
+      assert.deepEqual([...files['figures/posv.png']], [...png])
+      assert.deepEqual([...files['plots/arch.pdf']], [...pdf])
+    })
+})
+
+test('buildProjectZip refuses more figure copies than MAX_FIGURE_COPY_BYTES, and writes each path once', () => {
+  const big = new Uint8Array(MAX_FIGURE_COPY_BYTES / 2 + 1)
+  const paths = (n: number) => Array.from({ length: n }, (_, i) => `\\includegraphics{copy${i}/posv}`).join('\n')
+  const withPaths = (n: number): Draft => ({ ...draft, files: [{ name: 'main.tex', kind: 'tex', content: `${paths(n)}\n${paths(n)}` }] })
+  // One extra path, named twice: one copy, under the budget.
+  assert.equal(buildProjectZip(withPaths(1), [{ name: 'posv.png', content: big }]).type, 'application/zip')
+  // Two extra paths: two copies, over it.
+  assert.throws(() => buildProjectZip(withPaths(2), [{ name: 'posv.png', content: big }]), /more than 25 MB/)
 })
 
 test('slug makes a safe file name', () => {

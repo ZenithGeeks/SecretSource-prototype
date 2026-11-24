@@ -43,7 +43,7 @@ import { toast } from 'sonner'
 
 import { Button, Card } from '../../../components/ui'
 import type { DraftReader } from '../../../lib/agentTools'
-import { errorMessage } from '../../../lib/author'
+import { authorApi, errorMessage } from '../../../lib/author'
 import { buildAnnotatedTex, buildProjectZip, buildUpdatedBib, slug } from '../../../lib/authorExport'
 import { shortMessage } from '../../../lib/citations'
 import { downloadBlob, downloadText } from '../../../lib/csv'
@@ -52,15 +52,17 @@ import { useDebounced } from '../../../lib/useDebounced'
 import { type BibProblem, bibEntries, bibKeys, bibProblems, findCites, parseProject, sentenceStart, WARNING_TITLE, withContent } from '../../../lib/latexProject'
 import { useAuthorActions, useAuthorCheck, useAuthorDraft, useExportReport, useProjectLint, useProjectName, useSavedSources, useStartCheck } from '../../../lib/useAuthor'
 import { isOpenIssue, summarize, VERDICTS } from '../../../lib/verdict'
-import type { Citation, Draft, ProjectFile } from '../../../types/draftCheck'
+import type { Citation, Draft, DraftImage, ProjectFile } from '../../../types/draftCheck'
 import { CodeEditor, type CiteCompletionSource, type CursorPosition, type LineMark, type ProblemMark } from '../components/editor/CodeEditor'
 import { EditorTopBar, type SaveStatus } from '../components/editor/EditorTopBar'
 import { ExportMenu, type ExportKind } from '../components/editor/ExportMenu'
 import { FileTabs } from '../components/editor/FileTabs'
+import { ImagesMenu } from '../components/editor/ImagesMenu'
 import { PreviewPane } from '../components/editor/PreviewPane'
 import { SplitPane } from '../../../components/SplitPane'
 import { StatusBar } from '../components/editor/StatusBar'
 import type { EditorTarget } from '../editorTarget'
+import { useDraftImages } from '../useDraftImages'
 
 type Texts = Record<string, string>
 
@@ -123,6 +125,51 @@ export function Editor({
   const files: ProjectFile[] = useMemo(() => draft.data?.files ?? [], [draft.data])
   const [activeName, setActiveName] = useState<string | null>(target.file ?? null)
   const active = files.find((f) => f.name === activeName) ?? files.find((f) => f.kind === 'tex') ?? files[0]
+
+  // The draft's figures (SCRUM-463): the list the gateway sent, or the answer to this editor's
+  // own last upload or removal while it is newer. Kept here and not in the query cache: see
+  // useAuthorActions().uploadImage. Newer is by `imagesVersion`, which the gateway counts up on
+  // every change to the figures: a read of the draft that left before an upload and lands after
+  // it carries the older version, so it does not hide the new figure.
+  type ImageList = { images: DraftImage[]; version: number }
+  const [ownImages, setOwnImages] = useState<(ImageList & { draftId: string }) | null>(null)
+  const serverImages: ImageList = { images: draft.data?.images ?? [], version: draft.data?.imagesVersion ?? 0 }
+  const images = ownImages && ownImages.draftId === draftId && ownImages.version > serverImages.version ? ownImages.images : serverImages.images
+  const imageMap = useDraftImages(draftId, images)
+  const [imagesBusy, setImagesBusy] = useState(false)
+  const adoptImages = (answer: Draft) =>
+    setOwnImages((current) => {
+      const version = answer.imagesVersion ?? 0
+      // Two answers can land out of order too: the one with the higher version wins.
+      if (current && current.draftId === draftId && current.version >= version) return current
+      return { draftId, images: answer.images ?? [], version }
+    })
+  const changeImages = async (work: () => Promise<void>) => {
+    setImagesBusy(true)
+    try {
+      await work()
+    } finally {
+      setImagesBusy(false)
+    }
+  }
+  const uploadImages = (list: File[]) =>
+    changeImages(async () => {
+      for (const file of list) {
+        try {
+          adoptImages(await actions.uploadImage(draftId, file))
+        } catch (error) {
+          toast.error(`Could not upload ${file.name}: ${errorMessage(error)}`)
+        }
+      }
+    })
+  const removeImage = (name: string) =>
+    changeImages(async () => {
+      try {
+        adoptImages(await actions.deleteImage(draftId, name))
+      } catch (error) {
+        toast.error(`Could not remove ${name}: ${errorMessage(error)}`)
+      }
+    })
 
   // --- the two texts per file, and the writes between them --------------------------------
   const [texts, setTexts] = useState<Texts>({})
@@ -541,10 +588,23 @@ export function Editor({
         toast.success(`Downloaded ${file.name} with SecretSource comments`)
         return
       }
-      case 'zip':
-        downloadBlob(`${name}.zip`, buildProjectZip(current))
-        toast.success(`Downloaded ${name}.zip`)
+      case 'zip': {
+        // A figure that cannot be read leaves only itself out of the .zip, and is named.
+        const read = await Promise.allSettled(
+          images.map(async (image) => ({ name: image.name, content: new Uint8Array(await (await authorApi.imageBlob(draftId, image.name)).arrayBuffer()) })),
+        )
+        const figures = read.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+        const missing = images.filter((_, i) => read[i].status === 'rejected').map((i) => i.name)
+        try {
+          downloadBlob(`${name}.zip`, buildProjectZip(current, figures))
+        } catch (error) {
+          toast.error(`Could not build ${name}.zip: ${errorMessage(error)}`)
+          return false
+        }
+        if (missing.length) toast.warning(`Downloaded ${name}.zip without ${missing.join(', ')}: could not read ${missing.length === 1 ? 'it' : 'them'}`)
+        else toast.success(`Downloaded ${name}.zip`)
         return
+      }
       case 'report':
         setExporting('report')
         try {
@@ -813,7 +873,9 @@ export function Editor({
                   })
                   .catch((error) => toast.error(`Could not add ${name}: ${errorMessage(error)}`))
               }}
-            />
+            >
+              <ImagesMenu images={images} busy={imagesBusy} onUpload={(list) => void uploadImages(list)} onRemove={(name) => void removeImage(name)} />
+            </FileTabs>
             <CodeEditor
               key={`${draftId}:${active.name}`}
               ariaLabel={`${active.name} source`}
@@ -834,6 +896,7 @@ export function Editor({
             content={text}
             citations={fileCitations}
             bibEntries={entries}
+            images={imageMap}
             verdictColors={verdictColors}
             onToggleVerdictColors={() => setVerdictColors((v) => !v)}
             onKeepMine={(citation, note) => void keepMine(citation, note)}

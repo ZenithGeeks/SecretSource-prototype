@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -9,6 +9,7 @@ import { runTool, type DraftReader } from '../src/lib/agentTools'
 import { checkedLabel } from '../src/lib/timeAgo'
 import { CodeEditor } from '../src/roles/author/components/editor/CodeEditor'
 import { Editor } from '../src/roles/author/screens/Editor'
+import { useDraftImages } from '../src/roles/author/useDraftImages'
 import { SplitPane } from '../src/components/SplitPane'
 import { Toaster } from '../src/components/Toaster'
 import { installFakeGateway, type FakeGateway } from './fakeAuthorGateway'
@@ -572,6 +573,172 @@ describe('Author LaTeX editor — the preview never edits the source', () => {
     // and the editor's own document is the same text (CodeMirror draws only the visible lines)
     expect(EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString()).toBe(PAPER_TEX)
   }, 20000)
+})
+
+describe('Author LaTeX editor — images (SCRUM-463)', () => {
+  const FIGURE_TEX = String.raw`\section{Results}
+See the figure.
+\begin{figure}
+\includegraphics[width=0.5\textwidth]{figures/posv}
+\end{figure}
+`
+  const preview = () => screen.getByTestId('preview-page').shadowRoot
+
+  test('an uploaded image is drawn where \\includegraphics names it, at its width, until it is removed', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    await waitFor(() => expect(preview()?.querySelector('.ss-graphic')?.textContent).toBe('Image not uploaded: figures/posv'), { timeout: 15000 })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Images/ }))
+    const panel = screen.getByRole('region', { name: 'Draft images' })
+    expect(within(panel).getByText(/No images yet/)).toBeTruthy()
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'posv.png', { type: 'image/png' })
+    fireEvent.change(within(panel).getByLabelText('Upload images'), { target: { files: [png] } })
+
+    // Found by its file name from "figures/posv", fetched with the token, drawn from a blob: URL.
+    await waitFor(() => expect(preview()?.querySelector('img.ss-image')).toBeTruthy(), { timeout: 15000 })
+    const img = preview()!.querySelector('img.ss-image') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('blob:vitest')
+    expect(img.style.width).toBe('50%')
+    expect(gateway.calls).toContain('POST /author/drafts/d1/images')
+    expect(gateway.calls).toContain('GET /author/drafts/d1/images/posv.png')
+    expect(within(panel).getByText('posv.png')).toBeTruthy()
+    // Not an edit of the text: nothing was written and the draft's version stays.
+    expect(gateway.calls.filter((c) => c.startsWith('PUT '))).toEqual([])
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Remove posv.png' }))
+    await waitFor(() => expect(preview()?.querySelector('.ss-graphic')?.textContent).toBe('Image not uploaded: figures/posv'), { timeout: 15000 })
+    expect(gateway.drafts.get('d1')!.images).toEqual([])
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:vitest')
+  }, 30000)
+
+  test('an SVG reaches the preview only as a PNG drawn from it, so its own blob: URL is never shown', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX.replace('figures/posv', 'figures/logo') }] })
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
+    gateway.drafts.get('d1')!.images = [{ name: 'figures/logo.svg', size: svg.length, hash: 'h1' }]
+    gateway.imageBytes.set('d1/figures/logo.svg', svg)
+    vi.mocked(URL.createObjectURL).mockImplementation((blob) => `blob:${(blob as Blob).type}`)
+    // jsdom has no HTMLImageElement.decode: it resolves here as a loaded image would.
+    Object.defineProperty(HTMLImageElement.prototype, 'decode', { configurable: true, value: () => Promise.resolve() })
+    const drawImage = vi.fn()
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D)
+    const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done) => done(new Blob(['png'], { type: 'image/png' })))
+    try {
+      renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+      await waitFor(() => expect(preview()?.querySelector('img.ss-image')?.getAttribute('src')).toBe('blob:image/png'), { timeout: 15000 })
+      expect(drawImage).toHaveBeenCalled()
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:image/svg+xml')
+    } finally {
+      for (const spy of [getContext, toBlob]) spy.mockRestore()
+      delete (HTMLImageElement.prototype as { decode?: unknown }).decode
+      vi.mocked(URL.createObjectURL).mockImplementation(() => 'blob:vitest')
+    }
+  }, 30000)
+
+  test('a figure whose read fails for a moment is fetched again and drawn', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
+    gateway.drafts.get('d1')!.images = [{ name: 'figures/posv.png', size: 4, hash: 'h1' }]
+    gateway.imageBytes.set('d1/figures/posv.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
+    gateway.imageReadFailures = 1
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    await waitFor(() => expect(preview()?.querySelector('img.ss-image')).toBeTruthy(), { timeout: 15000 })
+    expect(gateway.calls.filter((c) => c === 'GET /author/drafts/d1/images/figures/posv.png')).toHaveLength(2)
+  }, 30000)
+
+  test('figures load at most three at a time', async () => {
+    const names = ['a', 'b', 'c', 'd', 'e']
+    const tex = names.map((n) => String.raw`\includegraphics{${n}}`).join('\n\n')
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: tex }] })
+    gateway.drafts.get('d1')!.images = names.map((n, i) => ({ name: `${n}.png`, size: 4, hash: `h${i}` }))
+    for (const n of names) gateway.imageBytes.set(`d1/${n}.png`, new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
+    let open = 0
+    let most = 0
+    const held: (() => void)[] = []
+    gateway.beforeImageRead = () => {
+      open += 1
+      most = Math.max(most, open)
+      return new Promise<void>((resolve) => held.push(() => (open -= 1, resolve())))
+    }
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    await waitFor(() => expect(held).toHaveLength(3))
+    // The rest start only as these finish: release what is waiting until all five went out.
+    for (let released = 0; released < names.length; ) {
+      await waitFor(() => expect(held.length).toBeGreaterThan(released))
+      const waiting = held.slice(released)
+      released = held.length
+      act(() => waiting.forEach((release) => release()))
+    }
+    await waitFor(() => expect(preview()?.querySelectorAll('img.ss-image')).toHaveLength(5), { timeout: 15000 })
+    expect(most).toBe(3)
+  }, 30000)
+
+  test('replacing the list waits for active SVG conversions and skips cancelled queued figures', async () => {
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    const images = ['a', 'b', 'c', 'queued', 'new'].map((name) => ({ name: `${name}.svg`, size: svg.length, hash: name }))
+    gateway.drafts.get('d1')!.images = images
+    for (const image of images) gateway.imageBytes.set(`d1/${image.name}`, svg)
+    const held: (() => void)[] = []
+    Object.defineProperty(HTMLImageElement.prototype, 'decode', { configurable: true, value: () => Promise.resolve() })
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D)
+    const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done) => {
+      held.push(() => done(new Blob(['png'], { type: 'image/png' })))
+    })
+    const { result, rerender, unmount } = renderHook(
+      ({ list }) => useDraftImages('d1', list),
+      { initialProps: { list: images.slice(0, 4) } },
+    )
+    const read = (name: string) => `GET /author/drafts/d1/images/${name}.svg`
+    try {
+      await waitFor(() => expect(held).toHaveLength(3))
+      await act(async () => rerender({ list: images.slice(4) }))
+      expect(gateway.calls).not.toContain(read('new'))
+
+      await act(async () => held[0]())
+      await waitFor(() => expect(held).toHaveLength(4))
+      await act(async () => held.slice(1).forEach((finish) => finish()))
+      expect([...result.current.keys()]).toEqual(['new.svg'])
+      expect(gateway.calls).not.toContain(read('queued'))
+    } finally {
+      unmount()
+      await act(async () => held.forEach((finish) => finish()))
+      getContext.mockRestore()
+      toBlob.mockRestore()
+      delete (HTMLImageElement.prototype as { decode?: unknown }).decode
+    }
+  })
+
+  test('a refused upload says why and leaves the images as they were', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    fireEvent.click(await screen.findByRole('button', { name: /^Images/ }))
+    const panel = screen.getByRole('region', { name: 'Draft images' })
+    fireEvent.change(within(panel).getByLabelText('Upload images'), { target: { files: [new File(['GIF89a'], 'anim.gif')] } })
+    expect(await screen.findByText(/Could not upload anim\.gif/)).toBeTruthy()
+    expect(gateway.drafts.get('d1')!.images ?? []).toEqual([])
+  })
+
+  test('the project .zip carries the images at their paths', async () => {
+    gateway = installFakeGateway({ files: [{ name: 'main.tex', content: FIGURE_TEX }] })
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])
+    gateway.drafts.get('d1')!.images = [{ name: 'figures/posv.png', size: bytes.length, hash: 'h1' }]
+    gateway.imageBytes.set('d1/figures/posv.png', bytes)
+    const saved: Blob[] = []
+    vi.mocked(URL.createObjectURL).mockImplementation((blob) => {
+      if (blob instanceof Blob && blob.type === 'application/zip') saved.push(blob)
+      return 'blob:vitest'
+    })
+    renderEditor({ draftId: 'd1', file: 'main.tex', line: 1 })
+    fireEvent.click(await screen.findByRole('button', { name: 'Export' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Project \.zip/ }))
+    await waitFor(() => expect(saved).toHaveLength(1))
+    const zip = new Uint8Array(await saved[0].arrayBuffer())
+    const text = new TextDecoder('latin1').decode(zip)
+    expect(text).toContain('main.tex')
+    expect(text).toContain('figures/posv.png')
+    // the figure's bytes are stored as they are
+    expect(text).toContain(new TextDecoder('latin1').decode(bytes))
+    vi.mocked(URL.createObjectURL).mockImplementation(() => 'blob:vitest')
+  })
 })
 
 describe('Author LaTeX editor — what Ask reads', () => {

@@ -10,13 +10,17 @@ directly under asyncio.run, as test_checks.py does for _run_check.
 import asyncio
 import io
 import json
+import os
+import threading
 import time
 import zipfile
+import zlib
 from datetime import datetime, timedelta
 
 import pytest
 import redis
 from app import auth, main
+from app.author import images as author_images
 from app.author import logic as author_logic
 from app.author import router as author
 from app.author import verify as author_verify
@@ -448,6 +452,381 @@ def test_uploading_a_zip_makes_a_draft_from_its_tex_and_bib_files(client):
 
     bad = client.post("/author/drafts/upload", headers=ADA, files={"file": ("notes.txt", b"x", "text/plain")})
     assert bad.status_code == 400
+
+
+# --- a draft's figures (SCRUM-463) -------------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+JPG = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+SVG = b'<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>'
+
+
+@pytest.fixture
+def figures_dir(monkeypatch, tmp_path):
+    folder = tmp_path / "draft-images"
+    monkeypatch.setattr(author_images, "DRAFT_IMAGES_DIR", folder)
+    return folder
+
+
+def upload_image(client, draft_id, name, content, headers=ADA, path=None):
+    return client.post(
+        f"/author/drafts/{draft_id}/images",
+        headers=headers,
+        params={"name": path} if path else None,
+        files={"file": (name, content, "application/octet-stream")},
+    )
+
+
+def test_a_zip_keeps_its_figures_and_the_owner_reads_them(client, figures_dir):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("main.tex", r"\includegraphics[width=0.5\textwidth]{figures/posv}")
+        archive.writestr("figures/posv.png", PNG)
+        archive.writestr("figures/arch.pdf", b"%PDF-1.5 figure")
+        archive.writestr("figures/logo.svg", SVG)
+        archive.writestr("figures/fake.png", b"not a png")  # not the image it says: left out
+        archive.writestr("figures/old.eps", b"%!PS")  # not kept
+        archive.writestr("__MACOSX/figures/._posv.png", PNG)
+    upload = {"file": ("thesis.zip", buffer.getvalue(), "application/zip")}
+    response = client.post("/author/drafts/upload", headers=ADA, files=upload)
+    assert response.status_code == 200, response.text
+    draft = response.json()
+    assert [f["name"] for f in draft["files"]] == ["main.tex"]
+    kept = ["figures/arch.pdf", "figures/logo.svg", "figures/posv.png"]
+    assert [i["name"] for i in draft["images"]] == kept
+    assert all(set(i) == {"name", "size", "hash"} for i in draft["images"])
+
+    url = f"/author/drafts/{draft['id']}/images/figures/posv.png"
+    image = client.get(url, headers=ADA)
+    assert image.status_code == 200
+    assert image.content == PNG and image.headers["content-type"] == "image/png"
+    svg = client.get(f"/author/drafts/{draft['id']}/images/figures/logo.svg", headers=ADA)
+    assert svg.headers["content-type"].startswith("image/svg+xml")
+    assert "sandbox" in svg.headers["content-security-policy"]
+    assert svg.headers["x-content-type-options"] == "nosniff"
+    # Figures are not text: the draft's version and unsaved state do not move.
+    assert draft["version"] == 1
+    assert client.get(f"/author/drafts/{draft['id']}/images/figures/fake.png", headers=ADA).status_code == 404
+
+
+def test_a_zip_keeps_figures_only_up_to_the_drafts_caps(client, figures_dir, monkeypatch):
+    monkeypatch.setattr(author_images, "MAX_IMAGE_FILE", 64)
+    monkeypatch.setattr(author_images, "MAX_DRAFT_IMAGES", 130)  # two 60-byte figures fit
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("main.tex", "x")
+        archive.writestr("big.png", PNG + b"\x00" * 64)  # over the per-file cap
+        archive.writestr("a.png", PNG + b"\x01" * 20)
+        archive.writestr("b.png", PNG + b"\x02" * 20)
+        archive.writestr("c.png", PNG + b"\x03" * 20)  # past the draft's total
+    upload = {"file": ("caps.zip", buffer.getvalue(), "application/zip")}
+    draft = client.post("/author/drafts/upload", headers=ADA, files=upload).json()
+    assert [i["name"] for i in draft["images"]] == ["a.png", "b.png"]
+
+
+def test_a_zip_figure_that_cannot_be_read_is_left_out_not_a_failed_upload(client, figures_dir):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("main.tex", "x")
+        archive.writestr("good.png", PNG)
+        archive.writestr("bad.png", PNG + b"BADCRC")
+    raw = bytearray(buffer.getvalue())
+    at = raw.index(PNG + b"BADCRC")
+    raw[at + len(PNG)] ^= 0xFF  # the bytes no longer match the entry's CRC
+    upload = {"file": ("crc.zip", bytes(raw), "application/zip")}
+    response = client.post("/author/drafts/upload", headers=ADA, files=upload)
+    assert response.status_code == 200, response.text
+    assert [i["name"] for i in response.json()["images"]] == ["good.png"]
+
+
+def test_a_zip_figure_with_damaged_compressed_data_is_left_out(client, figures_dir):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("main.tex", "x")
+        archive.writestr("good.png", PNG)
+        archive.writestr("bad.png", PNG * 4)
+    raw = bytearray(buffer.getvalue())
+    info = zipfile.ZipFile(io.BytesIO(bytes(raw))).getinfo("bad.png")
+    start = info.header_offset + 30 + len(info.filename) + len(info.extra)
+    raw[start : start + info.compress_size] = b"\xff" * info.compress_size  # not a deflate stream
+    with pytest.raises(zlib.error):  # the failure this test is about, not a CRC mismatch
+        zipfile.ZipFile(io.BytesIO(bytes(raw))).read("bad.png")
+    upload = {"file": ("deflate.zip", bytes(raw), "application/zip")}
+    response = client.post("/author/drafts/upload", headers=ADA, files=upload)
+    assert response.status_code == 200, response.text
+    assert [f["name"] for f in response.json()["files"]] == ["main.tex"]
+    assert [i["name"] for i in response.json()["images"]] == ["good.png"]
+
+
+def test_figures_a_zip_leaves_out_do_not_use_up_the_drafts_caps(client, figures_dir, monkeypatch):
+    monkeypatch.setattr(author_images, "MAX_IMAGES", 2)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("main.tex", "x")
+        for n in range(5):
+            archive.writestr(f"fake{n}.png", b"not a png")  # not the image the name says
+        archive.writestr("x*y.png", PNG)  # a name that is not kept
+        archive.writestr("a.png", PNG)
+        archive.writestr("b.png", PNG + b"\x01")
+        archive.writestr("c.png", PNG + b"\x02")  # past MAX_IMAGES
+    upload = {"file": ("caps.zip", buffer.getvalue(), "application/zip")}
+    draft = client.post("/author/drafts/upload", headers=ADA, files=upload).json()
+    assert [i["name"] for i in draft["images"]] == ["a.png", "b.png"]
+
+
+def test_a_figure_name_may_hold_spaces_brackets_and_accents(client, figures_dir):
+    draft = make_draft(client)
+    for name in ("figure (1).png", "fig_a+b,c.png", "résumé.png"):
+        response = upload_image(client, draft["id"], "x.png", PNG, path=f"figures/{name}")
+        assert response.status_code == 200, response.text
+        url = f"/author/drafts/{draft['id']}/images/figures/{name}"
+        assert client.get(url, headers=ADA).content == PNG
+    for bad in ("a*b.png", "c:/x.png", "a\x01.png"):
+        assert upload_image(client, draft["id"], "x.png", PNG, path=bad).status_code == 400
+
+
+def test_another_user_cannot_read_upload_or_delete_a_drafts_figures(client, figures_dir):
+    draft = make_draft(client)
+    assert upload_image(client, draft["id"], "posv.png", PNG).status_code == 200
+    url = f"/author/drafts/{draft['id']}/images/posv.png"
+    assert client.get(url, headers=BO).status_code == 404
+    assert client.delete(url, headers=BO).status_code == 404
+    assert upload_image(client, draft["id"], "posv.png", JPG, headers=BO).status_code == 404
+    assert client.get(url, headers=ADA).content == PNG
+
+
+def test_uploading_replacing_and_deleting_a_figure(client, figures_dir):
+    draft = make_draft(client)
+    first = upload_image(client, draft["id"], "upload.png", PNG, path="figures/posv.png")
+    assert first.status_code == 200, first.text
+    assert [i["name"] for i in first.json()["images"]] == ["figures/posv.png"]
+    # Not an edit of the text: an open editor's next write still carries a current `updated`.
+    assert first.json()["updated"] == draft["updated"]
+
+    # Every change to the figures counts up `imagesVersion`, which the editor orders answers by.
+    assert draft["imagesVersion"] == 0 and first.json()["imagesVersion"] == 1
+    other = PNG + b"\x01"
+    replaced = upload_image(client, draft["id"], "posv.png", other, path="figures/posv.png").json()
+    assert len(replaced["images"]) == 1 and replaced["images"][0]["hash"] != first.json()["images"][0]["hash"]
+    folder = figures_dir / draft["id"]
+    assert len(list(folder.iterdir())) == 1  # the replaced file is gone
+    url = f"/author/drafts/{draft['id']}/images/figures/posv.png"
+    assert client.get(url, headers=ADA).content == other
+
+    removed = client.delete(url, headers=ADA).json()
+    assert removed["images"] == [] and removed["imagesVersion"] == 3
+    assert list(folder.iterdir()) == []
+    assert client.delete(url, headers=ADA).status_code == 404
+
+
+def test_remove_unused_deletes_only_stale_part_files(client, figures_dir):
+    draft = make_draft(client)
+    assert upload_image(client, draft["id"], "a.png", PNG).status_code == 200
+    folder = figures_dir / draft["id"]
+    stale = folder / ".abc.png.dead.part"
+    fresh = folder / ".def.png.live.part"
+    stale.write_bytes(b"half")
+    fresh.write_bytes(b"half")
+    old = time.time() - author_images.STALE_PART_SECONDS - 60
+    os.utime(stale, (old, old))
+
+    # The next change to the figures runs remove_unused after its save.
+    assert upload_image(client, draft["id"], "b.png", PNG + b"").status_code == 200
+    assert not stale.exists()
+    assert fresh.exists()  # may still be a write in progress
+    assert client.get(f"/author/drafts/{draft['id']}/images/a.png", headers=ADA).content == PNG
+
+
+def test_a_replace_whose_save_fails_keeps_the_old_figure(client, figures_dir, monkeypatch):
+    draft = make_draft(client)
+    assert upload_image(client, draft["id"], "posv.png", PNG).status_code == 200
+
+    def broken(table, row):
+        raise RuntimeError("the store is down")
+
+    saved = author.store.save_author_row
+    monkeypatch.setattr(author.store, "save_author_row", broken)
+    with pytest.raises(RuntimeError):
+        upload_image(client, draft["id"], "posv.png", PNG + b"\x01")
+    monkeypatch.setattr(author.store, "save_author_row", saved)
+    # The row still lists the old figure, and its file is still there.
+    assert client.get(f"/author/drafts/{draft['id']}/images/posv.png", headers=ADA).content == PNG
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_failed_import_save_discards_only_unreferenced_files(client, figures_dir, monkeypatch, committed):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("main.tex", "x")
+        archive.writestr("a.png", PNG)
+    save_row = author.store.save_author_row
+
+    def fail_save(table, row):
+        assert list((figures_dir / row["id"]).iterdir())
+        if committed:
+            save_row(table, row)
+        raise RuntimeError("draft save response failed")
+
+    monkeypatch.setattr(author.store, "save_author_row", fail_save)
+    with pytest.raises(RuntimeError, match="draft save response failed"):
+        client.post(
+            "/author/drafts/upload",
+            headers=ADA,
+            files={"file": ("paper.zip", buffer.getvalue(), "application/zip")},
+        )
+    if committed:
+        (folder,) = figures_dir.iterdir()
+        assert client.get(f"/author/drafts/{folder.name}/images/a.png", headers=ADA).content == PNG
+    else:
+        assert not list(figures_dir.iterdir())
+        assert client.get("/author/drafts", headers=ADA).json() == []
+
+
+def test_delete_all_waits_for_a_write_that_holds_a_drafts_lock(client, figures_dir):
+    draft = make_draft(client)
+    assert upload_image(client, draft["id"], "a.png", PNG).status_code == 200
+    holding, done = threading.Event(), threading.Event()
+
+    def upload_in_flight():
+        # An upload that took the draft's lock before Delete all: it saves its row and file.
+        with author._locked(author.DRAFTS, draft["id"]):
+            holding.set()
+            time.sleep(0.3)
+            row = author.store.load_author_row(author.DRAFTS, draft["id"])
+            author_images.add(row, [("b.png", PNG + b"\x02")])
+            author.store.save_author_row(author.DRAFTS, row)
+        done.set()
+
+    writer = threading.Thread(target=upload_in_flight)
+    writer.start()
+    assert holding.wait(5)
+    assert client.delete("/user/data", headers=ADA).status_code == 200
+    writer.join(5)
+    assert done.is_set()
+    # Delete all waited for it, so neither the row nor its figures came back.
+    assert client.get("/author/drafts", headers=ADA).json() == []
+    assert not (figures_dir / draft["id"]).exists()
+
+
+def test_named_figure_import_during_delete_all_cannot_leave_an_orphan(client, figures_dir, monkeypatch):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("main.tex", "x")
+        archive.writestr("a.png", PNG)
+    upload = {"file": ("paper.zip", buffer.getvalue(), "application/zip")}
+
+    def import_draft():
+        return client.post("/author/drafts/upload", headers=ADA, files=upload)
+
+    delete_rows = author.store.delete_author_rows
+
+    def after_snapshot(owner):
+        # The owner snapshot is complete, but its rows still exist. Drive a real upload
+        # on another request thread and let the normal lock timeout finish that request.
+        assert import_draft().status_code == 503
+        assert not list(figures_dir.glob("*"))
+        delete_rows(owner)
+
+    monkeypatch.setattr(author, "LOCK_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(author.store, "delete_author_rows", after_snapshot)
+    assert client.delete("/user/data?scope=author", headers=ADA).status_code == 200
+    retry = import_draft()
+    assert retry.status_code == 200
+    draft_id = retry.json()["id"]
+    assert client.get(f"/author/drafts/{draft_id}/images/a.png", headers=ADA).content == PNG
+
+
+def test_figure_uploads_are_checked_and_capped(client, figures_dir, monkeypatch):
+    draft = make_draft(client)
+    assert upload_image(client, draft["id"], "a.png", b"GIF89a").status_code == 400  # not a PNG
+    assert upload_image(client, draft["id"], "a.gif", b"GIF89a").status_code == 400  # not a kept kind
+    assert upload_image(client, draft["id"], "a.png", PNG, path="../escape.png").status_code == 400
+    assert upload_image(client, draft["id"], "a.svg", b"<html><script/></html>").status_code == 400
+
+    monkeypatch.setattr(author_images, "MAX_IMAGE_FILE", 64)
+    monkeypatch.setattr(author_images, "MAX_DRAFT_IMAGES", 100)
+    assert upload_image(client, draft["id"], "big.png", PNG + b"\x00" * 64).status_code == 413
+    assert upload_image(client, draft["id"], "one.png", PNG).status_code == 200
+    assert upload_image(client, draft["id"], "two.png", PNG + b"\x02" * 20).status_code == 200
+    over = upload_image(client, draft["id"], "three.png", PNG + b"\x03" * 20)
+    assert over.status_code == 413 and "together" in over.json()["detail"]
+    names = [i["name"] for i in client.get(f"/author/drafts/{draft['id']}", headers=ADA).json()["images"]]
+    assert names == ["one.png", "two.png"]
+
+
+def test_deleting_a_draft_or_all_author_data_removes_its_figures(client, figures_dir):
+    kept = make_draft(client, headers=BO, title="Bo's")
+    upload_image(client, kept["id"], "b.png", PNG, headers=BO)
+    first = make_draft(client, title="One")
+    second = make_draft(client, title="Two")
+    for draft in (first, second):
+        assert upload_image(client, draft["id"], "a.png", PNG).status_code == 200
+
+    assert client.delete(f"/author/drafts/{first['id']}", headers=ADA).status_code == 200
+    assert not (figures_dir / first["id"]).exists()
+    assert (figures_dir / second["id"]).is_dir()
+
+    assert client.delete("/user/data", headers=ADA).status_code == 200
+    assert not (figures_dir / second["id"]).exists()
+    assert (figures_dir / kept["id"]).is_dir()  # another user's figures stay
+
+
+def deny_unlink_of(monkeypatch, figure):
+    unlink = author_images.os.unlink
+
+    def deny_figure_unlink(path, *args, **kwargs):
+        if path == figure.name:
+            raise PermissionError("figure storage is not writable")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(author_images.os, "unlink", deny_figure_unlink)
+
+
+def test_a_failed_figure_erasure_in_delete_all_keeps_the_draft_for_retry(client, figures_dir, monkeypatch):
+    draft_id = make_draft(client)["id"]
+    assert upload_image(client, draft_id, "a.png", PNG).status_code == 200
+    (figure,) = (figures_dir / draft_id).iterdir()
+
+    url = "/user/data?scope=author"
+    with monkeypatch.context() as patch:
+        deny_unlink_of(patch, figure)
+        assert client.delete(url, headers=ADA).status_code == 503
+    assert client.get(f"/author/drafts/{draft_id}/images/a.png", headers=ADA).content == PNG
+
+    assert client.delete(url, headers=ADA).status_code == 200
+    assert client.get(f"/author/drafts/{draft_id}", headers=ADA).status_code == 404
+    assert not figure.parent.exists()
+
+
+def test_delete_draft_removes_the_row_even_when_its_figures_cannot_be_removed(
+    client, figures_dir, monkeypatch, caplog
+):
+    draft_id = make_draft(client)["id"]
+    assert upload_image(client, draft_id, "a.png", PNG).status_code == 200
+    (figure,) = (figures_dir / draft_id).iterdir()
+
+    with monkeypatch.context() as patch, caplog.at_level("ERROR"):
+        deny_unlink_of(patch, figure)
+        assert client.delete(f"/author/drafts/{draft_id}", headers=ADA).status_code == 200
+    # The row went first, so the draft is gone; the folder that stayed is logged.
+    assert client.get(f"/author/drafts/{draft_id}", headers=ADA).status_code == 404
+    assert figure.exists()
+    assert any(draft_id in record.getMessage() for record in caplog.records)
+
+
+def test_delete_draft_whose_row_delete_fails_keeps_its_figures(client, figures_dir, monkeypatch):
+    draft_id = make_draft(client)["id"]
+    assert upload_image(client, draft_id, "a.png", PNG).status_code == 200
+
+    def broken(table, row_id):
+        raise RuntimeError("the store is down")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(author.store, "delete_author_row", broken)
+        with pytest.raises(RuntimeError):
+            client.delete(f"/author/drafts/{draft_id}", headers=ADA)
+    # The draft is still listed, and every figure it lists can still be read.
+    assert client.get(f"/author/drafts/{draft_id}/images/a.png", headers=ADA).content == PNG
 
 
 # --- draft checks -----------------------------------------------------------------------

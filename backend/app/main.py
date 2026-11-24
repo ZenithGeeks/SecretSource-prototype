@@ -65,7 +65,7 @@ from app.agent_runs import get_runner
 from app.agent_runs import router as agent_router
 from app.analysis_table import AnalysisTable
 from app.auth import current_user
-from app.author.router import DRAFT_CHECK, author_pdfs
+from app.author.router import DRAFT_CHECK, author_pdfs, delete_author_data
 from app.author.router import router as author_router
 from app.config import (
     AVATARS_DIR,
@@ -1690,7 +1690,7 @@ async def delete_all_data(scope: str = "all", user: str | None = Depends(current
         if user is not None:  # with login off there is no user, so there are no facts
             await asyncio.to_thread(store.delete_facts, user)
     if author:
-        await asyncio.to_thread(store.delete_author_rows, user)
+        await asyncio.to_thread(delete_author_data, user)
     return {"deleted": len(ids), "skipped": len(mine) - len(ids)}
 
 

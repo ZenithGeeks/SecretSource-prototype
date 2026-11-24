@@ -31,7 +31,7 @@ from pydantic import BaseModel
 
 from app import store
 from app.auth import current_user
-from app.author import logic
+from app.author import images, logic
 from app.author.verify import citation_outcome, reference_checks, verify_cached
 from app.config import PARALLEL_CHECKS
 from app.metrics import AUDIT_FINDINGS
@@ -213,6 +213,8 @@ def draft_view(draft: dict, runs: list[dict] | None = None) -> dict:
         else None
     )
     view["checks"] = len(done)
+    view["images"] = images.view(draft.get("images", []))
+    view["imagesVersion"] = int(draft.get("imagesVersion", 0))
     return view
 
 
@@ -446,23 +448,37 @@ def _untitled(user: str | None) -> str:
     return _first_free(UNTITLED, {d.get("title") for d in _rows(DRAFTS, user)})
 
 
-def _new_draft(user: str | None, title: str, project_id: str | None, files: list[dict]) -> dict:
+def _new_draft(
+    user: str | None,
+    title: str,
+    project_id: str | None,
+    files: list[dict],
+    figures: list[tuple[str, bytes]] | None = None,
+) -> dict:
     """A new draft. No title, or the bare default the app sends for a blank draft, gets the
     next free "Untitled draft N"; an upload's file name longer than MAX_TITLE is cut. Picked and
     saved under the owner's title lock, so two at once get two numbers. A draft made in a project
     holds the project's lock too, so it cannot land in a project a delete is removing."""
     wanted = " ".join(title.split())[:MAX_TITLE]
     default = not wanted or wanted == UNTITLED
-    keys = [_title_key(DRAFTS, user)] if default else []
+    # Delete all takes this key before listing drafts. Named imports must take it too:
+    # creating their figure folder and saving the row must fall on the same side of deletion.
+    keys = [_title_key(DRAFTS, user)]
     if project_id:
         keys.append(_row_key(PROJECTS, project_id))
     with _hold(*keys):
         if project_id:
             _row(PROJECTS, project_id, user, "project")
-        return _insert_draft(user, _untitled(user) if default else wanted, project_id, files)
+        return _insert_draft(user, _untitled(user) if default else wanted, project_id, files, figures)
 
 
-def _insert_draft(user: str | None, title: str, project_id: str | None, files: list[dict]) -> dict:
+def _insert_draft(
+    user: str | None,
+    title: str,
+    project_id: str | None,
+    files: list[dict],
+    figures: list[tuple[str, bytes]] | None = None,
+) -> dict:
     now = logic.now_iso()
     draft = {
         "id": _new_id(),
@@ -479,22 +495,49 @@ def _insert_draft(user: str | None, title: str, project_id: str | None, files: l
         "edited": now,
         "savedAt": now,
         "savedHash": logic.content_hash(files),
+        "images": [],
     }
-    store.save_author_row(DRAFTS, draft)
+    if not figures:
+        store.save_author_row(DRAFTS, draft)
+        return draft
+
+    try:
+        # Invalid or over-budget ZIP figures are skipped by the importer.
+        images.add(draft, figures, strict=False)
+    except Exception:
+        _cleanup_failed_import(draft["id"], save_attempted=False)
+        raise
+    try:
+        store.save_author_row(DRAFTS, draft)
+    except Exception:
+        _cleanup_failed_import(draft["id"], save_attempted=True)
+        raise
     return draft
 
 
-def _text_files_from_upload(name: str, content: bytes) -> list[dict]:
-    """The .tex and .bib files of an upload: the file itself, or those inside a .zip
-    (an Overleaf export). Figures and everything else in the zip are left out."""
+def _cleanup_failed_import(draft_id: str, *, save_attempted: bool) -> None:
+    try:
+        # A remote store can commit an upsert and then fail to deliver the response.
+        if not save_attempted or store.load_author_row(DRAFTS, draft_id) is None:
+            images.delete_all(draft_id)
+    except Exception:
+        # Preserve the original import error; keep files if we could not confirm row absence.
+        logger.exception("Could not clean up figures for failed draft import %s", draft_id)
+
+
+def _files_from_upload(name: str, content: bytes) -> tuple[list[dict], list[tuple[str, bytes]]]:
+    """The .tex and .bib files of an upload, and its figures: the file itself, or what a .zip
+    (an Overleaf export) holds. Figures are the zip's .png, .jpg, .svg and .pdf files
+    (app/author/images.py); everything else in it is left out."""
     lower = name.lower()
     if lower.endswith(".zip"):
         try:
             archive = zipfile.ZipFile(io.BytesIO(content))
         except zipfile.BadZipFile as error:
             raise HTTPException(400, "not a zip file") from error
+        infos = archive.infolist()[:MAX_ZIP_FILES]
         files = []
-        for info in archive.infolist()[:MAX_ZIP_FILES]:
+        for info in infos:
             if (
                 info.is_dir()
                 or not info.filename.lower().endswith((".tex", ".bib"))
@@ -510,13 +553,13 @@ def _text_files_from_upload(name: str, content: bytes) -> list[dict]:
             raise HTTPException(400, "the zip holds no .tex or .bib file")
         # main.tex first, then the rest in archive order, so the editor opens on it
         files.sort(key=lambda f: (f["name"].rsplit("/", 1)[-1] != "main.tex", f["kind"] == "bib"))
-        return files
+        return files, images.from_zip(archive, infos)
     if not lower.endswith((".tex", ".bib")):
         raise HTTPException(400, "upload a .tex, .bib or .zip file")
     if len(content) > MAX_TEXT_FILE:
         raise HTTPException(413, "a draft file must be under 2MB")
     base = Path(name).name
-    return [{"name": base, "kind": _kind_of(base), "content": content.decode("utf-8", errors="replace")}]
+    return [{"name": base, "kind": _kind_of(base), "content": content.decode("utf-8", errors="replace")}], []
 
 
 @router.get("/drafts")
@@ -546,9 +589,9 @@ async def upload_draft(
     # again under the project lock.
     if projectId:
         await asyncio.to_thread(_row, PROJECTS, projectId, user, "project")
-    files = _text_files_from_upload(file.filename or "draft.tex", await file.read())
+    files, figures = _files_from_upload(file.filename or "draft.tex", await file.read())
     title = re.sub(r"\.(tex|bib|zip)$", "", Path(file.filename or "draft").name, flags=re.I)
-    draft = await asyncio.to_thread(_new_draft, user, title, projectId, files)
+    draft = await asyncio.to_thread(_new_draft, user, title, projectId, files, figures)
     return await _draft_answer(draft, user)
 
 
@@ -596,7 +639,13 @@ async def delete_draft(draft_id: str, user: str | None = Depends(current_user)):
         # the row) or re-reads the row after it and answers 404, so it never brings it back.
         with _locked(DRAFTS, draft_id):
             _row(DRAFTS, draft_id, user, "draft")
+            # The row goes first: if it cannot be deleted, the draft keeps every figure it lists.
+            # A folder that then cannot be removed is logged; no row points at it any more.
             store.delete_author_row(DRAFTS, draft_id)
+            try:
+                images.delete_all(draft_id)
+            except OSError:
+                logger.exception("Could not remove figures of deleted draft %s", draft_id)
 
     await asyncio.to_thread(remove)
     return {"deleted": draft_id}
@@ -691,6 +740,89 @@ async def settle_bib_fork(draft_id: str, request: BibForkIn, user: str | None = 
             return _save(DRAFTS, draft)
 
     return await _draft_answer(await asyncio.to_thread(settle), user)
+
+
+# --- a draft's figures (SCRUM-463, app/author/images.py) ---------------------------------
+# Not edits of its text: like a rename, they leave `updated` and `edited` as they were, so an
+# open editor's next write is not a conflict.
+
+
+@router.post("/drafts/{draft_id}/images")
+async def upload_image(
+    draft_id: str,
+    file: UploadFile = FILE_UPLOAD,
+    name: str | None = None,
+    user: str | None = Depends(current_user),
+):
+    """Adds a figure, or replaces the one of the same name. `name` is the path the LaTeX
+    names it by ("figures/posv.png"); without it, the uploaded file's own name."""
+    path = images.safe_image_name(name or Path(file.filename or "").name)
+    await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
+    content = await file.read(images.MAX_IMAGE_FILE + 1)
+
+    def add() -> dict:
+        with _locked(DRAFTS, draft_id, busy=_draft_busy):
+            draft = _row(DRAFTS, draft_id, user, "draft")
+            images.add(draft, [(path, content)])
+            store.save_author_row(DRAFTS, draft)
+            images.remove_unused(draft)  # the replaced file, once the row no longer lists it
+            return draft
+
+    return await _draft_answer(await asyncio.to_thread(add), user)
+
+
+@router.get("/drafts/{draft_id}/images/{name:path}")
+async def get_image(draft_id: str, name: str, user: str | None = Depends(current_user)):
+    """One figure's bytes, for the draft's owner only (someone else's draft is a 404). An SVG
+    is served sandboxed: opened on its own, it runs no script and loads nothing."""
+    draft = await asyncio.to_thread(_row, DRAFTS, draft_id, user, "draft")
+    image = next((i for i in draft.get("images", []) if i["name"] == name), None)
+    path = images.stored_path(draft_id, image) if image else None
+    if not path or not path.is_file():
+        raise HTTPException(404, "no such image")
+    content = await asyncio.to_thread(path.read_bytes)
+    headers = {
+        "Cache-Control": "private, no-cache",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return Response(content, media_type=images.media_type(name), headers=headers)
+
+
+@router.delete("/drafts/{draft_id}/images/{name:path}")
+async def delete_image(draft_id: str, name: str, user: str | None = Depends(current_user)):
+    def remove() -> dict:
+        with _locked(DRAFTS, draft_id, busy=_draft_busy):
+            draft = _row(DRAFTS, draft_id, user, "draft")
+            images.remove(draft, name)
+            store.save_author_row(DRAFTS, draft)
+            images.remove_unused(draft)
+            return draft
+
+    return await _draft_answer(await asyncio.to_thread(remove), user)
+
+
+def _erase_draft_images(draft_id: str) -> None:
+    try:
+        images.delete_all(draft_id)
+    except OSError as error:
+        logger.exception("Could not erase figures for draft %s", draft_id)
+        raise HTTPException(503, "Could not remove draft figures. Try deleting again.") from error
+
+
+def delete_author_data(user: str | None) -> None:
+    """Settings -> Your data -> Delete all for the Author role: every project, draft and source
+    row of this owner, and every stored figure of the drafts. The drafts' locks are held through
+    figure and row deletion, so a write that already holds one (an
+    upload, an autosave) finishes first and is deleted with the rest, and one that comes after
+    finds no draft (404) instead of saving it back."""
+    with _titles_locked(DRAFTS, user):
+        draft_ids = [draft["id"] for draft in _rows(DRAFTS, user)]
+        with _locked(DRAFTS, *draft_ids):
+            # Keep the draft IDs discoverable if a folder cannot be removed.
+            for draft_id in draft_ids:
+                _erase_draft_images(draft_id)
+            store.delete_author_rows(user)
 
 
 @router.post("/drafts/{draft_id}/save")
@@ -1267,7 +1399,7 @@ async def create_project(request: ProjectIn, user: str | None = Depends(current_
 async def import_project(file: UploadFile = FILE_UPLOAD, user: str | None = Depends(current_user)):
     """+ New project from a .bib, or an Overleaf .zip: the .bib becomes the project's
     bibliography and the .tex files one draft."""
-    files = _text_files_from_upload(file.filename or "project.bib", await file.read())
+    files, figures = _files_from_upload(file.filename or "project.bib", await file.read())
     name = re.sub(r"\.(bib|zip|tex)$", "", Path(file.filename or "project").name, flags=re.I)
     bibs = [f for f in files if f["kind"] == "bib"]
     tex = [f for f in files if f["kind"] == "tex"]
@@ -1276,7 +1408,7 @@ async def import_project(file: UploadFile = FILE_UPLOAD, user: str | None = Depe
         _new_project, user, name, bibs[0]["name"] if bibs else None, bib_content
     )
     if tex:
-        await asyncio.to_thread(_new_draft, user, name, project["id"], tex)
+        await asyncio.to_thread(_new_draft, user, name, project["id"], tex, figures)
     drafts = await asyncio.to_thread(_rows, DRAFTS, user)
     return _project_view(project, drafts, {})
 

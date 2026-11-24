@@ -7,8 +7,8 @@ import { gzipSync } from "node:zlib";
 
 const BUDGETS = {
   largestJs: 700_000, // biggest single JS/MJS chunk (the app entry)
-  totalJs: 1_225_000, // all JS/MJS chunks together, incl. pdf worker (1.219 MB after the Author editor redesign, #852)
-  totalCss: 15_000, // all CSS together (12.7 KB after the researcher redesign, #356)
+  totalJs: 1_250_000, // all JS/MJS chunks together, incl. pdf worker (1.214 MB after draft figures, #1056; raised deliberately per QA)
+  totalCss: 16_000, // all CSS together (14.98 KB after draft figures, #1056; raised deliberately per QA)
 };
 
 const dir = join(import.meta.dirname, "..", "dist", "assets");

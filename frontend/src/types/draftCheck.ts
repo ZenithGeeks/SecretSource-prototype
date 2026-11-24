@@ -164,6 +164,19 @@ export type Draft = {
   /** The name of the draft's own copy of its project's .bib, which hides the project's one,
    * until the author chooses to use the project's or keep the copy (#733). */
   bibFork?: string | null
+  /** The draft's figures, which the preview draws where \includegraphics names them
+   * (SCRUM-463). Missing on answers from a gateway before them. */
+  images?: DraftImage[]
+  /** Counts the changes to `images`: of two answers, the higher one is the newer list. */
+  imagesVersion?: number
+}
+
+/** One of a draft's figures. `name` is the path its LaTeX uses ("figures/posv.png"); `hash`
+ * changes when the figure is replaced under the same name. */
+export type DraftImage = {
+  name: string
+  size: number
+  hash: string
 }
 
 /** A stage of a running check, streamed over SSE like an analysis's stages. */

@@ -1,8 +1,9 @@
 /** The file bar above the editor: one tab per project file, a red dot on those with open
  * issues from the last check, an amber one on a .bib with parse warnings, a muted dot on the
- * unsaved ones, and "+ file", which turns into a small name field. */
+ * unsaved ones, "+ file", which turns into a small name field, and what the editor adds after
+ * it (the draft's Images). */
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { cn } from '../../../../lib/utils'
 import type { ProjectFile } from '../../../../types/draftCheck'
@@ -13,6 +14,7 @@ export function FileTabs({
   active,
   onSelect,
   onAdd,
+  children,
 }: {
   /** `issues`: the file's open issues (lib/verdict isOpenIssue); `problems`: a .bib's parse
    * warnings, entry by entry (lib/latexProject bibProblems). */
@@ -20,6 +22,8 @@ export function FileTabs({
   active: string
   onSelect: (name: string) => void
   onAdd: (name: string) => void
+  /** Drawn after "+ file": the draft's Images (ImagesMenu). */
+  children?: ReactNode
 }) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
@@ -123,6 +127,7 @@ export function FileTabs({
           + file
         </button>
       )}
+      {children}
     </div>
   )
 }

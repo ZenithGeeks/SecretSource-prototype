@@ -97,6 +97,7 @@ default".
 | `SERVICE_AUTH` | `none` | `api-key` sends `SERVICE_API_KEY` in an `apikey` header |
 | `GOOGLE_APPLICATION_CREDENTIALS` | empty | credentials file used for those tokens |
 | `PAPERS_DIR` | `data/papers` | downloaded PDFs and figure crops |
+| `DRAFT_IMAGES_DIR` | `data/draft-images` | Author drafts' uploaded figures; must be on a persistent volume (see Deploy) |
 | `ANALYSES_DB` | `data/analyses.db` | SQLite file for analyses, when Supabase is not set |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | empty | both set: store analyses and projects in Supabase instead of SQLite, and turn on login (see Login) |
 | `SESSION_DB_URL` | empty | Postgres URL where the chat agents keep their sessions (`app/sessions.py`); empty keeps them in memory, so a restart forgets them. ADK's tables go in the `adk` schema, never `public` |
@@ -298,6 +299,11 @@ serves pages and figures from it, and the worker reads the PDFs and writes the f
 lives on the mini PC and is shared over NFS, and the PC's workers mount that share.
 
 Without the shared folder, every uploaded PDF ends with "no paper found matching the title".
+
+Author drafts' figures live on the gateway's disk under `DRAFT_IMAGES_DIR`, which compose mounts
+as the persistent volume `draft-images`. The draft rows that list the figures are in the store, so
+a gateway that runs without that volume loses the files on restart while the rows still list
+them, and the editor shows those figures as missing.
 
 ## Tests
 
@@ -630,12 +636,15 @@ runningCheckId, sinceLastCheck, created, updated, savedAt}`. `files` are `{name,
 | --- | --- |
 | `GET /author/drafts` | the caller's drafts, newest change first |
 | `POST /author/drafts` | body `{"title", "projectId", "files": [{"name", "content"}]}`; an empty `main.tex` when no files |
-| `POST /author/drafts/upload?projectId=` | multipart `.tex`, `.bib` or Overleaf `.zip` (its `.tex`/`.bib` files; figures are left out) |
-| `GET /author/drafts/{id}` | the draft with its files and uploaded PDFs |
+| `POST /author/drafts/upload?projectId=` | multipart `.tex`, `.bib` or Overleaf `.zip` (its `.tex`/`.bib` files, and its `.png`/`.jpg`/`.svg`/`.pdf` figures within the image caps below; a figure that is not the image its name says, or past a cap, is left out) |
+| `GET /author/drafts/{id}` | the draft with its files, uploaded PDFs and `images: [{name, size, hash}]` |
 | `PATCH /author/drafts/{id}` | `title`, `projectId` (empty to unfile) |
 | `DELETE /author/drafts/{id}` | the draft and its finished checks |
 | `PUT /author/drafts/{id}/files/{name}` | body `{"content", "updated"?}`; a new name adds the file. Does not bump the version. The project's shared .bib (when the draft has no file of that name) is written to the project, and `updated` is then that file's own `updated` (one made from its content for a .bib older than it). It is required there: a missing or stale one is a 409 |
 | `DELETE /author/drafts/{id}/files/{name}` | keeps at least one file; the project's shared .bib is a 400 |
+| `POST /author/drafts/{id}/images?name=` | multipart figure: `.png`, `.jpg`, `.svg` or `.pdf`, checked by its first bytes; under 5 MB each, 25 MB and 100 images per draft (413 past a cap). `name` is the path the LaTeX uses, default the file's own name; the same name replaces the figure. Stored on disk under `DRAFT_IMAGES_DIR/<draft id>/` (the `draft-images` volume). Not an edit of the text: `updated`, `edited` and the version stay |
+| `GET /author/drafts/{id}/images/{name}` | the figure's bytes, to the draft's owner only (another user's draft is a 404). Sent with `Content-Security-Policy: sandbox` and `nosniff`, so an SVG opened on its own runs nothing |
+| `DELETE /author/drafts/{id}/images/{name}` | removes the figure; deleting the draft, or Delete all in Settings, removes all of its figures |
 | `POST /author/drafts/{id}/bib-fork` | body `{"keep": "project" \| "draft"}`: for a draft whose own copy hides its project's .bib (`bibFork` in every draft answer), drop the copy or keep it and stop asking; 404 when there is no copy |
 | `POST /author/drafts/{id}/save` | Ctrl/Cmd+S: `version + 1`. A check on a draft with unsaved edits saves first, the same way, so every check's `version` names the content it checked |
 | `GET /author/drafts/{id}/parse` | `{texFiles, citeCommands, bibEntries, warnings}`; a warning is `{type, detail, file, line}` with `type` one of `missing-key`, `duplicate-key`, `unused-entry`, `no-doi-url` |

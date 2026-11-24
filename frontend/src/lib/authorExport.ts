@@ -9,6 +9,7 @@
 import { parseBib, serializeBib, type BibEntry } from './bibtex'
 import { shortMessage } from './citations'
 import { findCites } from './latexProject'
+import { findImage } from './latexPreview'
 import { referenceNote } from './referenceCheck'
 import { VERDICTS, isOpenIssue } from './verdict'
 import { zipStored } from './zip'
@@ -79,11 +80,48 @@ export function buildAnnotatedTex(file: ProjectFile, citations: Citation[]): str
   return lines.join('\n')
 }
 
-/** Every file of the project as a .zip, with the current file contents. Figures would go
- * in here too once uploads carry them; the prototype has none. */
-export function buildProjectZip(draft: Draft): Blob {
-  return new Blob([zipStored(draft.files)], { type: 'application/zip' })
+/** The paths a .tex file's \includegraphics (and the other image commands) name, comments
+ * left out. */
+function imagePaths(tex: string): string[] {
+  const source = tex.replace(/(^|[^\\])%.*$/gm, '$1')
+  const command = /\\(?:includegraphics|includesvg|includepdf|adjincludegraphics)\*?(?:\s*\[[^\]]*\])*\s*\{([^}]*)\}/g
+  return [...source.matchAll(command)].map((m) => m[1].trim()).filter(Boolean)
 }
+
+/** Every file of the project as a .zip, with the current file contents, and the draft's
+ * figures. Each figure is at its own path, and also at every path an \includegraphics names
+ * it by when that differs: the preview finds figures/posv as posv.png by its file name, but
+ * pdflatex looks only at figures/posv.png, so an export that kept only posv.png would not
+ * compile. A path without an extension gets the figure's. */
+export function buildProjectZip(draft: Draft, figures: { name: string; content: Uint8Array }[] = []): Blob {
+  const byName = new Map(figures.map((f) => [f.name, f.name]))
+  const extra = new Map<string, Uint8Array>()
+  for (const file of draft.files) {
+    if (file.kind !== 'tex') continue
+    for (const path of imagePaths(file.content)) {
+      const stored = findImage(byName, path)
+      const figure = stored && figures.find((f) => f.name === stored)
+      if (!figure) continue
+      const wanted = path.replace(/^\.\//, '')
+      // Outside the project ("../x", "/abs", "C:"): not an entry an unzip should write.
+      if (wanted.startsWith('/') || wanted.includes(':') || wanted.includes('\\') || wanted.split('/').includes('..')) continue
+      const name = /\.[A-Za-z0-9]+$/.test(wanted.split('/').pop() ?? '') ? wanted : `${wanted}${stored.slice(stored.lastIndexOf('.'))}`
+      if (name !== figure.name) extra.set(name, figure.content)
+    }
+  }
+  // Each extra path is another whole copy of its figure, so a source naming one figure many
+  // ways could build an archive too large for the browser to hold.
+  let copied = 0
+  for (const content of extra.values()) copied += content.length
+  if (copied > MAX_FIGURE_COPY_BYTES) {
+    throw new Error(`The figures' extra copies at their \\includegraphics paths come to more than ${MAX_FIGURE_COPY_BYTES / (1024 * 1024)} MB; name each figure by one path.`)
+  }
+  return new Blob([zipStored([...draft.files, ...figures, ...[...extra].map(([name, content]) => ({ name, content }))])], { type: 'application/zip' })
+}
+
+/** The most bytes the copies of figures at their \includegraphics paths may add to a project
+ * .zip: the gateway's cap on one draft's figures (backend/app/author/images.py). */
+export const MAX_FIGURE_COPY_BYTES = 25 * 1024 * 1024
 
 /** "related-work-thesis-ch-2" from a draft title, for file names. */
 export function slug(title: string): string {

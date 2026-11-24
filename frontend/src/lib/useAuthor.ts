@@ -277,6 +277,12 @@ export function useAuthorActions() {
       touched(draftId)
       return draft
     },
+    /** A figure added or taken away. The cache is left alone: a new draft object there would
+     * hand the open editor the `updated` it last read, which may be older than the one its own
+     * last write answered with. The editor keeps the answer's `images` itself; the gateway
+     * leaves `updated` as it was, so the next write is not a conflict. */
+    uploadImage: (draftId: string, file: File, name?: string): Promise<Draft> => authorApi.uploadImage(draftId, file, name),
+    deleteImage: (draftId: string, name: string): Promise<Draft> => authorApi.deleteImage(draftId, name),
     saveDraft: async (draftId: string): Promise<Draft> => {
       const draft = await authorApi.saveDraft(draftId)
       touched(draftId)

@@ -98,6 +98,8 @@ if SERVICE_AUTH == "api-key" and not SERVICE_API_KEY:
 
 PAPERS_DIR = Path(os.getenv("PAPERS_DIR", "data/papers"))
 AVATARS_DIR = Path(os.getenv("AVATARS_DIR", "data/avatars"))
+# The Author drafts' figures, one folder per draft (app/author/images.py, SCRUM-463).
+DRAFT_IMAGES_DIR = Path(os.getenv("DRAFT_IMAGES_DIR", "data/draft-images"))
 ANALYSES_DB = os.getenv("ANALYSES_DB", "data/analyses.db")
 
 # Persistence backend. With both set, the gateway stores analyses and source
