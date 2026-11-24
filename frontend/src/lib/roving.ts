@@ -38,7 +38,8 @@ export function moveFocus(event: KeyboardEvent<HTMLElement>, selector: string, w
  * chooses it. Choosing is not tied to moving, because a choice here is a label decision and
  * some groups fold away once one is made. */
 export function onRadioKeys(event: KeyboardEvent<HTMLElement>) {
-  moveFocus(event, '[role="radio"]:not(:disabled)', true)
+  // A key that moved here must not also move the page around the group (the labeler's passages).
+  if (moveFocus(event, '[role="radio"]:not(:disabled)', true)) event.stopPropagation()
 }
 
 /** The Tab stop of a radio group is its checked radio, or the first one while none is. */

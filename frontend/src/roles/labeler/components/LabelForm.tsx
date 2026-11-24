@@ -18,7 +18,7 @@ const SURE: { value: Confidence; label: string; key: string }[] = [
 
 // Condensed from docs/annotation-guideline.md, sections 5 to 7. Change both together.
 const HOW_TO_JUDGE = [
-  'Grade only what the citation is for, from the cited work’s own sentences, not its related work.',
+  'Grade only what the citation is for, from the cited work’s own sentences, not its related work. Its related work is evidence only for a background claim that the cited work states.',
   '3 allows only minor gaps: a left-out detail, a usual rounding, one case of several the evidence shows, a common synonym.',
   'Any other gap is a 2: wider scope, stronger certainty (“shows” for “suggests”), a missing condition, a different entity or number.',
   '1 when no passage backs it, or it contradicts the claim: start the reason with “Contradicts:”.',

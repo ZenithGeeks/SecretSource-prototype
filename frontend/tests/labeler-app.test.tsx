@@ -290,6 +290,22 @@ describe('the Labeler shell', () => {
     }
   })
 
+  it('closes an Ask panel left open on the list while a blind check is open', async () => {
+    const before = { ...session }
+    Object.assign(session, { blind: true })
+    try {
+      renderApp()
+      fireEvent.click((await screen.findAllByRole('button', { name: /^Ask AI/ }))[0])
+      expect(await screen.findByRole('button', { name: 'New chat' })).toBeInTheDocument()
+      act(() => gateway.actions!.openPaper('a1'))
+      await screen.findByRole('heading', { name: 'Paper A' })
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument())
+    } finally {
+      Object.assign(session, before)
+      delete (session as { blind?: boolean }).blind
+    }
+  })
+
   describe('the breadcrumb', () => {
     const crumbs = () => within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
 

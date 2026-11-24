@@ -14,10 +14,10 @@ import { csvText } from './csv'
  * else the title another of `runs` has for the same paper (a run stopped before the paper was
  * read has none), else the uploaded file's name, else the paper id. */
 export function analysisLabel(analysis: Analysis, runs: Analysis[] = []): string {
-  const paper = normalise(analysis.paper)
+  const paper = paperId(analysis.paper)
   return (
     analysis.title ||
-    runs.find((run) => run.title && normalise(run.paper) === paper)?.title ||
+    runs.find((run) => run.title && paperId(run.paper) === paper)?.title ||
     analysis.file?.split(/[\\/]/).pop() ||
     analysis.paper
   )
@@ -26,12 +26,20 @@ export function analysisLabel(analysis: Analysis, runs: Analysis[] = []): string
 /** A paper's runs: the one its row opens, and the others, newest first. */
 export type PaperRuns = { run: Analysis; earlier: Analysis[] }
 
-/** Lowercase words only, so "arXiv:2004.14974" and "2004.14974" compare equal. */
-function normalise(text: string) {
-  return text
-    .normalize()
+/** A paper id without the prefix that names its kind, so "arXiv:2004.14974", an arxiv.org link
+ * and "2004.14974" compare equal. The id's own punctuation stays: 10.1/a-b is not 10.1/a.b. */
+function paperId(paper: string) {
+  return paper
+    .trim()
     .toLowerCase()
     .replace(/^(https?:\/\/)?(www\.)?(arxiv\.org\/abs\/|doi\.org\/)|^(arxiv|doi):/, '')
+}
+
+/** A title's letters and numbers in any script, lowercased, so case and punctuation do not split a paper. */
+function titleKey(title: string) {
+  return title
+    .normalize()
+    .toLowerCase()
     .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
     .trim()
 }
@@ -41,20 +49,22 @@ function normalise(text: string) {
  * newest run.
  *
  * The same paper can come back under another id (a DOI one time, an arXiv link the next), so
- * runs are matched by title, and a run without a title (a stopped one) by its id, joined to the
- * title another run of that id has. A row opens a running run, else the newest finished one,
+ * runs are matched by title. Every run of an id takes the title of that id's newest titled run,
+ * so a run without one (a stopped one) or with a re-extracted one joins it. A row opens a running run, else the newest finished one,
  * else the newest.
  */
 export function groupRuns(analyses: Analysis[]): PaperRuns[] {
+  // One title per id, its newest run's, so a paper re-read under a changed title stays one row.
   const titleOf = new Map<string, string>()
   for (const analysis of analyses) {
-    const title = normalise(analysis.title ?? '')
-    if (title) titleOf.set(normalise(analysis.paper) || analysis.paper, title)
+    const id = paperId(analysis.paper)
+    const title = titleKey(analysis.title ?? '')
+    if (title && !titleOf.has(id)) titleOf.set(id, title)
   }
   const papers = new Map<string, Analysis[]>()
   for (const analysis of analyses) {
-    const id = normalise(analysis.paper) || analysis.paper
-    const title = normalise(analysis.title ?? '') || titleOf.get(id)
+    const id = paperId(analysis.paper)
+    const title = titleOf.get(id)
     const key = title ? `title:${title}` : `id:${id}`
     papers.set(key, [...(papers.get(key) ?? []), analysis])
   }

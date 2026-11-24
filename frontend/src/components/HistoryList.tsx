@@ -13,7 +13,7 @@ import { toast } from 'sonner'
 
 import { api, type Analysis } from '../lib/api'
 import { askTarget } from '../lib/askCursor'
-import { analysisLabel, byRunTime, claimsLine, countsText, groupRuns, type PaperRuns } from '../lib/claims'
+import { analysisLabel, byRunTime, claimsLine, countsText, groupRuns, runDate, type PaperRuns } from '../lib/claims'
 import { moveFocus } from '../lib/roving'
 import { cn } from '../lib/utils'
 import { TextButton } from './ui'
@@ -35,8 +35,8 @@ function rowDetail(analysis: Analysis) {
 
 /** The open paper's row, when the run open is not the one the row counts: "Viewing an earlier
  * run · stopped", so the row's numbers are not read as the open page's. */
-function otherRunDetail(row: Analysis, opened: Analysis, analyses: Analysis[]) {
-  const newer = analyses.indexOf(opened) < analyses.indexOf(row)
+function otherRunDetail(row: Analysis, opened: Analysis) {
+  const newer = runDate(opened) > runDate(row)
   const state = opened.status === 'error' ? 'stopped' : opened.status === 'running' ? 'running' : 'finished'
   return `Viewing ${newer ? 'a later' : 'an earlier'} run · ${state}`
 }
@@ -197,7 +197,7 @@ ${counts}` : name}
               {/* Wrapped at words and cut after two lines; the full title is on hover. */}
               <span className="line-clamp-2">{name}</span>
               <span className="block text-xs font-normal text-ink-muted">
-                {opened ? otherRunDetail(analysis, opened, shown) : rowDetail(analysis)}
+                {opened ? otherRunDetail(analysis, opened) : rowDetail(analysis)}
               </span>
             </span>
           </button>
