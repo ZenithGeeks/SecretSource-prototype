@@ -1221,7 +1221,7 @@ def _cache_keys(identifier: str, found: Resolution) -> set[str]:
 def _download(pdf_url: str, name: str) -> Path:
     import requests
 
-    from app.uploads import MAX_UPLOAD_BYTES
+    from app.main import MAX_UPLOAD_BYTES
 
     PAPERS_DIR.mkdir(parents=True, exist_ok=True)
     path = PAPERS_DIR / f"{name}.pdf"

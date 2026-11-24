@@ -4,8 +4,8 @@ finds the file name never reads a half-written PDF."""
 import sys
 
 import pytest
+from app.main import MAX_UPLOAD_BYTES
 from app.pipeline import sources
-from app.uploads import MAX_UPLOAD_BYTES
 
 
 class _Response:
@@ -79,9 +79,9 @@ def test_a_declared_length_over_the_cap_is_refused_and_writes_nothing(monkeypatc
 
 def test_a_body_that_grows_past_the_cap_is_aborted_and_leaves_no_file(monkeypatch, tmp_path):
     monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path)
-    import app.uploads as uploads
+    import app.main as gateway
 
-    monkeypatch.setattr(uploads, "MAX_UPLOAD_BYTES", 20)
+    monkeypatch.setattr(gateway, "MAX_UPLOAD_BYTES", 20)
     body = b"%PDF-1.7 " + b"x" * 20
     fake = type(
         "requests",
