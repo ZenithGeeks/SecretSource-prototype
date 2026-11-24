@@ -1,7 +1,7 @@
 /** The small pieces of the labeler: filters, claim strip, label form, save bar and friends. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { useState, type ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -356,12 +356,34 @@ describe('ClaimDecision', () => {
 })
 
 describe('ClaimSticky', () => {
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
 
   it('shows a short claim whole, with no button', () => {
     render(<ClaimSticky text="Y is fast." />)
     expect(screen.getByText('Y is fast.')).toHaveClass('line-clamp-4')
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('offers the full claim when the panel narrows and cleans up the observer', () => {
+    const disconnect = vi.fn()
+    let resize!: () => void
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(notify: () => void) { resize = notify }
+      observe() {}
+      disconnect = disconnect
+    })
+    const scrollHeight = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(80)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(80)
+    const { unmount } = render(<ClaimSticky text="Changes width." />)
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    scrollHeight.mockReturnValue(120)
+    act(() => resize())
+    expect(screen.getByRole('button', { name: 'Show the full claim' })).toBeInTheDocument()
+    unmount()
+    expect(disconnect).toHaveBeenCalledOnce()
   })
 
   it('offers the full claim when the text is cut, and folds it again', () => {

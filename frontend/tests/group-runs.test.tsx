@@ -21,6 +21,21 @@ describe('groupRuns', () => {
     expect(ids(paper.earlier)).toEqual(['old'])
   })
 
+  it('keeps distinct Unicode and blank-normalized titles in separate groups', () => {
+    const groups = groupRuns([
+      run({ id: 'cells', title: '细胞研究', paper: 'doi:10.1/cells' }),
+      run({ id: 'genes', title: '基因分析', paper: 'doi:10.1/genes' }),
+      run({ id: 'cells-older', title: '细胞研究！', paper: 'arxiv:1234.1' }),
+      run({ id: 'symbols', title: '!?', paper: 'doi:10.1/symbols' }),
+      run({ id: 'other', title: '…', paper: 'doi:10.1/other' }),
+      run({ id: 'punctuation-id', title: '', paper: '!' }),
+      run({ id: 'titled-punctuation-id', title: 'Paper with a punctuation ID', paper: '!' }),
+    ])
+    expect(ids(groups.map(({ run }) => run))).toEqual(['cells', 'genes', 'symbols', 'other', 'punctuation-id'])
+    expect(ids(groups[0].earlier)).toEqual(['cells-older'])
+    expect(ids(groups[4].earlier)).toEqual(['titled-punctuation-id'])
+  })
+
   it('keeps papers in the order of their first run', () => {
     const papers = groupRuns([
       run({ id: 'a1', title: 'A' }),

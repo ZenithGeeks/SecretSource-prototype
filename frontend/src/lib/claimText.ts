@@ -1,3 +1,5 @@
+import type { CitationMarker } from './api'
+
 /**
  * Claim text as a reader sees it. Claims are extracted with their citation markers taken out,
  * which leaves the punctuation around them behind: "Inspired by,,, Yuan et al." or "priors-.".
@@ -21,18 +23,35 @@ export function tidyClaim(text: string): string {
  * prints there, e.g. "[13]", from the paper's citation markers. A marker the paper's markers do
  * not cover stays as it is: a guessed number would be worse than an id.
  */
-export function printedMarkers(sentence: string, markers: { ref: string; text: string }[]): string {
-  const printed = new Map(markers.map((marker) => [marker.ref, marker.text.trim()]))
+type PrintedMarker = Pick<CitationMarker, 'ref' | 'text'> & Partial<Pick<CitationMarker, 'page' | 'x0' | 'y0' | 'x1' | 'y1'>>
+
+export function printedMarkers(sentence: string, markers: PrintedMarker[]): string {
+  // The extractor copies the text and box to every reference in a grouped citation.
+  const boxKey = ({ page, x0, y0, x1, y1, text }: PrintedMarker) =>
+    JSON.stringify([page, x0, y0, x1, y1, text.trim()])
+  const boxes = new Map<string, string>()
+  for (const marker of markers) {
+    const key = boxKey(marker)
+    const first = boxes.get(key)
+    boxes.set(key, first === undefined || first === marker.ref ? marker.ref : '')
+  }
+  const printed = new Map<string, string>()
+  for (const marker of markers) {
+    const text = marker.text.trim()
+    // Numeric lists and ranges are ambiguous even if another target was discarded upstream.
+    if (!text || boxes.get(boxKey(marker)) !== marker.ref || /^\[?\s*\d+[a-z]?\s*[,;–—-]\s*\d/i.test(text)) continue
+    const value = /^[[(]/.test(text) ? text : `[${text}]`
+    const previous = printed.get(marker.ref)
+    printed.set(marker.ref, previous === undefined || previous === value ? value : '')
+  }
   return sentence.replace(/\[(b\d+)\]/g, (whole, ref: string) => {
-    const text = printed.get(ref)
-    if (!text) return whole
-    return /^[[(]/.test(text) ? text : `[${text}]`
+    return printed.get(ref) || whole
   })
 }
 
 /** The number the paper prints for a reference, "[14]", or "" when its markers do not say.
  * Never GROBID's "[b13]", which the PDF beside it does not show. */
-export function printedRef(reference: { ref?: string }, markers: { ref: string; text: string }[] = []): string {
+export function printedRef(reference: { ref?: string }, markers: PrintedMarker[] = []): string {
   if (!reference.ref) return ''
   const id = `[${reference.ref}]`
   const printed = printedMarkers(id, markers)

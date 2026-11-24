@@ -238,6 +238,7 @@ describe('the sentence and its figures', () => {
   it('offers no Read all for a short caption', () => {
     card({ sentence: 'See Figure 2.' }, { paper: 'mine.pdf', figures, onShow: vi.fn() })
     expect(screen.queryByRole('button', { name: 'Read the full caption' })).not.toBeInTheDocument()
+    expect(screen.getByText('Figure 2: Accuracy.')).not.toHaveClass('line-clamp-3')
   })
 
   it('opens the figure from its picture', () => {
@@ -572,7 +573,16 @@ describe('pages, crops and passages of the leading answer', () => {
     card({ verdicts: [verdict({ evidence })] })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(screen.queryByRole('button', { name: 'Read the full passage' })).not.toBeInTheDocument()
+    expect(screen.getByText('“A passage.”')).not.toHaveClass('line-clamp-3')
   })
+})
+
+it('links and numbers the deciding citation without duplicating its answer', () => {
+  card({ citations: [cite({ label: '13' })], verdicts: [verdict()] })
+  fireEvent.click(screen.getByRole('button', { expanded: false }))
+  expect(screen.getByRole('link', { name: /Ioffe et al/ })).toHaveAttribute('href', 'https://doi.org/10.1/bn')
+  expect(screen.getByText('[13]')).toBeInTheDocument()
+  expect(screen.queryByText(/Other cited works/)).not.toBeInTheDocument()
 })
 
 describe('the other cited works', () => {

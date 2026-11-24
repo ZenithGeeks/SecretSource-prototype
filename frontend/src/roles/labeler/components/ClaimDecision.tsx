@@ -38,7 +38,12 @@ export function ClaimSticky({
     const el = box.current
     /* v8 ignore next -- @preserve */
     if (!el || expanded) return
-    setCut(el.scrollHeight > el.clientHeight + 1)
+    const measure = () => setCut(el.scrollHeight > el.clientHeight + 1)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
   }, [text, expanded])
   return (
     <section aria-label="Claim being judged" className={cn('border-b border-border-subtle bg-surface px-4 py-2', className)}>

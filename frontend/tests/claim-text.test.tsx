@@ -40,6 +40,24 @@ describe('printedMarkers', () => {
     expect(printedMarkers('See [b2] and [b3].', markers)).toBe('See [8] and (Lee, 2020).')
   })
 
+  it('uses only unambiguous text belonging to a single reference', () => {
+    const box = { page: 1, x0: 2, y0: 3, x1: 4, y1: 5 }
+    const entries = [
+      { ref: 'b1', text: '7' },
+      { ref: 'b1', text: '[7]' },
+      { ref: 'b1', text: '[7]' },
+      { ref: 'b1', text: '[7,8]' },
+      { ref: 'b2', text: '[8–10]' },
+      { ref: 'b3', text: '(Lee, 2020; Nye, 2021)', ...box },
+      { ref: 'b4', text: '(Lee, 2020; Nye, 2021)', ...box },
+      { ref: 'b5', text: '[11]' },
+      { ref: 'b5', text: '[12]' },
+      { ref: 'b6', text: '  ' },
+    ]
+    expect(printedMarkers('[b1] [b2] [b3] [b4] [b5] [b6]', entries)).toBe('[7] [b2] [b3] [b4] [b5] [b6]')
+    expect(printedRef({ ref: 'b5' }, [...entries].reverse())).toBe('')
+  })
+
   it('leaves an id the markers do not cover', () => {
     expect(printedMarkers('See [b9].', markers)).toBe('See [b9].')
   })

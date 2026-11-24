@@ -366,6 +366,24 @@ describe('the results', () => {
     expect(screen.getByRole('button', { name: /The backed claim/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('counts only claims matching both selected filters', () => {
+    load(analysis({ claims: [refuted, { ...refuted, claim: 'Other contradiction', section: '2' }] }))
+    view({ section: '3.1', filter: 'refutes' })
+    expect(screen.getByText('Showing 1 of 2')).toBeInTheDocument()
+    expect(screen.queryByText('Other contradiction')).not.toBeInTheDocument()
+  })
+
+  it('does not reopen a closed viewer after a quote lookup finishes', async () => {
+    const lookup = Promise.withResolvers<object>()
+    state.findInPaper.mockReturnValue(lookup.promise)
+    view()
+    fireEvent.click(screen.getByRole('button', { name: /Show in cited paper/ }))
+    expect(screen.getByTestId('viewer')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close viewer' }))
+    await act(async () => lookup.resolve({ ...location, coverage: 1 }))
+    expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
+  })
+
   it('follows a filter the screen holds, and reports a picked tile to it', () => {
     const onFilter = vi.fn()
     view({ filter: 'supports', onFilter })

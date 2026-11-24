@@ -8,7 +8,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Trash2 } from 'lucide-react'
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { api, type Analysis } from '../lib/api'
@@ -22,6 +22,7 @@ import { TextButton } from './ui'
 export const UNDO_DELETE_MS = 6000
 
 const ROW = '[data-history-row]'
+const deleteToastId = (id: string) => `delete-${id}`
 
 /** The line under a row's title, the same shape on every row: "20 claims", then
  * ", 3 contradicted by a source" only when a source does. The full split is on hover. */
@@ -62,9 +63,17 @@ export function HistoryList({
   // Rows waiting out the undo window: hidden here, not yet deleted on the server.
   const [hidden, setHidden] = useState<string[]>([])
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const selection = useRef({ selected, onSelect })
+  useLayoutEffect(() => {
+    selection.current = { selected, onSelect }
+  }, [selected, onSelect])
   const remove = useMutation({
     mutationFn: api.deleteAnalysis,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['analyses'] }),
+    onSuccess: (_data, id) => {
+      const current = selection.current
+      if (current.selected === id) current.onSelect(null)
+      return queryClient.invalidateQueries({ queryKey: ['analyses'] })
+    },
     onError: (_error, id) => {
       setHidden((ids) => ids.filter((hiddenId) => hiddenId !== id))
       toast.error('Could not delete that analysis. It is back in the list.')
@@ -78,7 +87,9 @@ export function HistoryList({
     const pending = timers.current
     return () => {
       for (const [id, timer] of pending) {
+        pending.delete(id)
         clearTimeout(timer)
+        toast.dismiss(deleteToastId(id))
         api
           .deleteAnalysis(id)
           .catch(() => undefined)
@@ -92,15 +103,19 @@ export function HistoryList({
     setHidden((ids) => [...ids, analysis.id])
     const timer = setTimeout(() => {
       timers.current.delete(analysis.id)
+      toast.dismiss(deleteToastId(analysis.id))
       remove.mutate(analysis.id)
     }, UNDO_DELETE_MS)
     timers.current.set(analysis.id, timer)
     toast(`Deleted “${analysisLabel(analysis)}”`, {
+      id: deleteToastId(analysis.id),
       duration: UNDO_DELETE_MS,
       action: {
         label: 'Undo',
         onClick: () => {
-          clearTimeout(timers.current.get(analysis.id))
+          const pending = timers.current.get(analysis.id)
+          if (pending === undefined) return
+          clearTimeout(pending)
           timers.current.delete(analysis.id)
           setHidden((ids) => ids.filter((id) => id !== analysis.id))
         },

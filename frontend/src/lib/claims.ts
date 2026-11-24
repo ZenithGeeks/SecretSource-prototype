@@ -29,9 +29,10 @@ export type PaperRuns = { run: Analysis; earlier: Analysis[] }
 /** Lowercase words only, so "arXiv:2004.14974" and "2004.14974" compare equal. */
 function normalise(text: string) {
   return text
+    .normalize()
     .toLowerCase()
     .replace(/^(https?:\/\/)?(www\.)?(arxiv\.org\/abs\/|doi\.org\/)|^(arxiv|doi):/, '')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
     .trim()
 }
 
@@ -47,12 +48,14 @@ function normalise(text: string) {
 export function groupRuns(analyses: Analysis[]): PaperRuns[] {
   const titleOf = new Map<string, string>()
   for (const analysis of analyses) {
-    if (analysis.title) titleOf.set(normalise(analysis.paper), normalise(analysis.title))
+    const title = normalise(analysis.title ?? '')
+    if (title) titleOf.set(normalise(analysis.paper) || analysis.paper, title)
   }
   const papers = new Map<string, Analysis[]>()
   for (const analysis of analyses) {
-    const id = normalise(analysis.paper)
-    const key = analysis.title ? normalise(analysis.title) : (titleOf.get(id) ?? id)
+    const id = normalise(analysis.paper) || analysis.paper
+    const title = normalise(analysis.title ?? '') || titleOf.get(id)
+    const key = title ? `title:${title}` : `id:${id}`
     papers.set(key, [...(papers.get(key) ?? []), analysis])
   }
   return [...papers.values()].map((runs) => {

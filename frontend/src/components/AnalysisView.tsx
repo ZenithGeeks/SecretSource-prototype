@@ -10,7 +10,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { paperName } from '../lib/api'
 import type { Analysis, Claim } from '../lib/api'
@@ -110,6 +110,10 @@ export function AnalysisView({
   onRetried?: (id: string) => void
 }) {
   const [opened, setOpened] = useState<{ target: Target | null; at: number }>({ target: null, at: 0 })
+  const activeLookup = useRef<number | undefined>(undefined)
+  useLayoutEffect(() => {
+    activeLookup.current = undefined
+  }, [jump])
   const [ownFilter, setOwnFilter] = useState<Standing | null>(null)
   const filter = shownFilter === undefined ? ownFilter : shownFilter
   const keepFilter = onFilter ?? setOwnFilter
@@ -216,6 +220,8 @@ export function AnalysisView({
   }
 
   const setTarget = (next: Target | null) => {
+    if (next?.lookup !== undefined && !next.locating && next.lookup !== activeLookup.current) return
+    activeLookup.current = next?.locating ? next.lookup : undefined
     setKeyNotice(null)
     setOpened({ target: next, at: Date.now() })
     if (!next && id) setPaperDismissedFor(id)
@@ -382,7 +388,7 @@ export function AnalysisView({
               </p>
               {filter && (
                 <p className="text-ui text-ink-muted" aria-live="polite">
-                  Showing {counts[filter]} of {standings.length}{' '}
+                  Showing {shown.length} of {standings.length}{' '}
                   <button type="button" onClick={() => keepFilter(null)} className={CLEAR_BUTTON}>
                     Show all claims
                   </button>

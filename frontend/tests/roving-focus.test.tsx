@@ -76,6 +76,21 @@ describe('Segmented', () => {
     expect(chosen).toEqual([])
   })
 
+  it.each(['two', 'missing'] as const)('skips disabled options and enters on the first enabled option when value is %s', (value) => {
+    render(<Segmented label="View" options={[
+      { value: 'zero', label: 'Zero', disabled: true },
+      { value: 'one', label: 'One' },
+      { value: 'two', label: 'Two', disabled: true },
+      { value: 'three', label: 'Three' },
+    ]} value={value} onChange={vi.fn()} />)
+    const one = screen.getByRole('button', { name: 'One' })
+    expect(one.tabIndex).toBe(0)
+    expect(screen.getByRole('button', { name: 'Two' }).tabIndex).toBe(-1)
+    one.focus()
+    fireEvent.keyDown(one, { key: 'ArrowRight' })
+    expect(screen.getByRole('button', { name: 'Three' })).toHaveFocus()
+  })
+
   it('disables an option that does not apply, and says why', () => {
     const onChange = vi.fn()
     render(

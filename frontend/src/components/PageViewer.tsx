@@ -52,6 +52,7 @@ export type Target = {
   verdict?: Verdict['verdict'] // colors a located passage by the result it represents
   page?: number // fall back to this when there is no source to take a page from
   error?: string // a lookup failure that should remain distinct from an unlocated passage
+  lookup?: number // identifies an asynchronous quote lookup and its result
   locating?: boolean // the quote's place is still being looked up: the page area says so
   section?: string // the analysed paper's section this points into, for the table of contents
   claim?: number // index of the claim whose passage this is, so the list can lead back to it
@@ -68,6 +69,8 @@ const RENDERED_AROUND = 2 // pages drawn on each side of the one in view; the re
 const MAX_PAGE_WIDTH = 2400 // css px; wider than this only costs memory
 const MAX_CANVAS_WIDTH = 4096 // device px; a canvas this wide is already sharp at any zoom here
 
+const PDF_LINKS = '.annotationLayer a'
+
 const TOOLBAR_ITEMS = 'button:not(:disabled), a[href]'
 
 type Box = { x0: number; y0: number; x1: number; y1: number }
@@ -83,20 +86,17 @@ function boxStyle(box: Box, width: number, height: number) {
 }
 
 /** pdf.js draws a PDF's links as empty boxes over the text; give each one a name to read out,
- * and keep them out of the Tab order. A page has dozens of them, a few pixels wide, and the
- * labeler's two papers put over a hundred between the keyboard and the decision. They still
- * work with the mouse. */
-function nameLinks(viewer: HTMLElement) {
+ * and give them one shared Tab stop. Arrows move between links once inside the group. */
+function nameLinks(viewer: HTMLElement, focused: HTMLElement | null) {
   for (const link of viewer.querySelectorAll<HTMLAnchorElement>('.annotationLayer a:not([aria-label])')) {
     const href = link.getAttribute('href') ?? ''
     const inPaper = !href || href.startsWith('#')
     link.setAttribute('aria-label', link.title || (inPaper ? 'Go to a place in this paper' : `Open ${href}`))
   }
-  // pdf.js gives each annotation's <section> a tabindex of its own, so the links and their
-  // boxes both have to leave the Tab order. Only changed ones are written: the observer below
-  // also watches tabindex, and writing an unchanged value would wake it again.
-  for (const stop of viewer.querySelectorAll<HTMLElement>('.annotationLayer a, .annotationLayer [tabindex]')) {
-    if (stop.tabIndex !== -1) stop.tabIndex = -1
+  const entry = focused && viewer.contains(focused) ? focused : viewer.querySelector(PDF_LINKS)
+  for (const stop of viewer.querySelectorAll<HTMLElement>(`${PDF_LINKS}, .annotationLayer [tabindex]`)) {
+    const index = stop === entry ? 0 : -1
+    if (stop.tabIndex !== index) stop.tabIndex = index
   }
 }
 
@@ -281,6 +281,7 @@ export function PageViewer({
   // Tab past 76 of them to reach the decision.
   const [lastMarker, setLastMarker] = useState<CitationMarker | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
+  const lastPdfLink = useRef<HTMLElement | null>(null)
   // The toolbar is one Tab stop too, the control last used, and the arrow keys move along it.
   const toolbar = useRef<HTMLDivElement>(null)
   const toolbarStop = useRef(0)
@@ -328,7 +329,7 @@ export function PageViewer({
     const node = scroller.current
     /* v8 ignore next -- the scroller is always mounted when effects run; this satisfies the type */
     if (!node) return
-    const observer = new MutationObserver(() => nameLinks(node))
+    const observer = new MutationObserver(() => nameLinks(node, lastPdfLink.current))
     // tabindex too: an element pdf.js puts back in the Tab order after adding it would otherwise stay there.
     observer.observe(node, { childList: true, subtree: true, attributes: true, attributeFilter: ['tabindex'] })
     return () => observer.disconnect()
@@ -659,10 +660,15 @@ export function PageViewer({
           </div>
           <div
             ref={scroller}
+            onFocus={(event) => {
+              if (!event.target.matches(PDF_LINKS)) return
+              lastPdfLink.current = event.target
+              nameLinks(event.currentTarget, event.target)
+            }}
             onKeyDown={(event) => {
-              if (event.target instanceof HTMLElement && event.target.matches('[data-marker]')) {
-                moveFocus(event, '[data-marker]', false)
-              }
+              if (!(event.target instanceof HTMLElement)) return
+              if (event.target.matches('[data-marker]')) moveFocus(event, '[data-marker]', false)
+              if (event.target.matches(PDF_LINKS)) moveFocus(event, PDF_LINKS, false)
             }}
             onMouseUp={reportSelection}
             onKeyUp={reportSelection}

@@ -287,7 +287,7 @@ async function showInCitedPaper(
   page?: number,
 ) {
   const request = ++showRequests
-  const target: Target = { paper: verdict.source, label, quote, source: null, page, verdict: verdict.verdict }
+  const target: Target = { paper: verdict.source, label, quote, source: null, page, verdict: verdict.verdict, lookup: request }
   onShow({ ...target, locating: true })
   const found = await findQuote(verdict.source, quote, page)
   if (request !== showRequests) return
@@ -357,7 +357,7 @@ function Caption({ text }: { text: string }) {
   const [full, setFull] = useState(false)
   return (
     <figcaption className="space-y-1 text-xs text-ink-muted">
-      <span className={cn('block', !full && 'line-clamp-3')}>{text}</span>
+      <span className={cn('block', text.length > LONG_CAPTION && !full && 'line-clamp-3')}>{text}</span>
       {text.length > LONG_CAPTION && (
         <MoreToggle open={full} onToggle={() => setFull(!full)}>
           {full ? 'Hide the full caption' : 'Read the full caption'}
@@ -395,7 +395,7 @@ function Passage({ text }: { text: string }) {
   const [full, setFull] = useState(false)
   return (
     <>
-      <blockquote className={cn('font-serif text-reading leading-6 text-ink', !full && 'line-clamp-3')}>“{text}”</blockquote>
+      <blockquote className={cn('font-serif text-reading leading-6 text-ink', text.length > LONG_REASON && !full && 'line-clamp-3')}>“{text}”</blockquote>
       {text.length > LONG_REASON && (
         <MoreToggle open={full} onToggle={() => setFull(!full)}>
           {full ? 'Hide the full passage' : 'Read the full passage'}
@@ -542,6 +542,31 @@ function MoreEvidence({ verdict, onShow }: { verdict: Verdict; onShow?: (target:
   )
 }
 
+function CitationReference({ citation }: { citation: Citation }) {
+  const link = citationLink(citation)
+  return (
+    <p className="text-sm text-ink-muted">
+      {link ? (
+        <a
+          href={link}
+          target="_blank"
+          rel="noreferrer"
+          // Underlined on hover only, so a linked reference looks like the unlinked ones beside it.
+          className="hover:text-accent hover:underline"
+        >
+          {reference(citation)}
+        </a>
+      ) : (
+        reference(citation)
+      )}
+      {/* The number the PDF prints for this work, to find it in the paper's reference list. */}
+      {citationNumber(citation) && (
+        <span className="ml-1 font-medium text-ink tabular-nums">[{citationNumber(citation)}]</span>
+      )}
+    </p>
+  )
+}
+
 /** What a source answered, for a cited work that is not the claim's main evidence: one line until
  * opened, then the deciding quote and the working behind it. */
 function Answer({
@@ -660,28 +685,9 @@ function CitedWork({
   ownsAnalysis?: boolean
   sourceUpload?: { analysisId: string; onUploaded: () => Promise<unknown> }
 }) {
-  const link = citationLink(citation)
   return (
     <li>
-      <p className="text-sm text-ink-muted">
-        {link ? (
-          <a
-            href={link}
-            target="_blank"
-            rel="noreferrer"
-            // Underlined on hover only, so a linked reference looks like the unlinked ones beside it.
-            className="hover:text-accent hover:underline"
-          >
-            {reference(citation)}
-          </a>
-        ) : (
-          reference(citation)
-        )}
-        {/* The number the PDF prints for this work, to find it in the paper's reference list. */}
-        {citationNumber(citation) && (
-          <span className="ml-1 font-medium text-ink tabular-nums">[{citationNumber(citation)}]</span>
-        )}
-      </p>
+      <CitationReference citation={citation} />
       {verdict && (
         <Answer
           verdict={verdict}
@@ -1015,7 +1021,8 @@ export function ClaimCard({
               {primaryName && <span className="text-ink-muted"> · {primaryName}</span>}
             </p>
           </div>
-          <p className={cn('max-w-prose text-reading leading-6 text-ink-muted', !fullReason && 'line-clamp-3')}>
+          {primaryCitation && <CitationReference citation={primaryCitation} />}
+          <p className={cn('max-w-prose text-reading leading-6 text-ink-muted', primary.reasoning.length > LONG_REASON && !fullReason && 'line-clamp-3')}>
             {primary.reasoning}
           </p>
           {primary.reasoning.length > LONG_REASON && (

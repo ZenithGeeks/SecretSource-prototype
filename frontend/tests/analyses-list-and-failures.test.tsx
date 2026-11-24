@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const toasts = vi.hoisted(() => ({
   shown: [] as { text: string; undo?: () => void }[],
   errors: [] as string[],
+  dismiss: vi.fn(),
 }))
 
 vi.mock('sonner', () => ({
@@ -16,7 +17,7 @@ vi.mock('sonner', () => ({
     (text: string, options?: { action?: { onClick: () => void } }) => {
       toasts.shown.push({ text, undo: options?.action?.onClick })
     },
-    { error: (text: string) => toasts.errors.push(text) },
+    { error: (text: string) => toasts.errors.push(text), dismiss: toasts.dismiss },
   ),
 }))
 
@@ -30,6 +31,7 @@ vi.mock('../src/lib/api', async (original) => ({
   api: gateway,
 }))
 
+import { NewAnalysis } from '../src/components/NewAnalysis'
 import { FailedRun } from '../src/components/FailedRun'
 import { HistoryList, UNDO_DELETE_MS } from '../src/components/HistoryList'
 import type { Analysis } from '../src/lib/api'
@@ -45,6 +47,7 @@ function wrap(children: ReactNode) {
 }
 
 beforeEach(() => {
+  toasts.dismiss.mockClear()
   toasts.shown = []
   toasts.errors = []
   // Picking a standing writes it to the address, so each test starts from a clean one.
@@ -410,12 +413,30 @@ describe('deleting from the sidebar', () => {
     expect(screen.getByText('First paper')).toBeInTheDocument()
   })
 
+  it.each(['a1', 'a2'])('reconciles selection %s only if that run was deleted', async (selected) => {
+    const client = new QueryClient()
+    const onSelect = vi.fn()
+    const ui = (id: string | null) => (
+      <QueryClientProvider client={client}><HistoryList analyses={rows} selected={id} onSelect={onSelect} /></QueryClientProvider>
+    )
+    const request = Promise.withResolvers<{ deleted: string }>()
+    gateway.deleteAnalysis.mockReturnValue(request.promise)
+    const { rerender } = render(ui(null))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete analysis of First paper' }))
+    await act(() => vi.advanceTimersByTimeAsync(UNDO_DELETE_MS))
+    rerender(ui(selected))
+    await act(async () => request.resolve({ deleted: 'a1' }))
+    expect(onSelect.mock.calls).toEqual(selected === 'a1' ? [[null]] : [])
+  })
+
   it('sends a waiting delete when the list goes away before the undo window ends', async () => {
     gateway.deleteAnalysis.mockResolvedValue({ deleted: 'a2' })
     const { unmount } = wrap(<HistoryList analyses={rows} selected={null} onSelect={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Delete analysis of Second paper' }))
     unmount()
-    await waitFor(() => expect(gateway.deleteAnalysis).toHaveBeenCalledWith('a2'))
+    expect(toasts.dismiss).toHaveBeenCalledWith('delete-a2')
+    act(() => toasts.shown[0].undo?.()) // A click already queued as the toast disappears cannot undo the sent request.
+    await waitFor(() => expect(gateway.deleteAnalysis).toHaveBeenCalledExactlyOnceWith('a2'))
   })
 
   it('lets a waiting delete fail quietly after the list has gone', async () => {
@@ -762,4 +783,25 @@ describe('the order and the memory of the Analyses list', () => {
     wrap(<AnalysisList analyses={[analysis({ title: 'Paper' })]} onOpen={vi.fn()} />)
     expect(window.scrollTo).toHaveBeenCalledWith(0, 0)
   })
+})
+
+it.each([true, false])('keeps a reference in progress when the history arrives (editing: %s)', (editing) => {
+  const client = new QueryClient()
+  const ui = (withHistory: boolean) => (
+    <QueryClientProvider client={client}>
+      <NewAnalysis onStarted={vi.fn()}>{withHistory && <div>Past analyses</div>}</NewAnalysis>
+    </QueryClientProvider>
+  )
+  const { rerender } = render(ui(false))
+  const input = screen.getByRole('textbox', { name: 'Paper to analyze' })
+  if (editing) fireEvent.change(input, { target: { value: '10.1234/example' } })
+  rerender(ui(true))
+  expect(screen.getByText('Past analyses')).toBeInTheDocument()
+  if (editing) {
+    expect(screen.getByRole('textbox', { name: 'Paper to analyze' })).toBe(input)
+    expect(input).toHaveValue('10.1234/example')
+  } else {
+    expect(screen.queryByRole('textbox', { name: 'Paper to analyze' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New analysis' })).toBeInTheDocument()
+  }
 })

@@ -7,7 +7,7 @@ import { type ButtonHTMLAttributes, type ComponentProps, type ReactNode, useEffe
 import type { Standing } from '../lib/claims'
 import { STANDING_COLORS, STANDING_LABELS, STANDING_MEANINGS } from '../lib/claims'
 import { useSettings } from '../lib/settings'
-import { moveFocus, radioTabIndex } from '../lib/roving'
+import { moveFocus } from '../lib/roving'
 import { cn } from '../lib/utils'
 
 /** A surface. Given `aria-labelledby` (its heading's id), it is a named region, so a screen
@@ -105,22 +105,24 @@ export function Segmented<T extends string>({
   onChange: (value: T) => void
   className?: string
 }) {
+  const tabStop = options.find((option) => !option.disabled && option.value === value)
+    ?? options.find((option) => !option.disabled)
   return (
     // One Tab stop: the arrow keys move along the options (lib/roving.ts), Enter or Space picks one.
     <div
       role="group"
       aria-label={label}
-      onKeyDown={(event) => moveFocus(event, 'button', false)}
+      onKeyDown={(event) => moveFocus(event, 'button:not(:disabled)', false)}
       className={cn('flex rounded-xl border border-border-subtle p-0.5', className)}
     >
-      {options.map((option, index) => (
+      {options.map((option) => (
         <button
           key={option.value}
           type="button"
           aria-pressed={value === option.value}
           disabled={option.disabled}
           title={option.title}
-          tabIndex={radioTabIndex(value === option.value, index, options.some((o) => o.value === value))}
+          tabIndex={option === tabStop ? 0 : -1}
           onClick={() => onChange(option.value)}
           className={cn(
             'min-h-9 flex-1 whitespace-nowrap rounded-lg px-3 text-ui transition-colors focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:min-h-11',

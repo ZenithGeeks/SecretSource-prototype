@@ -1,6 +1,6 @@
 /** PageViewer: the PDF's own links, drawn by pdf.js as empty boxes, get names a screen reader reads. */
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useEffect, useRef, type ReactNode } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
@@ -57,12 +57,22 @@ test("names each of the PDF's links by its title, its address, or as a place in 
   expect(screen.getByRole('link', { name: 'Go to a place in this paper' })).toBeInTheDocument()
 })
 
-test("keeps the PDF's links and pdf.js's annotation boxes out of the Tab order", async () => {
+test("keeps one shared Tab stop and lets arrows reach links without citation markers", async () => {
   const { container } = render(<PageViewer target={{ paper: 'paper.pdf', label: 'Reference', source: null, page: 1 }} />)
-  await waitFor(() => expect(screen.getByRole('link', { name: 'Peters et al.' })).toBeInTheDocument())
-  for (const stop of container.querySelectorAll<HTMLElement>('.annotationLayer a, .annotationLayer section')) {
-    expect(stop.tabIndex).toBe(-1)
-  }
+  const first = await screen.findByRole('link', { name: 'Peters et al.' })
+  expect(first.tabIndex).toBe(0)
+  const next = screen.getByRole('link', { name: /Open https:/ })
+  expect(next.tabIndex).toBe(-1)
+  act(() => first.focus())
+  fireEvent.keyDown(first, { key: 'ArrowRight' })
+  expect(next).toHaveFocus()
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  next.append(svg)
+  expect(fireEvent.keyDown(svg, { key: 'ArrowRight' })).toBe(true)
+  expect(next).toHaveFocus()
+  expect(next.tabIndex).toBe(0)
+  expect(first.tabIndex).toBe(-1)
+  expect(container.querySelector<HTMLElement>('.annotationLayer section')?.tabIndex).toBe(-1)
 })
 
 test('the panel label is a heading, so the quoted passage heading sits under it', () => {
@@ -72,7 +82,7 @@ test('the panel label is a heading, so the quoted passage heading sits under it'
 
 test('takes a PDF link back out of the Tab order when pdf.js puts it back in after drawing it', async () => {
   const { container } = render(<PageViewer target={{ paper: 'paper.pdf', label: 'Reference', source: null, page: 1 }} />)
-  const link = await screen.findByRole('link', { name: 'Peters et al.' })
+  const link = await screen.findByRole('link', { name: /Open https:/ })
   link.tabIndex = 0
   await waitFor(() => expect(link.tabIndex).toBe(-1))
   expect(container.querySelector<HTMLElement>('.annotationLayer section')?.tabIndex).toBe(-1)
