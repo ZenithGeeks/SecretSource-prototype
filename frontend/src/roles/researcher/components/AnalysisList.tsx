@@ -82,19 +82,18 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
     setPicked(next)
     writeStandingParam(next)
   }
-  // Sorted once, so the options and the rows group a paper's runs alike and pick the same run.
-  const sorted = [...analyses].sort(byRunTime)
+  // Group before filtering so the facets and the rows always use the same representative run.
+  const groups = groupRuns([...analyses].sort(byRunTime))
   // Every standing some paper has: the same set an analysis's tiles offer.
-  const runs = groupRuns(sorted).map(({ run }) => run)
+  const runs = groups.map(({ run }) => run)
   const kinds = STANDINGS.filter((kind) => runs.some((run) => has(run, kind)))
   // A standing whose last paper was deleted has no option left, so it stops filtering.
   const shows = picked.filter((kind) => kinds.includes(kind))
   const searchId = useId()
   const words = query.trim().toLowerCase()
-  const shown = words
-    ? sorted.filter((analysis) => `${analysisLabel(analysis)} ${analysis.paper}`.toLowerCase().includes(words))
-    : sorted
-  const papers = groupRuns(shown)
+  const matches = (analysis: Analysis) => `${analysisLabel(analysis)} ${analysis.paper}`.toLowerCase().includes(words)
+  const matching = words ? groups.filter(({ run, earlier }) => [run, ...earlier].some(matches)) : groups
+  const papers = matching
     .filter(({ run }) => !shows.length || shows.some((kind) => has(run, kind)))
     .sort((a, b) => byRunTime(a.run, b.run))
 
@@ -134,7 +133,7 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
       <StandingKey />
       {/* Read out as the search narrows the list. */}
       <p aria-live="polite" className="sr-only">
-        {words ? `${shown.length} of ${analyses.length} analyses` : ''}
+        {words ? `${matching.length} of ${groups.length} papers` : ''}
       </p>
       {papers.length ? (
         <ul className="divide-y divide-border-subtle overflow-hidden rounded-2xl border border-border-subtle bg-surface">

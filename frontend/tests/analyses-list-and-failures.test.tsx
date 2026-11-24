@@ -88,12 +88,37 @@ describe('the Analyses list', () => {
     const search = screen.getByRole('searchbox', { name: 'Search your analyses' })
     fireEvent.change(search, { target: { value: 'DENSE' } })
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
-    expect(screen.getByText('1 of 4 analyses')).toBeInTheDocument()
+    expect(screen.getByText('1 of 4 papers')).toBeInTheDocument()
     fireEvent.change(search, { target: { value: '10.3' } })
     expect(screen.getByText('Stopped')).toBeInTheDocument()
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
     fireEvent.change(search, { target: { value: ' nothing ' } })
     expect(screen.getByText(/^No analysis matches “nothing”/)).toBeInTheDocument()
+  })
+
+  it('keeps an untitled retry and all earlier runs when only an earlier title matches', () => {
+    const onOpen = vi.fn()
+    const runs = [
+      analysis({ id: 'old', title: 'Working title', completed: '2026-11-01T10:00:00' }),
+      analysis({ id: 'published', title: 'Published title', completed: '2026-11-10T10:00:00' }),
+      analysis({ id: 'retry', status: 'running', started: '2026-11-12T10:00:00' }),
+      analysis({ id: 'other', paper: '10.2/other', title: 'Other paper' }),
+    ]
+    wrap(<AnalysisList analyses={runs} onOpen={onOpen} />)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'working title' } })
+
+    expect(screen.getByText('1 of 2 papers')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Other paper/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Published title/ }))
+    expect(onOpen).toHaveBeenLastCalledWith('retry')
+
+    const earlier = screen.getByText('2 earlier runs').closest('details')!
+    const rows = within(earlier).getAllByRole('button')
+    expect(rows).toHaveLength(2)
+    fireEvent.click(rows[0])
+    expect(onOpen).toHaveBeenLastCalledWith('published')
+    fireEvent.click(rows[1])
+    expect(onOpen).toHaveBeenLastCalledWith('old')
   })
 
   it('lists a paper once and folds its other runs under it', () => {
