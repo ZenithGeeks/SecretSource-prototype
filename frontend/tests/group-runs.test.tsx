@@ -134,8 +134,8 @@ describe('standingCount', () => {
 describe('runTime', () => {
   const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
-  it('says when a finished run ended', () => {
-    expect(runTime(run({ started: '2026-11-12T10:00:00Z', completed: '2026-11-12T10:30:00Z' }))).toBe(`Finished ${when('2026-11-12T10:30:00Z')}`)
+  it('says when a finished run ended, in the same word as one without an end time', () => {
+    expect(runTime(run({ started: '2026-11-12T10:00:00Z', completed: '2026-11-12T10:30:00Z' }))).toBe(`Ran ${when('2026-11-12T10:30:00Z')}`)
   })
 
   it('says when a run started if it has not finished', () => {

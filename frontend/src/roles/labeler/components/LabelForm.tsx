@@ -75,7 +75,7 @@ export function LabelForm({
       {others.length > 0 && (
         <p className="text-sm text-ink-muted">Also labeled by {others.join(', ')}. Their levels are not shown here, so choose yours on your own.</p>
       )}
-      <div role="radiogroup" aria-labelledby={group} onKeyDown={onRadioKeys} className="grid grid-cols-4 gap-1.5">
+      <div role="radiogroup" aria-labelledby={group} data-level="" onKeyDown={onRadioKeys} className="grid grid-cols-4 gap-1.5">
         <span id={group} className="sr-only">
           Support level for {tag}
         </span>
@@ -165,7 +165,7 @@ export function LabelForm({
         <span id={sure} className="text-sm font-medium text-ink">
           How sure are you?
         </span>
-        <div role="radiogroup" aria-labelledby={sure} onKeyDown={onRadioKeys} className="grid grid-cols-3 gap-1.5">
+        <div role="radiogroup" aria-labelledby={sure} data-confidence="" onKeyDown={onRadioKeys} className="grid grid-cols-3 gap-1.5">
           {SURE.map(({ value: sureValue, label, key }, index) => (
             <button
               key={sureValue}

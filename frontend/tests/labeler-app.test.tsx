@@ -141,8 +141,8 @@ describe('the Labeler shell', () => {
     try {
       renderApp()
       // The lead's own work is unfinished, so the row keeps its own action and the labels sit beside it.
-      expect(await screen.findByRole('button', { name: 'Paper A (Start)' }, { timeout: 5000 })).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Paper A (View labels)' })).not.toBeInTheDocument()
+      expect(await screen.findByRole('link', { name: 'Paper A (Start)' }, { timeout: 5000 })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Paper A (View labels)' })).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: 'View labels for Paper A' }))
       expect(await screen.findByRole('heading', { name: 'Labelers disagree (1)' })).toBeInTheDocument()
       expect(new URLSearchParams(window.location.search).get('labels')).toBe('a1')
@@ -327,10 +327,22 @@ describe('the Labeler shell', () => {
       expect(skip).toHaveAttribute('href', '#claim-decision')
       const ask = screen.getAllByRole('button', { name: /^Ask AI/ })[0]
       expect(skip.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      // It moves the focus without adding "#claim-decision" to the history, so one Back leaves the paper.
+      const entries = window.history.length
+      expect(fireEvent.click(skip)).toBe(false)
+      expect(document.getElementById('claim-decision')).toHaveFocus()
+      expect(window.location.hash).toBe('')
+      expect(window.history.length).toBe(entries)
       fireEvent.click(crumbs().getByRole('button', { name: 'Papers to label' }))
       expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
       expect(window.location.search).toBe('')
       expect(crumbs().queryByText('Paper A')).not.toBeInTheDocument()
+    })
+
+    it('leaves the skip link to the browser while the claims are still loading', async () => {
+      renderApp('?analysis=a1')
+      expect(fireEvent.click(screen.getByRole('link', { name: 'Skip to the decision' }))).toBe(true)
+      await screen.findByText('Method Y improves recall.')
     })
 
     it('asks before leaving through the sidebar or the crumb when labels are unsaved', async () => {
@@ -381,9 +393,9 @@ describe('Back and Forward in the Labeler', () => {
   it('adds a history entry for another page, and replaces it on the first sync', async () => {
     const push = vi.spyOn(window.history, 'pushState')
     renderApp('?q=Paper')
-    await screen.findByRole('button', { name: 'Paper A (Start)' }, { timeout: 5000 })
+    await screen.findByRole('link', { name: 'Paper A (Start)' }, { timeout: 5000 })
     expect(push).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Paper A (Start)' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Paper A (Start)' }))
     await screen.findByText('Method Y improves recall.')
     expect(push).toHaveBeenCalledTimes(1)
     expect(window.location.search).toBe('?q=Paper&analysis=a1')
@@ -397,7 +409,7 @@ describe('Back and Forward in the Labeler', () => {
     })
     renderApp('?q=Paper')
     window.scrollY = 300
-    fireEvent.click(await screen.findByRole('button', { name: 'Paper A (Start)' }, { timeout: 5000 }))
+    fireEvent.click(await screen.findByRole('link', { name: 'Paper A (Start)' }, { timeout: 5000 }))
     await screen.findByText('Method Y improves recall.')
     await goTo('?q=Paper', { labelerScroll: 300 })
     expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()

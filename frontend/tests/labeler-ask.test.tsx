@@ -124,7 +124,7 @@ describe('Ask AI in the labeler', () => {
     expect(await screen.findByText(QUESTION.text)).toBeInTheDocument()
     expect(gateway.streamed[0]).toEqual({ path: '/labeling/sessions/a1/review', body: { claim_id: 'paperA#0' } })
     // The finding names what it is about; the cursor shows the same reaction beside the reference.
-    expect(screen.getByText(/· Ref B/)).toBeInTheDocument()
+    expect(within(screen.getByText(QUESTION.text).closest('li')!).getByText(/· Ref B/)).toBeInTheDocument()
     await waitFor(() => expect(screen.getAllByText('A question')).toHaveLength(2))
     // Nothing changed: level 4 is still chosen, and there is nothing new to save.
     const levels = screen.getByRole('radiogroup', { name: /level/i })

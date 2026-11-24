@@ -325,7 +325,7 @@ describe('TableOfContents', () => {
     const encoder = screen.getByRole('button', { name: /Encoder/ })
     expect(encoder).toHaveAttribute('aria-current', 'location')
     expect(encoder).toHaveAttribute('title', '2.1 Encoder, page 4 · 2 claims')
-    expect(screen.getByTitle('2 claims')).toHaveTextContent('2 claims')
+    expect(encoder).toHaveAccessibleName('2.1 Encoder, 2 claims')
     expect(screen.getByRole('button', { name: /Method/ })).not.toHaveAttribute('aria-current')
   })
 
@@ -333,7 +333,7 @@ describe('TableOfContents', () => {
     render(<TableOfContents outline={outline} claims={claims} current={null} onPick={() => {}} />)
     const introduction = screen.getByRole('button', { name: /Introduction/ })
     expect(introduction).toHaveAttribute('title', '1 Introduction, page 1 · 1 claim, 1 contradicted')
-    expect(screen.getByTitle('1 claim, 1 contradicted').querySelector('span[aria-hidden]')).toBeInTheDocument()
+    expect(introduction.querySelector('.bg-refutes')?.closest('[aria-hidden]')).toBeInTheDocument()
   })
 
   it('counts only the claims of the filtered standing', () => {
@@ -373,12 +373,11 @@ describe('TableOfContents', () => {
     expect(screen.getByRole('button', { name: /Method/ })).toHaveFocus()
   })
 
-  it('shows a contradicted count only for a section with one, and keeps the words for screen readers', () => {
+  it('names each section once, with its counts in words and not the digits drawn for them', () => {
     render(<TableOfContents outline={outline} claims={claims} current={null} onPick={() => {}} />)
-    expect(screen.getByRole('button', { name: /Introduction/ })).toHaveTextContent('1 claim, 1 contradicted')
-    const encoder = screen.getByRole('button', { name: /Encoder/ })
-    expect(encoder).toHaveTextContent('2 claims')
-    expect(encoder).not.toHaveTextContent('contradicted')
+    expect(screen.getByRole('button', { name: /Introduction/ })).toHaveAccessibleName('1 Introduction, 1 claim, 1 contradicted')
+    expect(screen.getByRole('button', { name: /Encoder/ })).toHaveAccessibleName('2.1 Encoder, 2 claims')
+    expect(screen.getByRole('button', { name: /Method/ })).toHaveAccessibleName('2 Method')
   })
 
   it('hands the picked row to the caller', () => {

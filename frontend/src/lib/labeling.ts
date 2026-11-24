@@ -78,6 +78,14 @@ export function byline(reference: Reference): string {
   return [who, reference.year].filter(Boolean).join(' · ')
 }
 
+/** A reference as the pickers list it: the number the paper prints, else who wrote it, then its title. */
+export function referenceName(reference: Reference, markers: Pick<CitationMarker, 'ref' | 'text'>[] = []): string {
+  const printed = printedRef(reference, markers)
+  if (printed) return `${printed} ${reference.label}`
+  const who = byline(reference)
+  return who ? `${who} · ${reference.label}` : reference.label
+}
+
 /** A row as the labeling table stores it: every value a string. */
 export type Row = Record<string, string>
 
@@ -870,25 +878,35 @@ export const REWORD = 'Reword the claim, or choose Keep'
 export const editNotReworded = (claim: WorkClaim, draft: Draft) =>
   draft.status === 'edited' && (!draft.edited.trim() || draft.edited.trim() === claim.claim.trim())
 
-/** What is still undecided, in words. Empty means the claim is finished. A reference is named
+/** One thing left to do on a claim, and where on the page it is done: the decision, the first
+ * passage not judged, or one reference's level or confidence. */
+export type Step = { text: string; at: 'decision' | 'passage' | 'level' | 'confidence'; id?: string }
+
+/** What is still undecided, step by step. Empty means the claim is finished. A reference is named
  * as its tab and level form name it: the number the paper prints, else who wrote it, else its title. */
-export function remaining(claim: WorkClaim, draft: Draft, references: Reference[], markers: CitationMarker[] = []): string[] {
-  if (!draft.status) return ['Decide on the claim: keep, edit or reject it']
+export function remainingSteps(claim: WorkClaim, draft: Draft, references: Reference[], markers: CitationMarker[] = []): Step[] {
+  if (!draft.status) return [{ text: 'Decide on the claim: keep, edit or reject it', at: 'decision' }]
   if (draft.status === 'rejected') return []
-  const left: string[] = []
-  if (editNotReworded(claim, draft)) left.push(REWORD)
-  const unjudged = claim.candidates.filter((c) => !draft.cands[c.cand_id]).length
-  if (unjudged) left.push(`${unjudged} passage${unjudged === 1 ? '' : 's'} not judged`)
+  const left: Step[] = []
+  if (editNotReworded(claim, draft)) left.push({ text: REWORD, at: 'decision' })
+  const unjudged = displayOrder(claim).filter((c) => !draft.cands[c.cand_id])
+  if (unjudged.length) {
+    left.push({ text: `${unjudged.length} passage${unjudged.length === 1 ? '' : 's'} not judged`, at: 'passage', id: unjudged[0].cand_id })
+  }
   for (const id of referencesOf(claim, draft)) {
     const ref = references.find((r) => r.reference_id === id)
     const title = ref ? printedRef(ref, markers) || byline(ref) || ref.label : id
-    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) left.push(`Give ${title} a level`)
+    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) left.push({ text: `Give ${title} a level`, at: 'level', id })
     else if (draft.labels[id]?.evidence && !draft.labels[id]?.confidence) {
-      left.push(`Give ${title} a confidence`)
+      left.push({ text: `Give ${title} a confidence`, at: 'confidence', id })
     }
   }
   return left
 }
+
+/** What is still undecided, in words. */
+export const remaining = (claim: WorkClaim, draft: Draft, references: Reference[], markers: CitationMarker[] = []): string[] =>
+  remainingSteps(claim, draft, references, markers).map((step) => step.text)
 
 export const isDone = (claim: WorkClaim, draft: Draft, references: Reference[]) =>
   remaining(claim, draft, references).length === 0

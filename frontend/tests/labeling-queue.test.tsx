@@ -123,7 +123,7 @@ describe('the labeler queue', () => {
   it('opens a ready paper, shows one being read, and says why another failed', async () => {
     renderQueue()
     const table = await screen.findByRole('table')
-    fireEvent.click(within(table).getByRole('button', { name: 'NLP paper (Continue)' }))
+    fireEvent.click(within(table).getByRole('link', { name: 'NLP paper (Continue)' }))
     expect(onOpen).toHaveBeenCalledWith('x2')
     const reading = rowOf(table, '10.1/new')
     expect(within(reading).getByText('Reading…')).toBeInTheDocument()
@@ -253,9 +253,9 @@ describe('the labeler queue', () => {
     try {
       renderQueue()
       const table = await screen.findByRole('table')
-      expect(within(table).getByRole('button', { name: 'HPC paper (Start)' })).toBeInTheDocument()
-      expect(within(table).getByRole('button', { name: 'NLP paper (Continue)' })).toBeInTheDocument()
-      expect(within(table).getByRole('button', { name: 'Finished paper (Review)' })).toBeInTheDocument()
+      expect(within(table).getByRole('link', { name: 'HPC paper (Start)' })).toBeInTheDocument()
+      expect(within(table).getByRole('link', { name: 'NLP paper (Continue)' })).toBeInTheDocument()
+      expect(within(table).getByRole('link', { name: 'Finished paper (Review)' })).toBeInTheDocument()
       const finished = rowOf(table, 'Finished paper')
       expect(within(finished).getByText('You: all 4 claims')).toHaveClass('text-supports')
       expect(within(finished).getByText('Team: all 4')).toBeInTheDocument()

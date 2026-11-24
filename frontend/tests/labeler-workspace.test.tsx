@@ -589,7 +589,9 @@ describe('passages and levels in the panel', () => {
     // The line shows once the search for passages has come back empty.
     expect(await screen.findByText(/^No passages: /)).toBeInTheDocument()
     expect(screen.queryByText(/Nothing to label yet/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
+    // With no reference to read, a passage can only be pasted, and the button says so.
+    fireEvent.click(screen.getByRole('button', { name: 'Paste a passage from a cited work' }))
+    expect(screen.getByText(/They have no PDF to select it in/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'refU' } })
     fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'cited only' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
@@ -1138,16 +1140,25 @@ describe('the progress count in the header', () => {
 
   it('says how many claims have changes not saved yet', async () => {
     await open()
-    expect(screen.getByText('· 0 unsaved')).toHaveClass('invisible')
-    expect(screen.getByText('· 0 unsaved')).toHaveAttribute('aria-hidden', 'true')
+    // Both counts keep their room while hidden, so the controls beside them never move.
+    const unsaved = screen.getByText('· 0 unsaved')
+    const ready = screen.getByText(', 0 ready to save')
+    expect(unsaved).toHaveClass('invisible')
+    expect(unsaved).toHaveAttribute('aria-hidden', 'true')
+    key('k')
+    expect(unsaved).toHaveTextContent('· 1 unsaved, 0 ready to save')
+    expect(unsaved).not.toHaveClass('invisible')
+    expect(ready).toHaveClass('invisible')
+    expect(ready).toHaveAttribute('aria-hidden', 'true')
     // A rejected claim has nothing left to decide, so it is ready to save, and still not finished.
     key('x')
-    expect(screen.getByText('· 1 unsaved, 1 ready to save')).not.toHaveClass('invisible')
-    expect(screen.getByText('· 1 unsaved, 1 ready to save')).not.toHaveAttribute('aria-hidden')
+    expect(unsaved).toHaveTextContent('· 1 unsaved, 1 ready to save')
+    expect(ready).not.toHaveClass('invisible')
+    expect(ready).not.toHaveAttribute('aria-hidden')
     expect(screen.getByRole('button', { name: /^Claim 1, ready to save:/ })).toBeInTheDocument()
     key(']')
     key('x')
-    expect(screen.getByText('· 2 unsaved, 2 ready to save')).toBeInTheDocument()
+    expect(unsaved).toHaveTextContent('· 2 unsaved, 2 ready to save')
   })
 
   it('has nowhere to go when every claim is finished', async () => {
@@ -1261,8 +1272,8 @@ describe('the reference picker', () => {
     gateway.session = makeSession({ claims: [claimCiting(['b4'])] })
     await open()
     const picker = screen.getByLabelText('Open reference')
-    expect(optionsOf(within(picker).getByRole('group', { name: 'Cited by this claim' }))).toEqual(['[4] Ref B'])
-    expect(optionsOf(within(picker).getByRole('group', { name: 'Not cited by this claim' }))).toEqual(['Ref C', 'Ref D'])
+    expect(optionsOf(within(picker).getByRole('group', { name: "This claim's references" }))).toEqual(['[4] Ref B'])
+    expect(optionsOf(within(picker).getByRole('group', { name: 'Other references' }))).toEqual(['Ref C', 'Ref D'])
   })
 
   it('leaves out the second group when the claim cites every reference', async () => {
@@ -1272,16 +1283,16 @@ describe('the reference picker', () => {
     })
     await open()
     const picker = screen.getByLabelText('Open reference')
-    expect(within(picker).getByRole('group', { name: 'Cited by this claim' })).toBeInTheDocument()
-    expect(within(picker).queryByRole('group', { name: 'Not cited by this claim' })).not.toBeInTheDocument()
+    expect(within(picker).getByRole('group', { name: "This claim's references" })).toBeInTheDocument()
+    expect(within(picker).queryByRole('group', { name: 'Other references' })).not.toBeInTheDocument()
   })
 
-  it('puts every reference under "Not cited by this claim" when the claim cites none of them', async () => {
+  it('puts every reference under "Other references" when the claim cites none of them', async () => {
     gateway.session = makeSession({ claims: [claimCiting([])] })
     await open()
     const picker = screen.getByLabelText('Open reference')
-    expect(within(picker).queryByRole('group', { name: 'Cited by this claim' })).not.toBeInTheDocument()
-    expect(optionsOf(within(picker).getByRole('group', { name: 'Not cited by this claim' }))).toEqual(['[4] Ref B', 'Ref C', 'Ref D'])
+    expect(within(picker).queryByRole('group', { name: "This claim's references" })).not.toBeInTheDocument()
+    expect(optionsOf(within(picker).getByRole('group', { name: 'Other references' }))).toEqual(['[4] Ref B', 'Ref C', 'Ref D'])
   })
 })
 
@@ -1718,5 +1729,97 @@ describe('the note on an Edit not reworded yet', () => {
     fireEvent.change(box(), { target: { value: 'Y raises recall.' } })
     fireEvent.blur(box())
     expect(screen.queryByText('Reword the claim, or choose Keep', { selector: 'p' })).not.toBeInTheDocument()
+  })
+})
+
+describe('the save bar steps', () => {
+  const expand = () => {
+    const more = screen.queryByRole('button', { name: /^and \d+ more$/ })
+    if (more) fireEvent.click(more)
+  }
+
+  it('takes an undecided claim to its decision', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Decide on the claim: keep, edit or reject it' }))
+    expect(screen.getByRole('radio', { name: /Keep/ })).toHaveFocus()
+  })
+
+  it('opens the first passage not judged, even under another reference tab', async () => {
+    await open()
+    key('k')
+    fireEvent.click(screen.getByRole('tab', { name: 'Ref C' }))
+    fireEvent.click(screen.getByRole('button', { name: '3 passages not judged' }))
+    expect(screen.getByRole('tab', { name: '[4] Ref B' })).toHaveAttribute('aria-selected', 'true')
+    expect(document.activeElement).toHaveTextContent('recall rose by 4 points')
+    expect(reference()).toBe('refB.pdf|recall rose by 4 points')
+  })
+
+  it("goes to a reference's level, then its confidence", async () => {
+    await open()
+    key('k')
+    key('r')
+    fireEvent.click(screen.getByRole('tab', { name: 'Ref C' }))
+    expand()
+    fireEvent.click(screen.getByRole('button', { name: 'Give [4] a level' }))
+    expect(screen.getByRole('tab', { name: '[4] Ref B' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('radio', { name: /^1 · / })).toHaveFocus()
+    key('2')
+    expand()
+    fireEvent.click(screen.getByRole('button', { name: 'Give [4] a confidence' }))
+    expect(screen.getByRole('radio', { name: /^Low/ })).toHaveFocus()
+  })
+
+  it('opens the tab of a reference that only has a passage the labeler added', async () => {
+    await open()
+    key('k')
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
+    fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'refD' } })
+    fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'found it myself' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Ref C' }))
+    expand()
+    fireEvent.click(screen.getByRole('button', { name: 'Give Ref D a level' }))
+    expect(screen.getByRole('tab', { name: 'Ref D' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('radio', { name: /^1 · / })).toHaveFocus()
+  })
+})
+
+describe('Nothing to undo', () => {
+  it('says undo is per claim, and names the claims with unsaved changes', async () => {
+    await open()
+    key('z')
+    expect(screen.getByRole('status')).toHaveTextContent(/^Nothing to undo on this claim$/)
+    key('x')
+    key(']')
+    key('z')
+    expect(screen.getByRole('status')).toHaveTextContent('Nothing to undo on this claim · claim 1 has changes')
+    key('x')
+    key(']')
+    key('z')
+    expect(screen.getByRole('status')).toHaveTextContent('Nothing to undo on this claim · claims 1, 2 have changes')
+  })
+})
+
+describe('one popover at a time', () => {
+  it('closes the shortcut list when the add-claim form opens, and the other way round', async () => {
+    await open()
+    key('?')
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed claim' }))
+    expect(screen.queryByRole('region', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('A claim extraction missed')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
+    expect(screen.getByRole('region', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('A claim extraction missed')).not.toBeInTheDocument()
+  })
+
+  it('closes the shortcut list when the guide opens from it, and returns to its button after', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+    await open()
+    key('?')
+    fireEvent.click(within(screen.getByRole('region', { name: 'Keyboard shortcuts' })).getByRole('button', { name: 'Labeling guide' }))
+    expect(screen.queryByRole('region', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument()
+    const guide = await screen.findByRole('dialog', { name: 'Labeling guide' })
+    fireEvent.click(within(guide).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Keyboard shortcuts' })).toHaveFocus())
   })
 })

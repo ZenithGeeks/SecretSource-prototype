@@ -133,16 +133,24 @@ describe('Queue', () => {
     const onOpen = vi.fn()
     const onOpenLabels = vi.fn()
     withQuery(<Queue onOpen={onOpen} onOpenLabels={onOpenLabels} onShowBlind={vi.fn()} />)
-    const unfinished = (await screen.findByRole('button', { name: 'Paper b1 (Start)' })).closest('tr')!
+    const unfinished = (await screen.findByRole('link', { name: 'Paper b1 (Start)' })).closest('tr')!
     expect(within(unfinished).getByText('Blind check')).toBeInTheDocument()
     expect(within(unfinished).getByText('Hidden until you finish')).toBeInTheDocument()
-    fireEvent.click(within(unfinished).getByRole('button', { name: 'Paper b1 (Start)' }))
+    fireEvent.click(within(unfinished).getByRole('link', { name: 'Paper b1 (Start)' }))
     expect(onOpen).toHaveBeenCalledWith('b1') // a lead's own blind check still opens to label
+    // A link, so a modified click opens the paper in a new tab and leaves this page as it is.
+    const link = within(unfinished).getByRole('link', { name: 'Paper b1 (Start)' })
+    expect(link).toHaveAttribute('href', '?analysis=b1')
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+      expect(fireEvent.click(link, modifier)).toBe(true) // not prevented: the browser opens it
+    }
+    expect(onOpen).toHaveBeenCalledOnce()
 
-    const finished = screen.getByRole('button', { name: 'Paper b2 (View labels)' }).closest('tr')!
+    const finished = screen.getByRole('link', { name: 'Paper b2 (View labels)' }).closest('tr')!
     expect(within(finished).queryByText('Hidden until you finish')).not.toBeInTheDocument()
     expect(within(finished).getByText('Somchai')).toBeInTheDocument()
-    fireEvent.click(within(finished).getByRole('button', { name: 'Paper b2 (View labels)' }))
+    expect(within(finished).getByRole('link', { name: 'Paper b2 (View labels)' })).toHaveAttribute('href', '?labels=b2')
+    fireEvent.click(within(finished).getByRole('link', { name: 'Paper b2 (View labels)' }))
     expect(onOpenLabels).toHaveBeenCalledWith('b2')
   })
 
@@ -172,9 +180,9 @@ describe('Queue', () => {
   it('keeps room for the menu on rows of papers the viewer did not add, so the rows line up', async () => {
     gateway.pool = pool({ papers: [paper('p-theirs', { mine: false }), paper('p-mine', { mine: true })] })
     renderQueue()
-    await screen.findByRole('button', { name: 'Paper p-theirs (Start)' })
-    const theirs = screen.getByRole('button', { name: 'Paper p-theirs (Start)' }).closest('tr')!
-    const mine = screen.getByRole('button', { name: 'Paper p-mine (Start)' }).closest('tr')!
+    await screen.findByRole('link', { name: 'Paper p-theirs (Start)' })
+    const theirs = screen.getByRole('link', { name: 'Paper p-theirs (Start)' }).closest('tr')!
+    const mine = screen.getByRole('link', { name: 'Paper p-mine (Start)' }).closest('tr')!
     expect(theirs.querySelector('span[aria-hidden="true"].size-10')).not.toBeNull()
     expect(within(theirs).queryByRole('button', { name: /^More actions/ })).not.toBeInTheDocument()
     expect(mine.querySelector('span[aria-hidden="true"].size-10')).toBeNull()

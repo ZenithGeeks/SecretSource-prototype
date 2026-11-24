@@ -10,10 +10,10 @@ import { Loader2, Plus, Sparkles, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { Button, IconButton, Input, Textarea } from '../../../components/ui'
-import { printedRef } from '../../../lib/claimText'
 import {
   byline,
   referenceFinished,
+  referenceName,
   referenceSummary,
   referencesOf,
   type AddedPassage,
@@ -229,6 +229,7 @@ export function PassageList({
   onSearchAgain,
   onAsk,
   canAdd = true,
+  pasteOnly = false,
 }: {
   claim: WorkClaim
   draft: Draft
@@ -251,6 +252,8 @@ export function PassageList({
   onAsk?: (passage: AskedPassage) => void
   /** False hides "Add a missed passage", for a claim with no paper a passage could come from. */
   canAdd?: boolean
+  /** The claim has no reference to read, only cited works with no PDF: a passage can only be pasted (#824). */
+  pasteOnly?: boolean
 }) {
   // Automatic focus opens the PDF while leaving the label panel at the claim decision.
   const revealFocused = !focus?.automatic
@@ -318,8 +321,7 @@ export function PassageList({
             const finished = referenceFinished(claim, draft, id)
             const reference = references.find((r) => r.reference_id === id)
             const active = id === activeId
-            const printed = reference ? printedRef(reference, markers) : ''
-            const tag = printed ? `${printed} ${labelOf(id)}` : labelOf(id)
+            const tag = reference ? referenceName(reference, markers) : labelOf(id)
             const text = finished ? referenceSummary(claim, draft, reference, id) : tag
             return (
               <button
@@ -412,12 +414,20 @@ export function PassageList({
         )
       })()}
 
-      {canAdd && <AddPassage references={references} onAdd={onAdd} />}
+      {canAdd && <AddPassage references={references} onAdd={onAdd} pasteOnly={pasteOnly} />}
     </section>
   )
 }
 
-function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p: AddedPassage) => void }) {
+function AddPassage({
+  references,
+  onAdd,
+  pasteOnly,
+}: {
+  references: Reference[]
+  onAdd: (p: AddedPassage) => void
+  pasteOnly: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [reference, setReference] = useState('')
   const [page, setPage] = useState('')
@@ -429,7 +439,7 @@ function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p:
     return (
       <Button variant="ghost" className="justify-start" onClick={() => setOpen(true)}>
         <Plus className="size-4" />
-        Add a missed passage
+        {pasteOnly ? 'Paste a passage from a cited work' : 'Add a missed passage'}
       </Button>
     )
   return (
@@ -446,7 +456,9 @@ function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p:
       }}
     >
       <p className="text-sm text-ink-muted">
-        Paste a passage from the reference here, or select it in the reference's PDF and choose Add as evidence.
+        {pasteOnly
+          ? 'Paste a passage from one of the works this claim cites. They have no PDF to select it in.'
+          : "Paste a passage from the reference here, or select it in the reference's PDF and choose Add as evidence."}
       </p>
       <div className="flex gap-2">
         <div className="flex min-w-0 flex-1 flex-col gap-1">

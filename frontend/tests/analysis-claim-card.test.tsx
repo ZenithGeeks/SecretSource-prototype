@@ -82,9 +82,52 @@ describe('what the other cited works said, beside the standing', () => {
     expect(screen.getByText(/^also 1 silent/)).toBeInTheDocument()
   })
 
+  it('counts the works that were not checked too, as the fold below lists them', () => {
+    const fourth = cite({ title: 'Group Norm', doi: '10.1/gn' })
+    card(
+      { ...claim, citations: [...claim.citations, fourth], unchecked: [{ source: 'loose.pdf', reason: 'no-open-access', message: '' }] },
+      { standing: 'refutes', startCollapsed: true },
+    )
+    expect(screen.getByText('also 1 silent, 1 backs it, 2 not checked')).toBeInTheDocument()
+  })
+
+  it('names a contradicting or an unsettled quote from a work that did not decide the claim by its verdict', async () => {
+    const onShow = vi.fn<(target: Target) => void>()
+    const others = {
+      citations: [cite(), second, third],
+      verdicts: [
+        verdict({ verdict: 'refutes' }),
+        verdict({ cited: '10.1/ln', source: 'ln.pdf', verdict: 'refutes', quote: 'ln says no' }),
+        verdict({ cited: '10.1/wn', source: 'wn.pdf', verdict: 'insufficient', quote: 'wn says little' }),
+      ],
+    }
+    card(others, { standing: 'refutes', onShow })
+    fireEvent.click(screen.getByRole('button', { name: /ln says no/ }))
+    fireEvent.click(screen.getByRole('button', { name: /wn says little/ }))
+    const shows = screen.getAllByRole('button', { name: /Show in cited paper/ })
+    fireEvent.click(shows[0])
+    await waitFor(() => expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ label: 'Claim 1 · Contradicting quote in Layer Norm' })))
+    fireEvent.click(shows[1])
+    await waitFor(() => expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ label: 'Claim 1 · Quote in Weight Norm' })))
+  })
+
   it('says nothing when the card has one answer', () => {
     card({ verdicts: [verdict({ verdict: 'refutes' })] }, { standing: 'refutes', startCollapsed: true })
     expect(screen.queryByText(/^also /)).not.toBeInTheDocument()
+  })
+})
+
+describe('the two quotes of an open card', () => {
+  it('sets both upright when either is long, so one card never mixes italic and upright', () => {
+    card({ sentence: 'Short sentence.', verdicts: [verdict({ verdict: 'refutes', quote: 'x'.repeat(250) })] }, { standing: 'refutes' })
+    const quotes = document.querySelectorAll('blockquote')
+    expect(quotes).toHaveLength(2)
+    for (const quote of quotes) expect(quote).not.toHaveClass('italic')
+  })
+
+  it('sets both in italic when both are short', () => {
+    card({ sentence: 'Short sentence.', verdicts: [verdict({ verdict: 'refutes', quote: 'Short quote.' })] }, { standing: 'refutes' })
+    for (const quote of document.querySelectorAll('blockquote')) expect(quote).toHaveClass('italic')
   })
 })
 
@@ -662,7 +705,10 @@ describe('the other cited works', () => {
     const { unmount } = card(claim, { onShow })
     fireEvent.click(screen.getByRole('button', { name: /qq/ }))
     fireEvent.click(screen.getByRole('button', { name: /Show in cited paper/ }))
-    await waitFor(() => expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ paper: 'ln.pdf', quote: 'qq' })))
+    // Not the deciding work: the viewer names the quote by its own verdict.
+    await waitFor(() =>
+      expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ paper: 'ln.pdf', quote: 'qq', label: 'Claim 1 · Supporting quote in Layer Norm' })),
+    )
     unmount()
     card(claim)
     fireEvent.click(screen.getByRole('button', { name: /qq/ }))

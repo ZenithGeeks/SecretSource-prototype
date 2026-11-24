@@ -132,16 +132,16 @@ describe('the workspace help and notices', () => {
       fireEvent.keyDown(window, { key: 'z' })
       expect(screen.getByText('Undone: Keep')).toBeInTheDocument()
       fireEvent.keyDown(window, { key: 'z' })
-      const first = screen.getByText('Nothing to undo')
+      const first = screen.getByText('Nothing to undo on this claim')
       act(() => vi.advanceTimersByTime(3000))
       fireEvent.keyDown(window, { key: 'z' })
-      const second = screen.getByText('Nothing to undo')
+      const second = screen.getByText('Nothing to undo on this claim')
       // A new node, so a screen reader reads it again, and a new four seconds.
       expect(second).not.toBe(first)
       act(() => vi.advanceTimersByTime(3000))
-      expect(screen.getByText('Nothing to undo')).toBeInTheDocument()
+      expect(screen.getByText('Nothing to undo on this claim')).toBeInTheDocument()
       act(() => vi.advanceTimersByTime(1500))
-      expect(screen.queryByText('Nothing to undo')).not.toBeInTheDocument()
+      expect(screen.queryByText('Nothing to undo on this claim')).not.toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }
@@ -194,8 +194,10 @@ describe('the workspace help and notices', () => {
       await screen.findByRole('heading', { name: 'Claim 1 of 2' })
       fireEvent.keyDown(window, { key: 'k' })
       expect(await screen.findByText(line)).toBeInTheDocument()
-      // A claim that cites no paper has nowhere a missed passage could come from.
-      expect(screen.queryByRole('button', { name: 'Add a missed passage' }) !== null).toBe(refs.length > 0)
+      // A claim that cites no paper has nowhere a missed passage could come from. One that cites
+      // works with no PDF can only take one pasted in, and the button says so.
+      expect(screen.queryByRole('button', { name: 'Paste a passage from a cited work' }) !== null).toBe(refs.length > 0)
+      expect(screen.queryByRole('button', { name: 'Add a missed passage' })).not.toBeInTheDocument()
     } finally {
       delete claim.unchecked
     }

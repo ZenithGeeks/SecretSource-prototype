@@ -63,6 +63,8 @@ export function TableOfContents({
               onClick={() => onPick(row)}
               aria-current={row.n === marked ? 'location' : undefined}
               tabIndex={row.n === marked || (!marked && index === 0) ? 0 : -1}
+              // One clean name; the digits drawn inside would otherwise be read out as "1 Introduction 1 1".
+              aria-label={`${row.n} ${row.title}${row.claims ? `, ${claimsText(row)}` : ''}`}
               title={`${row.n} ${row.title}, page ${row.page}${row.claims ? ` · ${claimsText(row)}` : ''}`}
               className={cn(
                 'flex min-h-9 w-full items-center gap-2 rounded-r-md border-l-2 py-1 pr-2 text-left text-ui transition-colors focus-visible:outline-2 focus-visible:outline-accent',
@@ -78,17 +80,14 @@ export function TableOfContents({
               {/* A neutral count, and the contradicted ones apart in their own colour, so "5"
                   is never read as five contradictions. */}
               {row.claims > 0 && (
-                <span className="inline-flex shrink-0 items-center gap-1 text-caption leading-4 font-medium tabular-nums" title={claimsText(row)}>
-                  <span aria-hidden="true" className="rounded-full bg-canvas px-1.5 text-ink-muted">
-                    {row.claims}
-                  </span>
+                <span aria-hidden="true" className="inline-flex shrink-0 items-center gap-1 text-caption leading-4 font-medium tabular-nums">
+                  <span className="rounded-full bg-canvas px-1.5 text-ink-muted">{row.claims}</span>
                   {row.contradicted > 0 && (
-                    <span aria-hidden="true" className="inline-flex items-center gap-1 text-refutes">
+                    <span className="inline-flex items-center gap-1 text-refutes">
                       <span className="size-1.5 shrink-0 rounded-full bg-refutes" />
                       {row.contradicted}
                     </span>
                   )}
-                  <span className="sr-only">{claimsText(row)}</span>
                 </span>
               )}
             </button>

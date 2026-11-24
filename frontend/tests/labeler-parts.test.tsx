@@ -515,7 +515,7 @@ describe('no control inside another', () => {
       <>
         <ClaimDecision claim={claim('c1', 'Original.')} position={1} count={1} draft={emptyDraft()} onChange={vi.fn()} />
         <LabelForm tag="[7]" title="Ref B" active label={emptyLabel()} others={[]} onChange={vi.fn()} />
-        <SaveBar left={['a', 'b']} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} />
+        <SaveBar left={['a', 'b']} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} />
       </>,
     )
     const inner = 'button, a[href], input, select, textarea, [role="radio"], [role="radiogroup"], [tabindex]'
@@ -525,7 +525,7 @@ describe('no control inside another', () => {
 
 describe('SaveBar', () => {
   const bar = (over: Partial<Parameters<typeof SaveBar>[0]> = {}) => {
-    const props = { left: [], dirty: true, saving: false, error: null, savedRows: null, hasNext: true, onSave: vi.fn(), claimNumber: 3, ...over }
+    const props = { left: [], dirty: true, saving: false, error: null, savedRows: null, hasNext: true, onSave: vi.fn(), onStep: vi.fn(), claimNumber: 3, ...over }
     render(<SaveBar {...props} />)
     return props
   }
@@ -543,13 +543,13 @@ describe('SaveBar', () => {
 
   it('fills a save button only when the claim is complete, so a partial save is never the obvious step', () => {
     const filled = () => screen.queryAllByRole('button', { name: /^Save claim/ }).filter((b) => b.classList.contains('bg-accent')).map((b) => b.textContent)
-    const { unmount } = render(<SaveBar left={['Give Ref B a level']} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={3} />)
+    const { unmount } = render(<SaveBar left={['Give Ref B a level']} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} claimNumber={3} />)
     expect(filled()).toEqual([])
     unmount()
-    const again = render(<SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={3} />)
+    const again = render(<SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} claimNumber={3} />)
     expect(filled()).toEqual(['Save claim 3 and next'])
     again.unmount()
-    render(<SaveBar left={['Give Ref B a level']} dirty saving={false} error={null} savedRows={null} hasNext={false} onSave={vi.fn()} claimNumber={3} />)
+    render(<SaveBar left={['Give Ref B a level']} dirty saving={false} error={null} savedRows={null} hasNext={false} onSave={vi.fn()} onStep={vi.fn()} claimNumber={3} />)
     expect(filled()).toEqual([])
   })
 
@@ -606,9 +606,9 @@ describe('SaveBar', () => {
   })
 
   it('shows a blocked save as a hint until the labeler tries to save', () => {
-    const { rerender } = render(<SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={1} blocked="Can't save yet" />)
+    const { rerender } = render(<SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} claimNumber={1} blocked="Can't save yet" />)
     expect(screen.getByText("Can't save yet")).toHaveClass('text-ink-muted')
-    rerender(<SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={1} blocked="Can't save yet" warn />)
+    rerender(<SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} claimNumber={1} blocked="Can't save yet" warn />)
     expect(screen.getByText("Can't save yet")).toHaveClass('text-refutes')
   })
 
@@ -620,13 +620,13 @@ describe('SaveBar', () => {
   it('names the claim each button saves, and offers Save all from two unsaved claims', () => {
     const onSaveAll = vi.fn()
     const { rerender } = render(
-      <SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={7} unsavedCount={1} onSaveAll={onSaveAll} />,
+      <SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} claimNumber={7} unsavedCount={1} onSaveAll={onSaveAll} />,
     )
     expect(screen.getByRole('button', { name: 'Save claim 7' })).toHaveAttribute('aria-keyshortcuts', 'Control+S Meta+S')
     expect(screen.getByRole('button', { name: 'Save claim 7 and next' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Save all/ })).not.toBeInTheDocument()
     rerender(
-      <SaveBar left={[]} dirty={false} saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={7} unsavedCount={4} onSaveAll={onSaveAll} />,
+      <SaveBar left={[]} dirty={false} saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} claimNumber={7} unsavedCount={4} onSaveAll={onSaveAll} />,
     )
     // Enabled on a claim with no changes of its own, since others have some.
     const all = screen.getByRole('button', { name: 'Save all unsaved (4)' })
@@ -635,13 +635,13 @@ describe('SaveBar', () => {
     fireEvent.click(all)
     expect(onSaveAll).toHaveBeenCalledOnce()
     rerender(
-      <SaveBar left={[]} dirty={false} saving error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={7} unsavedCount={4} onSaveAll={onSaveAll} />,
+      <SaveBar left={[]} dirty={false} saving error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} claimNumber={7} unsavedCount={4} onSaveAll={onSaveAll} />,
     )
     expect(screen.getByRole('button', { name: 'Save all unsaved (4)' })).toBeDisabled()
   })
 
   it('says Nothing changed when clean and disables Save', () => {
-    render(<SaveBar left={[]} dirty={false} saving error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={1} />)
+    render(<SaveBar left={[]} dirty={false} saving error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} claimNumber={1} />)
     expect(screen.getByText('Nothing changed')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Save claim \d+$/ })).toBeDisabled()
   })

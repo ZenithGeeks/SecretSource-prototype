@@ -14,6 +14,7 @@ export function SaveBar({
   savedRows,
   hasNext,
   onSave,
+  onStep,
   claimNumber,
   unsavedCount = 0,
   onSaveAll,
@@ -32,6 +33,8 @@ export function SaveBar({
   savedRows: number | null
   hasNext: boolean
   onSave: (next: boolean) => void
+  /** Goes to where `left[index]` is done: the decision, a passage or a level form. */
+  onStep: (index: number) => void
   /** The claim's number in the paper, so the buttons say which claim they save. */
   claimNumber: number
   /** Claims with unsaved changes in the whole paper; from two up, Save all is offered. */
@@ -48,6 +51,7 @@ export function SaveBar({
   const [showAll, setShowAll] = useState(false)
   const rest = useId()
   const more = !blocked && left.length > 1
+  const step = 'text-left text-ink-muted hover:text-ink hover:underline focus-visible:outline-2 focus-visible:outline-accent'
 
   return (
     <div className={cn('sticky bottom-0 z-10 flex flex-col gap-1.5 bg-surface px-3 py-2', className)}>
@@ -63,19 +67,16 @@ export function SaveBar({
             {status}
           </span>
           {/* Blocked, the status already names the one thing to do. Expanded, the list below has every item. */}
-          {!blocked && !(more && showAll) && (
-            <span
-              title={left.length > 0 ? left.join(' · ') : 'Every decision for this claim is made.'}
-              className={cn('min-w-0 text-xs tabular-nums', left.length > 0 ? 'truncate text-ink-muted' : 'flex items-center gap-1 text-supports')}
-            >
-              {left.length > 0 ? (
-                left[0]
-              ) : (
-                <>
-                  {/* Not "finished" while unsaved: the progress count only counts saved claims. */}
-                  <Check className="size-3.5" aria-hidden="true" /> {dirty ? 'Every decision made, not saved yet' : 'Every decision made'}
-                </>
-              )}
+          {/* Each thing left is a button to where it is done: the level form may be scrolled out of view. */}
+          {!blocked && !(more && showAll) && left.length > 0 && (
+            <button type="button" title={left.join(' · ')} onClick={() => onStep(0)} className={cn(step, 'min-w-0 truncate text-xs tabular-nums')}>
+              {left[0]}
+            </button>
+          )}
+          {!blocked && left.length === 0 && (
+            <span title="Every decision for this claim is made." className="flex min-w-0 items-center gap-1 text-xs text-supports">
+              {/* Not "finished" while unsaved: the progress count only counts saved claims. */}
+              <Check className="size-3.5" aria-hidden="true" /> {dirty ? 'Every decision made, not saved yet' : 'Every decision made'}
             </span>
           )}
           {more && (
@@ -94,8 +95,12 @@ export function SaveBar({
         {/* Under the status line at full width, so a long item wraps instead of pushing the row wider. */}
         {more && showAll && (
           <ul id={rest} className="w-full list-inside list-disc text-xs wrap-anywhere text-ink-muted">
-            {left.map((item) => (
-              <li key={item}>{item}</li>
+            {left.map((item, index) => (
+              <li key={item}>
+                <button type="button" onClick={() => onStep(index)} className={step}>
+                  {item}
+                </button>
+              </li>
             ))}
           </ul>
         )}

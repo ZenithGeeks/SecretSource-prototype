@@ -13,7 +13,7 @@ import type { ReactNode } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { paperName } from '../lib/api'
-import type { Analysis, Claim } from '../lib/api'
+import type { Analysis, Claim, OutlineEntry } from '../lib/api'
 import { countsOf, opensByDefault, ranked, runTime, STANDING_LABELS, standingOf } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { sectionName, sectionOfPage } from '../lib/outline'
@@ -28,7 +28,7 @@ import type { Target } from './PageViewer'
 import { PageViewer } from './PageViewer'
 import { ResultsSummary } from './ResultsSummary'
 import { KEY_CAP } from './StandingKey'
-import { Card, Empty, IconButton } from './ui'
+import { Card, Empty } from './ui'
 
 /** A section picked in the table of contents, to open at its page. `at` tells a newer pick
  * from the page the reader opened or closed since. */
@@ -73,6 +73,44 @@ class SavedParts extends Map<string, boolean> {
     saveView(this.id, { parts: [...this] })
     return this
   }
+}
+
+/** Shaped as the evidence page chips are, so a filter reads as a chip and not as a heading. */
+const CHIP = 'inline-flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-1.25 text-xs leading-4 font-medium text-accent'
+
+/** One filter in use, by its name, and the × that clears it when the screen can clear it. */
+function FilterChip({ label, onClear }: { label: string; onClear?: () => void }) {
+  if (!onClear) return <span className={CHIP}>{label}</span>
+  return (
+    <button
+      type="button"
+      onClick={onClear}
+      aria-label={`Clear the ${label} filter`}
+      className={cn(CHIP, 'hover:underline focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:min-h-11')}
+    >
+      {label}
+      <X className="size-3.5" aria-hidden="true" />
+    </button>
+  )
+}
+
+/** "§2 Background": a section as the claim cards name it. */
+function sectionChip(outline: OutlineEntry[], n: string) {
+  return sectionName(outline, n).replace(/^Section\s+/, '§').replace(' · ', ' ')
+}
+
+/** Why a picked section lists nothing: it has no claims, or none with the picked standing. */
+function SectionEmpty({ claims, filter, onShowAll }: { claims: number; filter: Standing | null; onShowAll: () => void }) {
+  if (!claims || !filter) return <p className="px-1 text-sm text-ink-muted">No claims come from this section.</p>
+  const noun = claims === 1 ? 'claim' : 'claims'
+  return (
+    <p className="px-1 text-sm text-ink-muted">
+      None of this section’s {claims} {noun} is “{STANDING_LABELS[filter]}” ·{' '}
+      <button type="button" onClick={onShowAll} className={CLEAR_BUTTON}>
+        Show its {claims} {noun}
+      </button>
+    </p>
+  )
 }
 
 /** A claim the run has finished with: it has an answer, a failure, or nothing to check. */
@@ -155,8 +193,8 @@ export function AnalysisView({
   const keepFilter = onFilter ?? setOwnFilter
   const [paperDismissedFor, setPaperDismissedFor] = useState<string | null>(null)
   // What a shortcut did instead, or could not do: read out, and shown on the claim's card, or in
-  // the viewer's header when the viewer opened (`inViewer`), so the card keeps its section and page.
-  const [keyNotice, setKeyNotice] = useState<{ claim: number; text: string; inViewer?: boolean } | null>(null)
+  // the viewer's header when the viewer opened (`inViewer`, its words), so the card keeps its section and page.
+  const [keyNotice, setKeyNotice] = useState<{ claim: number; text: string; inViewer?: string } | null>(null)
   const paperNotifiedFor = useRef<string | null>(null)
   // What the reader opened on the claim cards, kept here so a filter change does not fold it.
   const [openParts] = useState(() => (restorable ? new SavedParts(id) : new Map<string, boolean>()))
@@ -197,9 +235,15 @@ export function AnalysisView({
           // The cited work's quote, else (the card marks it) the claim's place in this paper.
           const action = inCard('[aria-keyshortcuts="O"]')
           action?.click()
+          // The card says why it has no cited quote: no verdicts at all, or none matched a passage.
+          const why = action?.dataset.inPaper
           if (!action) setKeyNotice({ claim, text: `No quoted passage to show for claim ${claim + 1}` })
-          else if (action.dataset.inPaper !== undefined) {
-            setKeyNotice({ claim, text: `No quote from a cited work for claim ${claim + 1} · showing it in this paper`, inViewer: true })
+          else if (why) {
+            setKeyNotice({
+              claim,
+              text: `${why} · showing claim ${claim + 1} in this paper`,
+              inViewer: `${why}, so this is where the claim sits in the paper.`,
+            })
           }
         }
         const toggle = inCard('[data-claim-toggle][aria-expanded="false"]')
@@ -217,8 +261,13 @@ export function AnalysisView({
       event.preventDefault()
       const at = rows.findIndex((row) => row.closest('[data-claim-card]')!.contains(focused))
       const to = key === 'j' ? Math.min(rows.length - 1, at + 1) : Math.max(0, at - 1)
-      rows[to].focus()
-      if (typeof rows[to].scrollIntoView === 'function') rows[to].scrollIntoView({ block: 'nearest' })
+      // The card goes near the top, under its scroll margin, so what follows the row is in view too.
+      const card = rows[to].closest<HTMLElement>('[data-claim-card]')!
+      rows[to].focus({ preventScroll: true })
+      if (typeof card.scrollIntoView === 'function') {
+        const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        card.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' })
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -242,6 +291,14 @@ export function AnalysisView({
     : null
   const target: Target | null = sectionTarget ?? opened.target ?? autoPaperTarget
 
+  // Whatever the viewer shows, a section's page or a quote still being looked up included, goes
+  // into the history entry, so Forward brings back the latest page and not an older one. A
+  // lookup cannot resume after a restore, so the page is kept without it.
+  const savedTarget = restorable ? JSON.stringify(target && { ...target, lookup: undefined, locating: undefined }) : null
+  useEffect(() => {
+    if (savedTarget !== null) saveView(id, { target: JSON.parse(savedTarget) as Target | null })
+  }, [id, savedTarget])
+
   // The page stays open when a filter hides its claim: closing it would lose the reader's place
   // and move the list under the pointer. Its header says so instead.
   const hiddenClaim = target?.claim !== undefined && !shown.some((entry) => entry.index === target.claim) ? target.claim : null
@@ -261,8 +318,6 @@ export function AnalysisView({
     activeLookup.current = next?.locating ? next.lookup : undefined
     setKeyNotice(null)
     setOpened({ target: next, at: Date.now() })
-    // A lookup still running would never finish after a restore: its final target is saved instead.
-    if (restorable && !next?.locating) saveView(id, { target: next && { ...next, lookup: undefined } })
     if (!next && id) setPaperDismissedFor(id)
     onTargetChange?.(next !== null)
     const inPaper = next !== null && next.paper === file
@@ -432,39 +487,32 @@ export function AnalysisView({
                 <kbd className={KEY_CAP}>J</kbd> and <kbd className={KEY_CAP}>K</kbd> move between claims ·{' '}
                 <kbd className={KEY_CAP}>O</kbd> shows the evidence
               </p>
-              {filter && (
-                <p className="flex items-center gap-1 text-ui text-ink-muted" aria-live="polite">
-                  Showing {shown.length} of {standings.length}
-                  <IconButton onClick={() => keepFilter(null)} aria-label={`Clear the ${STANDING_LABELS[filter]} filter`}>
-                    <X className="size-4" aria-hidden="true" />
-                  </IconButton>
-                  {/* Each × clears its own filter; with a section picked too, one button clears both. */}
-                  {section && onClearSection && (
-                    <button type="button" onClick={showAllClaims} className={CLEAR_BUTTON}>
-                      Clear all
-                    </button>
-                  )}
-                </p>
+            </div>
+          )}
+          {!teacher && !running && standings.length > 0 && (filter || section) && (
+            // Each filter in use is a chip that names it and clears it; with two, one button clears both.
+            <div className="flex flex-wrap items-center gap-2 text-ui text-ink-muted">
+              <p aria-live="polite">
+                Showing {shown.length} of {standings.length}
+              </p>
+              {filter && <FilterChip label={STANDING_LABELS[filter]} onClear={() => keepFilter(null)} />}
+              {section && <FilterChip label={sectionChip(outline, section)} onClear={onClearSection} />}
+              {filter && section && onClearSection && (
+                <button type="button" onClick={showAllClaims} className={CLEAR_BUTTON}>
+                  Clear all
+                </button>
               )}
             </div>
           )}
           <p role="status" className="sr-only">
             {keyNotice?.text}
           </p>
-          {section && (
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-sm text-ink-muted">
-              <span>
-                Claims from <span className="font-medium text-ink">{sectionName(outline, section)}</span>
-              </span>
-              {onClearSection && (
-                <IconButton onClick={onClearSection} aria-label="Clear the section filter">
-                  <X className="size-4" aria-hidden="true" />
-                </IconButton>
-              )}
-            </p>
-          )}
           {section && shown.length === 0 && standings.length > 0 && (
-            <p className="px-1 text-sm text-ink-muted">No claims come from this section.</p>
+            <SectionEmpty
+              claims={standings.filter((entry) => entry.claim.section === section).length}
+              filter={filter}
+              onShowAll={() => keepFilter(null)}
+            />
           )}
           {(teacher || !running) && shown.map(({ claim, index, standing }, i) => (
             <Fragment key={!teacher && i === 0 ? `first-${index}` : index}>
@@ -516,9 +564,7 @@ export function AnalysisView({
               onLabel={target.claim === undefined ? undefined : backToClaim}
               notice={
                 <>
-                  {keyNotice?.inViewer && (
-                    <p className="text-xs text-ink-muted">No cited work quotes this claim, so this is where it sits in the paper.</p>
-                  )}
+                  {keyNotice?.inViewer && <p className="text-xs text-ink-muted">{keyNotice.inViewer}</p>}
                   {hiddenClaim !== null && (
                     <p className="text-xs text-ink-muted">
                       Claim {hiddenClaim + 1} is hidden by the current filter ·{' '}

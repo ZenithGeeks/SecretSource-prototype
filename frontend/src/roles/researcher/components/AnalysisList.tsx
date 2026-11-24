@@ -33,7 +33,7 @@ function RunState({ analysis }: { analysis: Analysis }) {
   return null
 }
 
-/** "Finished 12 Nov 2026, 14:05 · 20 claims": what tells two runs of one paper apart. */
+/** "Ran 12 Nov 2026, 14:05 · 20 claims": what tells two runs of one paper apart. */
 function runDetails(analysis: Analysis) {
   const count = analysis.claims.length
   const claims = analysis.status === 'done' ? `${count} ${count === 1 ? 'claim' : 'claims'}` : ''
@@ -72,6 +72,11 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
   useEffect(() => {
     window.scrollTo(0, saved?.scrollY ?? 0)
   }, [saved])
+  // Written as they change, so Back finds them however the reader left: a row, the sidebar or the nav.
+  useEffect(() => {
+    const state: ListState = { query, openGroups, scrollY: savedState()?.scrollY ?? 0 }
+    window.history.replaceState({ ...window.history.state, analysisList: state }, '')
+  }, [query, openGroups])
   const open = (id: string) => {
     const state: ListState = { query, openGroups, scrollY: window.scrollY }
     window.history.replaceState({ ...window.history.state, analysisList: state }, '')
@@ -84,8 +89,7 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
   // Group before filtering so the facets and the rows always use the same representative run.
   const groups = groupRuns([...analyses].sort(byRunTime))
   // Every standing some paper has: the same set an analysis's tiles offer.
-  const runs = groups.map(({ run }) => run)
-  const kinds = STANDINGS.filter((kind) => runs.some((run) => has(run, kind)))
+  const kinds = STANDINGS.filter((kind) => groups.some(({ run }) => has(run, kind)))
   // A standing whose last paper was deleted has no option left, so it stops filtering.
   const shows = picked.filter((kind) => kinds.includes(kind))
   const searchId = useId()
@@ -95,30 +99,36 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
   const papers = matching
     .filter(({ run }) => !shows.length || shows.some((kind) => has(run, kind)))
     .sort((a, b) => byRunTime(a.run, b.run))
+  const paperCount = (n: number) => `${n} ${n === 1 ? 'paper' : 'papers'}`
 
   return (
     <section aria-labelledby={`${searchId}-title`} className="flex w-full flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 id={`${searchId}-title`} className="type-title flex-1">
+        <h2 id={`${searchId}-title`} className="type-title">
           Your analyses
         </h2>
+        {/* Read out as a search or the filter narrows the list. */}
+        <p aria-live="polite" className="flex-1 text-ui text-ink-muted">
+          {papers.length === groups.length ? paperCount(groups.length) : `${papers.length} of ${paperCount(groups.length)}`}
+        </p>
         <label htmlFor={searchId} className="sr-only">
           Search your analyses
         </label>
         {kinds.length > 0 && (
           <div className="flex items-center gap-1">
             <FacetFilter
-              label="Has a claim"
+              label="Verdict"
+              // Papers, by the run each row opens, among those the search leaves: what ticking it would list.
               options={kinds.map((kind) => ({
                 value: kind,
                 label: STANDING_LABELS[kind],
-                count: runs.filter((run) => has(run, kind)).length,
+                count: matching.filter(({ run }) => has(run, kind)).length,
               }))}
               selected={shows}
               onChange={(next) => pick(standingsIn(next.join(',')))}
             />
             {shows.length > 0 && (
-              <IconButton onClick={() => pick([])} aria-label="Clear the Has a claim filter">
+              <IconButton onClick={() => pick([])} aria-label="Clear the verdict filter">
                 <X className="size-4" aria-hidden="true" />
               </IconButton>
             )}
@@ -137,10 +147,6 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
         </div>
       </div>
       <StandingKey />
-      {/* Read out as the search narrows the list. */}
-      <p aria-live="polite" className="sr-only">
-        {words ? `${papers.length} of ${groups.length} papers` : ''}
-      </p>
       {papers.length ? (
         <ul className="divide-y divide-border-subtle overflow-hidden rounded-2xl border border-border-subtle bg-surface">
           {papers.map(({ run, earlier }) => (

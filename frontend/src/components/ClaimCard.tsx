@@ -9,7 +9,7 @@ import { api, figureImageUrl, reasonText } from '../lib/api'
 import { findQuote } from '../lib/findQuote'
 import { useOpenPart } from '../lib/openParts'
 import { citationLink, citationNumber, preprintNote, reference } from '../lib/citations'
-import { answersFor, citedAs, opensByDefault, STANDING_MEANINGS, STANDINGS, unpaired, verdictTally } from '../lib/claims'
+import { answersFor, citedAs, opensByDefault, STANDING_MEANINGS, STANDINGS, unpaired, verdictCountLabel, verdictTally } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { fromUploadedPdf, recheckFailure, recheckStage, sourceUploadMessage } from '../lib/sourceUpload'
 import { cn } from '../lib/utils'
@@ -39,6 +39,13 @@ const WHY_LABELS = {
   supports: 'Why it holds',
   refutes: 'Why it doesn’t hold',
   insufficient: 'Why it isn’t settled',
+} as const
+
+/** What the page viewer calls a quote from a cited work that did not decide the claim. */
+const QUOTE_LABELS = {
+  supports: 'Supporting quote',
+  refutes: 'Contradicting quote',
+  insufficient: 'Quote',
 } as const
 
 /** A small heading that says where the text under it comes from. */
@@ -304,7 +311,7 @@ function EvidencePanel({
   action,
   onAction,
   shortcut,
-  inPaper = false,
+  inPaper,
   long = false,
   children,
 }: {
@@ -315,8 +322,8 @@ function EvidencePanel({
   onAction?: () => void
   /** The key that triggers the action from anywhere in the card (AnalysisView listens for it). */
   shortcut?: string
-  /** The action shows the claim in the analysed paper, so O on it tells the reader so. */
-  inPaper?: boolean
+  /** The action shows the claim in the analysed paper: why there is no cited quote instead, which O reads out. */
+  inPaper?: string
   long?: boolean
   children: ReactNode
 }) {
@@ -331,7 +338,7 @@ function EvidencePanel({
         <TextButton
           onClick={onAction}
           aria-keyshortcuts={shortcut}
-          data-in-paper={inPaper || undefined}
+          data-in-paper={inPaper}
           className="mt-auto inline-flex items-center gap-1 self-start text-ui leading-4.5"
         >
           {action}
@@ -395,7 +402,7 @@ function Passage({ text }: { text: string }) {
   const [full, setFull] = useState(false)
   return (
     <>
-      <blockquote className={cn('font-serif text-reading leading-6 text-ink', text.length > LONG_REASON && !full && 'line-clamp-3')}>“{text}”</blockquote>
+      <blockquote className={cn('max-w-prose font-serif text-reading leading-6 text-ink', text.length > LONG_REASON && !full && 'line-clamp-3')}>“{text}”</blockquote>
       {text.length > LONG_REASON && (
         <MoreToggle open={full} onToggle={() => setFull(!full)}>
           {full ? 'Hide the full passage' : 'Read the full passage'}
@@ -627,7 +634,7 @@ function Answer({
           bar={VERDICT_BAR[verdict.verdict]}
           label={`What the cited paper says${page ? ` · page ${page}` : ''}`}
           action={onShow ? 'Show in cited paper' : undefined}
-          onAction={onShow && (() => showInCitedPaper(verdict, onShow, `Deciding quote in ${name(verdict)}`, verdict.quote, page))}
+          onAction={onShow && (() => showInCitedPaper(verdict, onShow, `${QUOTE_LABELS[verdict.verdict]} in ${name(verdict)}`, verdict.quote, page))}
         >
           “{verdict.quote}”
         </EvidencePanel>
@@ -806,8 +813,14 @@ export function ClaimCard({
   const primary = verdicts.find((v) => v.verdict === standing) ?? verdicts[0]
   const primaryCitation = primary ? claim.citations.find((c) => answersFor(claim, c).verdict === primary) : undefined
   const primaryPage = primary?.quote ? quotePage(primary) : undefined
+  // Both quotes set one way: italic or upright by each one's length made a card of two styles.
+  const longQuotes = sentence.length > LONG_QUOTE || (primary?.quote.length ?? 0) > LONG_QUOTE
   // The chip shows the worst answer only; what the other cited works said goes beside it.
-  const also = verdictTally(verdicts.filter((verdict) => verdict !== primary).map((verdict) => verdict.verdict))
+  const notChecked = primary ? claim.citations.filter((citation) => !answersFor(claim, citation).verdict).length + loose.failures.length : 0
+  const also = [
+    verdictTally(verdicts.filter((verdict) => verdict !== primary).map((verdict) => verdict.verdict)),
+    notChecked ? verdictCountLabel('unchecked', notChecked) : '',
+  ].filter(Boolean).join(', ')
   const alsoText = also && <span className="shrink-0 text-xs text-ink-muted">also {also}</span>
   // Never the stored file name ("10.18653-v1-2023.acl-long.153.pdf"): it means nothing to a reader.
   const primaryName = primaryCitation ? shortRef(primaryCitation) : 'Cited paper'
@@ -963,8 +976,8 @@ export function ClaimCard({
               onAction={showInPaper}
               // With no cited quote to show, O shows the claim's own place in the paper.
               shortcut={primary?.quote ? undefined : 'O'}
-              inPaper
-              long={sentence.length > LONG_QUOTE}
+              inPaper={primary ? `The deciding work (${primaryName}) has no matched passage` : 'No cited work quotes this claim'}
+              long={longQuotes}
             >
               “{withFigureLinks(sentence, ownFigures, openFigure)}”
             </EvidencePanel>
@@ -975,7 +988,7 @@ export function ClaimCard({
               label={`${primaryName}${primaryPage ? ` · page ${primaryPage}` : ''}`}
               action={showCited ? 'Show in cited paper' : undefined}
               shortcut="O"
-              long={primary.quote.length > LONG_QUOTE}
+              long={longQuotes}
               onAction={showCited && (() =>
                 showInCitedPaper(primary, showCited, `Deciding quote in ${primaryName}`, primary.quote, primaryPage)
               )}

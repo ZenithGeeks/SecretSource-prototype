@@ -191,11 +191,16 @@ describe('the results', () => {
     expect(rows()[0]).toHaveFocus()
     fireEvent.keyDown(window, { key: 'J' })
     expect(rows()[1]).toHaveFocus()
-    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+    // The card, not the row, goes to the top, so its scroll margin keeps it under the toolbar.
+    expect(scroll).toHaveBeenLastCalledWith({ block: 'start', behavior: 'smooth' })
+    expect(scroll.mock.contexts.at(-1)).toBe(rows()[1].closest('[data-claim-card]'))
     fireEvent.keyDown(window, { key: 'j' })
     expect(rows()[1]).toHaveFocus() // the last row stays put
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }))
     fireEvent.keyDown(window, { key: 'k' })
     expect(rows()[0]).toHaveFocus()
+    expect(scroll).toHaveBeenLastCalledWith({ block: 'start', behavior: 'auto' })
+    vi.unstubAllGlobals()
     fireEvent.keyDown(window, { key: 'k' })
     expect(rows()[0]).toHaveFocus()
     // @ts-expect-error jsdom has none; leave it missing for the next tests
@@ -293,13 +298,23 @@ describe('the results', () => {
       fireEvent.keyDown(first, { key: 'o' })
       const viewer = screen.getByTestId('viewer')
       expect(viewer).toHaveAttribute('data-paper', 'mine.pdf')
-      expect(screen.getByRole('status')).toHaveTextContent('No quote from a cited work for claim 1 · showing it in this paper')
+      // The deciding work has a verdict but no passage: the words say that, not that nothing quotes it.
+      expect(screen.getByRole('status')).toHaveTextContent('The deciding work (Khattab 2020) has no matched passage · showing claim 1 in this paper')
       // The card keeps its own section and page line; the note goes under the viewer's label.
-      const note = 'No cited work quotes this claim, so this is where it sits in the paper.'
+      const note = 'The deciding work (Khattab 2020) has no matched passage, so this is where the claim sits in the paper.'
       expect(within(viewer).getByText(note)).toBeInTheDocument()
-      expect(within(first.closest('[data-claim-card]') as HTMLElement).queryByText(/No quote from a cited work/)).not.toBeInTheDocument()
+      expect(within(first.closest('[data-claim-card]') as HTMLElement).queryByText(/no matched passage/)).not.toBeInTheDocument()
       fireEvent.keyDown(first, { key: 'j' })
       expect(screen.queryByText(note)).not.toBeInTheDocument()
+    })
+
+    it('says no cited work quotes the claim on O when none has a verdict', () => {
+      load(analysis({ claims: [{ ...refuted, verdicts: [] }, backed] }))
+      view()
+      const first = document.querySelector<HTMLElement>('[data-claim-toggle]')!
+      first.focus()
+      fireEvent.keyDown(first, { key: 'o' })
+      expect(within(screen.getByTestId('viewer')).getByText('No cited work quotes this claim, so this is where the claim sits in the paper.')).toBeInTheDocument()
     })
   })
 
@@ -411,10 +426,27 @@ describe('the results', () => {
   it('narrows to one section, and can show all claims again', () => {
     const onClearSection = vi.fn()
     view({ section: '2', onClearSection })
-    expect(screen.getByText('Section 2 · Method')).toBeInTheDocument()
+    // The section is a chip with its own ×, beside how many claims it leaves.
+    expect(screen.getByRole('button', { name: 'Clear the §2 Method filter' })).toHaveTextContent('§2 Method')
+    expect(screen.getByText('Showing 1 of 2')).toBeInTheDocument()
     expect(screen.queryByText('The refuted claim.')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Clear the section filter' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the §2 Method filter' }))
     expect(onClearSection).toHaveBeenCalledTimes(1)
+  })
+
+  it('says a section has claims, but none of the picked standing, and shows them in one click', () => {
+    const onFilter = vi.fn()
+    view({ section: '2', filter: 'refutes', onFilter, onClearSection: vi.fn() })
+    expect(screen.queryByText('No claims come from this section.')).not.toBeInTheDocument()
+    expect(screen.getByText(/None of this section’s 1 claim is “Source contradicts”/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Show its 1 claim' }))
+    expect(onFilter).toHaveBeenCalledWith(null)
+  })
+
+  it('counts a section’s claims in the plural when it has several', () => {
+    load(analysis({ claims: [refuted, backed, { ...backed, claim: 'Another backed claim.' }] }))
+    view({ section: '2', filter: 'refutes', onFilter: vi.fn() })
+    expect(screen.getByRole('button', { name: 'Show its 2 claims' })).toBeInTheDocument()
   })
 
   it('with a section and a standing both on, one Clear all clears both', () => {
@@ -423,20 +455,21 @@ describe('the results', () => {
     fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
     fireEvent.click(screen.getByRole('button', { name: 'Clear all' }))
     expect(onClearSection).toHaveBeenCalledTimes(1)
-    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear the Source backs it filter' })).not.toBeInTheDocument()
   })
 
   it('names the section without a clear button when the screen gives none', () => {
     view({ section: '2' })
     fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
-    expect(screen.queryByRole('button', { name: 'Clear the section filter' })).not.toBeInTheDocument()
+    expect(within(screen.getByText(/^Showing/).parentElement as HTMLElement).getByText('§2 Method')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear the §2 Method filter' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Clear all' })).not.toBeInTheDocument()
   })
 
   it('says when no claim comes from the section, naming it plainly when the outline lost it', () => {
     view({ section: '9' })
     expect(screen.getByText('No claims come from this section.')).toBeInTheDocument()
-    expect(screen.getByText('Section 9')).toBeInTheDocument()
+    expect(screen.getByText('§9')).toBeInTheDocument()
   })
 
   it('shows the claim sections as plain section numbers when the outline lost them', () => {
@@ -686,6 +719,23 @@ describe('Back and Forward into an analysis', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Close viewer' }))
     expect(window.history.state.analysisView.target).toBeNull()
+  })
+
+  it('keeps the latest page in the entry, a section picked in the contents included', () => {
+    window.history.replaceState(null, '', '/?analysis=a1')
+    view({ jump: { n: '2', title: 'Method', page: 3, at: Date.now() + 60_000 } })
+    expect(window.history.state.analysisView.target).toMatchObject({ label: 'Section 2 · Method', page: 3 })
+  })
+
+  it('keeps a quote still being looked up as its page, without the lookup', () => {
+    window.history.replaceState(null, '', '/?analysis=a1')
+    state.findInPaper.mockReturnValue(new Promise(() => {}))
+    view()
+    fireEvent.click(screen.getByRole('button', { name: /Show in cited paper/ }))
+    const saved = window.history.state.analysisView.target
+    expect(saved).toMatchObject({ paper: 'cited.pdf' })
+    expect(saved).not.toHaveProperty('locating')
+    expect(saved).not.toHaveProperty('lookup')
   })
 
   it('writes nothing once the address names another page, and ignores what another analysis saved', () => {

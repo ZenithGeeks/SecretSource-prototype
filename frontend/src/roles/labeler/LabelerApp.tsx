@@ -14,6 +14,7 @@ import { usePool } from '../../lib/labeling'
 import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { PaperBell } from './components/PaperBell'
+import { revealInPanel } from './components/PassageList'
 import { BlindChecks } from './screens/BlindChecks'
 import { Labels } from './screens/Labels'
 import { Queue } from './screens/Queue'
@@ -184,6 +185,14 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
           {analysis && (
             <a
               href="#claim-decision"
+              onClick={(event) => {
+                // Focus moves without the hash, so Back leaves the paper instead of only dropping "#claim-decision".
+                const decision = document.getElementById('claim-decision')
+                if (!decision) return
+                event.preventDefault()
+                decision.focus({ preventScroll: true })
+                revealInPanel(decision)
+              }}
               className="sr-only rounded-lg bg-accent px-3 py-2 text-ui font-medium text-canvas focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
             >
               Skip to the decision

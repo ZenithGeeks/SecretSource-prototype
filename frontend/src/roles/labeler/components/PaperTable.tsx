@@ -88,6 +88,14 @@ type RowProps = {
   onOpenLabels?: (id: string) => void
 }
 
+/** The address of a paper's workspace or labels, as LabelerApp writes it, for a new tab. */
+function paperHref(page: 'analysis' | 'labels', id: string) {
+  const params = new URLSearchParams(window.location.search)
+  for (const key of ['analysis', 'labels', 'tab']) params.delete(key)
+  params.set(page, id)
+  return `?${params}`
+}
+
 function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabels }: RowProps) {
   const assign = useAssignTopic()
   const retry = useRetryPaper()
@@ -128,16 +136,21 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
     >
       <td className={cn(cell, 'w-full @4xl:w-auto @4xl:min-w-56 @4xl:pl-4')}>
         {ready ? (
-          // The ::after layer stretches this button over the whole row, so a click anywhere opens it,
+          // The ::after layer stretches this link over the whole row, so a click anywhere opens it,
           // and it draws the focus ring around the row instead of the global one around the title.
-          <button
-            type="button"
+          // A link, so the paper can open in a new tab; a plain click stays in the app.
+          <a
+            href={paperHref(viewLabels ? 'labels' : 'analysis', paper.analysis_id)}
             aria-label={`${paper.title} (${action})`}
-            onClick={() => open(paper.analysis_id)}
-            className="text-left font-medium text-ink focus-visible:outline-none! after:absolute after:inset-0 after:rounded-sm hover:text-accent focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
+            onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+              event.preventDefault()
+              open(paper.analysis_id)
+            }}
+            className="block font-medium text-ink focus-visible:outline-none! after:absolute after:inset-0 after:rounded-sm hover:text-accent focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
           >
             <span className="line-clamp-2 wrap-break-word">{paper.title}</span>
-          </button>
+          </a>
         ) : (
           <span className="line-clamp-2 font-medium wrap-break-word text-ink">{paper.title}</span>
         )}

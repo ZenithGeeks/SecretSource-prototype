@@ -214,9 +214,9 @@ describe('narrowing an open analysis to a section', () => {
     renderAnalyses('&analysis=good')
     const contents = await screen.findByRole('navigation', { name: 'Contents of this paper' })
     fireEvent.click(within(contents).getByTitle('1 Introduction, page 1 · 1 claim'))
-    expect(await screen.findByText(/Claims from/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Clear the section filter' }))
-    await waitFor(() => expect(screen.queryByText(/Claims from/)).not.toBeInTheDocument())
+    const chip = await screen.findByRole('button', { name: 'Clear the §1 Introduction filter' })
+    fireEvent.click(chip)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Clear the §1 Introduction filter' })).not.toBeInTheDocument())
   })
 })
 

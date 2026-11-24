@@ -56,9 +56,9 @@ beforeEach(() => {
   gateway.deleteAnalysis.mockReset().mockResolvedValue({ deleted: '' })
 })
 
-/** Opens the "Has a claim" filter and ticks one standing. */
+/** Opens the "Verdict" filter and ticks one standing. */
 function pickStanding(label: string) {
-  const trigger = screen.getByRole('button', { name: /^Has a claim/ })
+  const trigger = screen.getByRole('button', { name: /^Verdict/ })
   if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
   fireEvent.click(screen.getByRole('checkbox', { name: new RegExp(`^${label}`) }))
 }
@@ -175,7 +175,7 @@ describe('the Analyses list', () => {
     const run = analysis({ id: 'x', title: 'Paper', completed: '2026-11-12T14:35:00', claims: [claim] as Analysis['claims'] })
     wrap(<AnalysisList analyses={[run]} onOpen={vi.fn()} />)
     const date = new Date('2026-11-12T14:35:00').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-    expect(screen.getByText(`Finished ${date} · 1 claim`)).toBeInTheDocument()
+    expect(screen.getByText(`Ran ${date} · 1 claim`)).toBeInTheDocument()
   })
 
   it('shows a badge for each standing a paper has, on its own line', () => {
@@ -205,13 +205,32 @@ describe('the Analyses list', () => {
     expect(screen.getByText('1 of 4 papers')).toBeInTheDocument()
   })
 
+  it('shows how many papers are listed beside the heading, and counts the filter in papers the search leaves', () => {
+    const dense = (id: string, title: string) => analysis({ id, title, paper: title, claims: [claim] as Analysis['claims'] })
+    // Two runs of one paper are one row, and one paper in the filter's count.
+    const runs = [dense('d1', 'Dense retrieval'), dense('d0', 'Dense retrieval'), dense('s1', 'Sparse retrieval'), ...list.slice(1)]
+    wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
+    expect(screen.getByText('5 papers')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Verdict' }))
+    const count = () => within(screen.getByRole('group', { name: 'Verdict' })).getByRole('checkbox').parentElement?.textContent
+    expect(count()).toBe('Source contradicts2')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'sparse' } })
+    expect(count()).toBe('Source contradicts1')
+    expect(screen.getByText('1 of 5 papers')).toBeInTheDocument()
+  })
+
+  it('says 1 paper for a list of one', () => {
+    wrap(<AnalysisList analyses={[analysis({ title: 'Paper' })]} onOpen={vi.fn()} />)
+    expect(screen.getByText('1 paper')).toBeInTheDocument()
+  })
+
   it('offers one filter per standing that needs reading and some paper has', () => {
     const silent = { claim: 's', citations: [], verdicts: [{ verdict: 'insufficient' }] }
     const backed = { claim: 'b', citations: [], verdicts: [{ verdict: 'supports' }] }
     const runs = [...list, analysis({ id: 'a5', paper: '10.5/quiet', title: 'Quiet one', claims: [silent, backed] as Analysis['claims'] })]
     wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Has a claim' }))
-    const group = screen.getByRole('group', { name: 'Has a claim' })
+    fireEvent.click(screen.getByRole('button', { name: 'Verdict' }))
+    const group = screen.getByRole('group', { name: 'Verdict' })
     expect(within(group).getAllByRole('checkbox').map((box) => box.parentElement?.textContent)).toEqual([
       'Source contradicts1',
       'Source is silent1',
@@ -233,7 +252,7 @@ describe('the Analyses list', () => {
 
   it('has no filter when no paper has a claim that needs reading', () => {
     wrap(<AnalysisList analyses={list.slice(1)} onOpen={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: 'Has a claim' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Verdict' })).not.toBeInTheDocument()
   })
 
   it('stops filtering by a standing once its last paper is gone', () => {
@@ -247,13 +266,13 @@ describe('the Analyses list', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(3)
   })
 
-  it('clears the Has a claim filter from the × beside it, which shows only while a standing is picked', () => {
+  it('clears the verdict filter from the × beside it, which shows only while a standing is picked', () => {
     wrap(<AnalysisList analyses={list} onOpen={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: 'Clear the Has a claim filter' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear the verdict filter' })).not.toBeInTheDocument()
     pickStanding('Source contradicts')
-    fireEvent.click(screen.getByRole('button', { name: 'Clear the Has a claim filter' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the verdict filter' }))
     expect(screen.getAllByRole('listitem')).toHaveLength(4)
-    expect(screen.queryByRole('button', { name: 'Clear the Has a claim filter' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear the verdict filter' })).not.toBeInTheDocument()
   })
 
   it('names the search alone when a search leaves nothing and no filter is on', () => {
@@ -310,7 +329,7 @@ describe('a failed run', () => {
   it('offers a later finished run of the same paper, dated by when it ended, and opens it', () => {
     const completed = '2026-11-12T18:32:00'
     const onOpen = renderWithList([analysis({ id: 'later', completed, started: '2026-11-12T18:00:00' }), failed])
-    expect(screen.getByText(`Finished ${shortDate(new Date(completed))}`)).toBeInTheDocument()
+    expect(screen.getByText(`Ran ${shortDate(new Date(completed))}`)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Open the finished run' }))
     expect(onOpen).toHaveBeenCalledWith('later')
     // Running it again is still possible, but as a link, no longer a button beside the main action.
@@ -333,13 +352,13 @@ describe('a failed run', () => {
   it('leaves the date out when the later run has no usable time', () => {
     renderWithList([analysis({ id: 'later', started: 'not a date' }), failed])
     expect(screen.getByRole('button', { name: 'Open the finished run' })).toBeInTheDocument()
-    expect(screen.queryByText(/^(Finished|Started|Ran)/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^(Started|Ran)/)).not.toBeInTheDocument()
   })
 
   it('leaves the date out when the later run has neither an end nor a start', () => {
     renderWithList([analysis({ id: 'later' }), failed])
     expect(screen.getByRole('button', { name: 'Open the finished run' })).toBeInTheDocument()
-    expect(screen.queryByText(/^(Finished|Started|Ran)/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^(Started|Ran)/)).not.toBeInTheDocument()
   })
 
   it('offers nothing when the newest finished run of the paper is older than this one', () => {
@@ -766,7 +785,7 @@ describe('the order and the memory of the Analyses list', () => {
       analysis({ id: 'new', title: 'Paper', completed: '2026-11-12T10:00:00', claims: [supports] }),
     ]
     wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: /^Has a claim/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Verdict/ }))
     expect(screen.getByRole('checkbox', { name: /^Source backs it/ })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: /^Source contradicts/ })).not.toBeInTheDocument()
   })
@@ -794,7 +813,7 @@ describe('the order and the memory of the Analyses list', () => {
     const runs = [analysis({ id: 'x', title: 'Dense retrieval', claims: [claim] }), analysis({ id: 'y', paper: '10.1/other', title: 'Other paper' })]
     wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
     expect(screen.getByRole('searchbox', { name: 'Search your analyses' })).toHaveValue('dense')
-    expect(screen.getByRole('button', { name: /^Has a claim/ })).toHaveTextContent('Source contradicts')
+    expect(screen.getByRole('button', { name: /^Verdict/ })).toHaveTextContent('Source contradicts')
     expect(screen.queryByRole('button', { name: /Other paper/ })).not.toBeInTheDocument()
     expect(window.scrollTo).toHaveBeenCalledWith(0, 340)
   })
@@ -812,7 +831,7 @@ describe('the order and the memory of the Analyses list', () => {
     window.history.replaceState(null, '', '/?standing=named')
     const runs = [analysis({ id: 'x', title: 'Dense retrieval', claims: [claim] }), analysis({ id: 'y', paper: '10.9/tool', title: 'Own tool', claims: [named] as unknown as Analysis['claims'] })]
     wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
-    expect(screen.getByRole('button', { name: /^Has a claim/ })).toHaveTextContent('Names a tool or dataset')
+    expect(screen.getByRole('button', { name: /^Verdict/ })).toHaveTextContent('Names a tool or dataset')
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
     expect(screen.getByRole('button', { name: /Own tool/ })).toBeInTheDocument()
   })
@@ -828,6 +847,21 @@ describe('the order and the memory of the Analyses list', () => {
     unmount()
     wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
     expect(earlier()).toHaveAttribute('open')
+  })
+
+  it('keeps an opened earlier-runs group in the history entry when the reader leaves without a row', () => {
+    const runs = [analysis({ id: 'new', title: 'Paper' }), analysis({ id: 'old', title: 'Paper' })]
+    const { unmount } = wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
+    const earlier = () => screen.getByText('1 earlier run').closest('details') as HTMLDetailsElement
+    earlier().open = true
+    fireEvent(earlier(), new Event('toggle'))
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'pap' } })
+    // Left from the sidebar or the nav: no row click saved anything, yet the entry has both.
+    expect(window.history.state.analysisList).toMatchObject({ query: 'pap', openGroups: ['new'] })
+    unmount()
+    wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
+    expect(earlier()).toHaveAttribute('open')
+    expect(screen.getByRole('searchbox')).toHaveValue('pap')
   })
 
   it('forgets an earlier-runs group once the reader closes it again', () => {

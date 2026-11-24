@@ -206,13 +206,14 @@ export function countsText(claims: Claim[]): string {
     .join(' · ')
 }
 
-/** "Finished 8 Nov 2026, 18:35", "Started …" for a run that has not finished, or "Ran …" for a
- * finished run from before finish times were kept: the one time every screen names a run by.
- * Empty when the run has no readable time. */
+/** "Ran 8 Nov 2026, 18:35" for a finished run, or "Started …" for one that has not finished: the
+ * one time every screen names a run by. A finished run shows when it finished, or when it started
+ * if it is from before finish times were kept, so one word fits both. Empty when the run has no
+ * readable time. */
 export function runTime(analysis: Analysis): string {
   const time = runDate(analysis)
   if (!time) return ''
-  const word = analysis.status !== 'done' ? 'Started' : analysis.completed ? 'Finished' : 'Ran'
+  const word = analysis.status === 'done' ? 'Ran' : 'Started'
   return `${word} ${new Date(time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
 }
 

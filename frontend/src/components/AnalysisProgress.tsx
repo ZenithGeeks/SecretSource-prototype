@@ -58,13 +58,19 @@ const HEADLINE = ['Reading the paper', 'Finding the claims', 'Matching citations
 function StageTile({ tile }: { tile: Tile }) {
   const current = tile.state === 'current'
   return (
-    <li className={cn('flex min-w-0 items-center gap-2.5 rounded-xl px-3 py-2.5', current ? 'bg-accent-soft' : 'bg-neutral-soft')}>
+    // The step a run stopped at is a warning, in the amber the app already uses, not grey or accent.
+    <li
+      className={cn(
+        'flex min-w-0 items-center gap-2.5 rounded-xl px-3 py-2.5',
+        current ? 'bg-accent-soft' : tile.state === 'failed' ? 'bg-insufficient-soft' : 'bg-neutral-soft',
+      )}
+    >
       {tile.state === 'done' ? (
         <CheckCircle2 className="size-4 shrink-0 text-supports" aria-hidden="true" />
       ) : current ? (
         <Loader2 className="size-4 shrink-0 animate-spin text-accent" aria-hidden="true" />
       ) : tile.state === 'failed' ? (
-        <AlertCircle className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+        <AlertCircle className="size-4 shrink-0 text-insufficient" aria-hidden="true" />
       ) : (
         <Circle className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
       )}
@@ -124,7 +130,9 @@ export function AnalysisProgress({
   when?: string
 }) {
   const running = status === 'running'
-  const [details, setDetails] = useState(false)
+  // A stopped run opens on its steps, so the one it stopped at shows without a click.
+  const [detailsPicked, setDetails] = useState<boolean | null>(null)
+  const details = detailsPicked ?? status === 'error'
   const [allSteps, setAllSteps] = useState(false)
   // In seconds, ticking every second while running, so the elapsed time moves.
   const now = useNow(1000, running) / 1000
@@ -186,6 +194,8 @@ export function AnalysisProgress({
       <header className="flex items-center gap-2">
         <p className="flex-1 text-reading leading-5 font-semibold" aria-live="polite">
           {running ? HEADLINE[Math.max(0, current)] : progress.error ? 'Stopped' : 'Finished'}
+          {/* Open by default, a stopped run still says which run it is, as its folded line does. */}
+          {!running && when && <span className="font-normal text-ink-muted"> · {when.replace(/^Started/, 'started')}</span>}
         </p>
         {running ? (
           <p className="text-ui text-ink-muted tabular-nums">{percent}%</p>
@@ -204,7 +214,10 @@ export function AnalysisProgress({
         aria-valuenow={filled}
         className="h-1.5 w-full overflow-hidden rounded-sm bg-neutral-soft"
       >
-        <div className="h-full rounded-sm bg-accent transition-[width] duration-500" style={{ width: `${filled}%` }} />
+        <div
+          className={cn('h-full rounded-sm transition-[width] duration-500', progress.error ? 'bg-insufficient' : 'bg-accent')}
+          style={{ width: `${filled}%` }}
+        />
       </div>
 
       <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
