@@ -408,7 +408,7 @@ describe('LabelForm', () => {
 
   it('shows who else labeled the pair, and sends each change', () => {
     const onChange = form({ others: ['Somchai', 'Ann'] })
-    expect(screen.getByText('Also labeled by Somchai, Ann. Their levels are not shown here, so choose yours on your own.')).toBeInTheDocument()
+    expect(screen.getByText('Also labeled by Somchai, Ann. Their levels are hidden.')).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: '3 · Clear' })).toHaveAccessibleDescription('The passage backs the claim, with a gap in scope or detail.')
     expect(screen.getByText('How to judge')).toBeInTheDocument()
 

@@ -99,6 +99,7 @@ const comparison = {
   ],
 }
 
+import { saveAskOpen } from '../src/lib/askSession'
 import { LabelerApp } from '../src/roles/labeler/LabelerApp'
 
 function renderApp(search = '', props: Parameters<typeof LabelerApp>[0] = {}) {
@@ -275,15 +276,23 @@ describe('the Labeler shell', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /Close/ }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /Settings/ })).not.toBeInTheDocument())
   })
-  it('drops Ask AI from the toolbar while a blind check is open, and brings it back after', async () => {
+  it('hides the Ask button and an open panel during a blind check, and restores them after', async () => {
     const before = { ...session }
     Object.assign(session, { blind: true })
     try {
-      renderApp('?analysis=a1')
-      await screen.findByRole('heading', { name: 'Paper A' })
-      await waitFor(() => expect(screen.queryByRole('button', { name: /^Ask AI/ })).not.toBeInTheDocument())
+      saveAskOpen(null, true)
+      renderApp('?tab=blind')
+      const panel = () => document.querySelector('aside[aria-label="Ask"]')
+      await waitFor(() => expect(panel()).toBeInTheDocument())
+      fireEvent.click(await screen.findByRole('button', { name: 'Start', exact: true }))
+      await screen.findByText('Method Y improves recall.')
+      await waitFor(() => {
+        expect(screen.queryByRole('button', { name: /^Ask AI/ })).not.toBeInTheDocument()
+        expect(panel()).not.toBeInTheDocument()
+      })
       fireEvent.click(within(sidebar()).getByRole('button', { name: 'Papers to label' }))
       expect(await screen.findAllByRole('button', { name: /^Ask AI/ })).not.toHaveLength(0)
+      expect(panel()).toBeInTheDocument()
     } finally {
       Object.assign(session, before)
       delete (session as { blind?: boolean }).blind

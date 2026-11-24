@@ -31,13 +31,16 @@ describe('radioTabIndex', () => {
 describe('onRadioKeys', () => {
   it('moves focus along the enabled radios without choosing one', () => {
     const chosen: string[] = []
+    const bubble = vi.fn()
     render(
-      <div role="radiogroup" aria-label="Level" onKeyDown={onRadioKeys}>
-        {['One', 'Two', 'Three'].map((name) => (
-          <button key={name} role="radio" aria-checked={false} disabled={name === 'Two'} onClick={() => chosen.push(name)}>
-            {name}
-          </button>
-        ))}
+      <div onKeyDown={bubble}>
+        <div role="radiogroup" aria-label="Level" onKeyDown={onRadioKeys}>
+          {['One', 'Two', 'Three'].map((name) => (
+            <button key={name} role="radio" aria-checked={false} disabled={name === 'Two'} onClick={() => chosen.push(name)}>
+              {name}
+            </button>
+          ))}
+        </div>
       </div>,
     )
     const one = screen.getByRole('radio', { name: 'One' })
@@ -46,7 +49,13 @@ describe('onRadioKeys', () => {
     expect(screen.getByRole('radio', { name: 'Three' })).toHaveFocus()
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
     expect(one).toHaveFocus()
+    expect(bubble).not.toHaveBeenCalled()
+    for (const modifiers of [{ shiftKey: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true }]) {
+      fireEvent.keyDown(one, { key: 'ArrowRight', ...modifiers })
+      expect(one).toHaveFocus()
+    }
     fireEvent.keyDown(one, { key: 'x' })
+    expect(bubble).toHaveBeenCalledTimes(5)
     expect(one).toHaveFocus()
     expect(chosen).toEqual([])
   })

@@ -324,7 +324,7 @@ describe('remaining', () => {
 
   it('names a reference by its id when the list does not know it, and pluralises passages', () => {
     const c = claim({ candidates: [cand('c1', { reference_id: 'zz' }), cand('c2', { reference_id: 'zz' })] })
-    expect(remaining(c, { ...emptyDraft(), status: 'accepted', cands: {} }, [])).toEqual(['2 passages not judged'])
+    expect(remaining(c, { ...emptyDraft(), status: 'accepted', cands: {} }, [])).toEqual(['2 passages not judged', 'Give zz level 1 and a search reason'])
     const judged: Draft = { ...emptyDraft(), status: 'accepted', cands: { c1: 'relevant', c2: 'rejected' } }
     expect(remaining(c, judged, [])).toEqual(['Give zz a level'])
   })

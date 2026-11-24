@@ -28,7 +28,7 @@ export function nextIndex(key: string, at: number, count: number, wrap: boolean)
 export function moveFocus(event: KeyboardEvent<HTMLElement>, selector: string, wrap: boolean) {
   const items = [...event.currentTarget.querySelectorAll<HTMLElement>(selector)]
   const next = nextIndex(event.key, items.indexOf(document.activeElement as HTMLElement), items.length, wrap)
-  if (next === null) return null
+  if (next === null || !items[next]) return null
   event.preventDefault()
   items[next].focus()
   return items[next]
@@ -38,7 +38,9 @@ export function moveFocus(event: KeyboardEvent<HTMLElement>, selector: string, w
  * chooses it. Choosing is not tied to moving, because a choice here is a label decision and
  * some groups fold away once one is made. */
 export function onRadioKeys(event: KeyboardEvent<HTMLElement>) {
-  moveFocus(event, '[role="radio"]:not(:disabled)', true)
+  // Leave modified keys (such as Shift+Left/Right in Workspace) to the surrounding screen.
+  if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return
+  if (moveFocus(event, '[role="radio"]:not(:disabled)', true)) event.stopPropagation()
 }
 
 /** The Tab stop of a radio group is its checked radio, or the first one while none is. */

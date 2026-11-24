@@ -41,9 +41,9 @@ function runDetails(analysis: Analysis) {
   return [runTime(analysis), claims].filter(Boolean).join(' · ')
 }
 
-/** The search, filter, open earlier-runs groups and scroll a reader leaves the list with, kept
+/** The search, open earlier-runs groups and scroll a reader leaves the list with, kept
  * in its history entry so Back from an analysis finds the list as it was. */
-type ListState = { query: string; shows: Standing[]; openGroups: string[]; scrollY: number }
+type ListState = { query: string; openGroups: string[]; scrollY: number }
 
 function savedState(): ListState | undefined {
   return (window.history.state as { analysisList?: ListState } | null)?.analysisList
@@ -68,7 +68,7 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
   const [saved] = useState(savedState)
   const [query, setQuery] = useState(saved?.query ?? '')
   const [picked, setPicked] = useState<Standing[]>(
-    () => saved?.shows ?? standingsIn(new URLSearchParams(window.location.search).get('standing')),
+    () => standingsIn(new URLSearchParams(window.location.search).get('standing')),
   )
   const [openGroups, setOpenGroups] = useState<string[]>(saved?.openGroups ?? [])
   // Back from an analysis returns to where the reader was; anything else starts at the top.
@@ -76,7 +76,7 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
     window.scrollTo(0, saved?.scrollY ?? 0)
   }, [saved])
   const open = (id: string) => {
-    const state: ListState = { query, shows: picked, openGroups, scrollY: window.scrollY }
+    const state: ListState = { query, openGroups, scrollY: window.scrollY }
     window.history.replaceState({ ...window.history.state, analysisList: state }, '')
     onOpen(id)
   }
@@ -85,16 +85,17 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
     writeStandingParam(next)
   }
   // Every standing some paper has: the same set an analysis's tiles offer.
-  const runs = groupRuns(analyses).map(({ run }) => run)
+  const ordered = [...analyses].sort(byRunTime)
+  const runs = groupRuns(ordered).map(({ run }) => run)
   const kinds = STANDINGS.filter((kind) => runs.some((run) => has(run, kind)))
   // A standing whose last paper was deleted has no option left, so it stops filtering.
   const shows = picked.filter((kind) => kinds.includes(kind))
   const searchId = useId()
   const words = query.trim().toLowerCase()
   const shown = words
-    ? analyses.filter((analysis) => `${analysisLabel(analysis)} ${analysis.paper}`.toLowerCase().includes(words))
-    : analyses
-  const papers = groupRuns([...shown].sort(byRunTime))
+    ? ordered.filter((analysis) => `${analysisLabel(analysis)} ${analysis.paper}`.toLowerCase().includes(words))
+    : ordered
+  const papers = groupRuns(shown)
     .filter(({ run }) => !shows.length || shows.some((kind) => has(run, kind)))
     .sort((a, b) => byRunTime(a.run, b.run))
 

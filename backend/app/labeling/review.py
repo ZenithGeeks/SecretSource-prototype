@@ -109,9 +109,13 @@ def rule_findings(claim: dict, saved: Saved) -> list[Finding]:
             text = "Passages here are marked relevant, but there is no level."
             found.append(Finding(target=target, tone="flags", text=text))
         elif label and not passages:
-            text = "This reference has a level, but none of its passages is marked relevant."
-            found.append(Finding(target=target, tone="flags", text=text))
-        # Level 1 says the passages do not back the claim; it needs no sentence to point at.
+            if label.get("evidence") != "1":
+                text = "No passage is marked relevant, so this reference needs level 1."
+                found.append(Finding(target=target, tone="flags", text=text))
+            elif not label.get("rationale", "").strip():
+                text = "Say what you looked for and where when no passage is relevant."
+                found.append(Finding(target=target, tone="flags", text=text))
+        # A level 1 supported by a marked passage needs no further reason from this check.
         elif label and label.get("evidence") != "1" and not label.get("rationale", "").strip():
             text = f"Level {label.get('evidence')} has no reason written. Which sentence backs it?"
             found.append(Finding(target=target, tone="asks", text=text))

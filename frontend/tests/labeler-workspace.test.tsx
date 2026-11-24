@@ -307,7 +307,7 @@ describe('the keyboard', () => {
     expect(screen.getByRole('radio', { name: '4 · Strong' })).toHaveAttribute('aria-checked', 'true')
   })
 
-  it('does not give a level to a reference with no relevant passage', async () => {
+  it('does not give level 3 to a reference with no relevant passage', async () => {
     await open()
     key('k')
     key('r') // focus moves on to the second passage of Ref B
@@ -599,7 +599,7 @@ describe('passages and levels in the panel', () => {
     await open()
     key('k')
     key('r')
-    expect(screen.getByText('Also labeled by Somchai. Their levels are not shown here, so choose yours on your own.')).toBeInTheDocument()
+    expect(screen.getByText('Also labeled by Somchai. Their levels are hidden.')).toBeInTheDocument()
   })
 })
 

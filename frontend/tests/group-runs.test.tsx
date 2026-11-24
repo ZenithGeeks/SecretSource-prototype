@@ -36,10 +36,30 @@ describe('groupRuns', () => {
     expect(ids(groups[4].earlier)).toEqual(['titled-punctuation-id'])
   })
 
+  it('keeps identifier punctuation and joins prefixed forms of the same id', () => {
+    const groups = groupRuns([
+      run({ id: 'dash', paper: 'doi:10.1/a-b' }),
+      run({ id: 'dot', paper: '10.1/a.b' }),
+      run({ id: 'older-dash', paper: 'https://dx.doi.org/10.1/A-B' }),
+    ])
+    expect(ids(groups.map(({ run }) => run))).toEqual(['dash', 'dot'])
+    expect(ids(groups[0].earlier)).toEqual(['older-dash'])
+  })
+
+  it('groups old titles for one id under its newest title, including runs with another id', () => {
+    const groups = groupRuns([
+      run({ id: 'new', paper: 'arxiv:1234.1', title: 'Published title' }),
+      run({ id: 'old', paper: 'https://arxiv.org/abs/1234.1', title: 'Working title' }),
+      run({ id: 'doi', paper: '10.1/paper', title: 'Published Title!' }),
+    ])
+    expect(groups).toHaveLength(1)
+    expect(ids(groups[0].earlier)).toEqual(['old', 'doi'])
+  })
+
   it('keeps papers in the order of their first run', () => {
     const papers = groupRuns([
       run({ id: 'a1', title: 'A' }),
-      run({ id: 'b1', title: 'B' }),
+      run({ id: 'b1', paper: '10.1/b', title: 'B' }),
       run({ id: 'a2', title: 'A' }),
     ])
     expect(papers.map(({ run: main }) => main.id)).toEqual(['a1', 'b1'])

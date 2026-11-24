@@ -14,10 +14,10 @@ import { csvText } from './csv'
  * else the title another of `runs` has for the same paper (a run stopped before the paper was
  * read has none), else the uploaded file's name, else the paper id. */
 export function analysisLabel(analysis: Analysis, runs: Analysis[] = []): string {
-  const paper = normalise(analysis.paper)
+  const paper = paperIdentifier(analysis.paper)
   return (
     analysis.title ||
-    runs.find((run) => run.title && normalise(run.paper) === paper)?.title ||
+    runs.find((run) => run.title && paperIdentifier(run.paper) === paper)?.title ||
     analysis.file?.split(/[\\/]/).pop() ||
     analysis.paper
   )
@@ -26,8 +26,14 @@ export function analysisLabel(analysis: Analysis, runs: Analysis[] = []): string
 /** A paper's runs: the one its row opens, and the others, newest first. */
 export type PaperRuns = { run: Analysis; earlier: Analysis[] }
 
-/** Lowercase words only, so "arXiv:2004.14974" and "2004.14974" compare equal. */
-function normalise(text: string) {
+const PAPER_PREFIX = /^(https?:\/\/)?(www\.)?(arxiv\.org\/abs\/|(?:dx\.)?doi\.org\/)|^(arxiv|doi):/
+
+function paperIdentifier(text: string) {
+  return text.trim().toLowerCase().replace(PAPER_PREFIX, '').trim()
+}
+
+/** Compare titles by Unicode words, ignoring case and punctuation. */
+function normaliseTitle(text: string) {
   return text
     .normalize()
     .toLowerCase()
@@ -41,20 +47,21 @@ function normalise(text: string) {
  * newest run.
  *
  * The same paper can come back under another id (a DOI one time, an arXiv link the next), so
- * runs are matched by title, and a run without a title (a stopped one) by its id, joined to the
- * title another run of that id has. A row opens a running run, else the newest finished one,
+ * runs with the same id use its newest usable title. Equivalent titles also join runs under
+ * different ids. A row opens a running run, else the newest finished one,
  * else the newest.
  */
 export function groupRuns(analyses: Analysis[]): PaperRuns[] {
   const titleOf = new Map<string, string>()
   for (const analysis of analyses) {
-    const title = normalise(analysis.title ?? '')
-    if (title) titleOf.set(normalise(analysis.paper) || analysis.paper, title)
+    const id = paperIdentifier(analysis.paper)
+    const title = normaliseTitle(analysis.title ?? '')
+    if (title && !titleOf.has(id)) titleOf.set(id, title)
   }
   const papers = new Map<string, Analysis[]>()
   for (const analysis of analyses) {
-    const id = normalise(analysis.paper) || analysis.paper
-    const title = normalise(analysis.title ?? '') || titleOf.get(id)
+    const id = paperIdentifier(analysis.paper)
+    const title = titleOf.get(id)
     const key = title ? `title:${title}` : `id:${id}`
     papers.set(key, [...(papers.get(key) ?? []), analysis])
   }

@@ -42,6 +42,7 @@ import {
   readUnsaved,
   relevantPassages,
   remaining,
+  referencesOf,
   sameDraft,
   unresolvedCitations,
   saveNextTarget,
@@ -564,7 +565,7 @@ function Body({
 
   // Keys: Ctrl/⌘+S saves; K/E/X decide the claim; R/N judge the focused passage; J/U (or the
   // up and down arrows) move between passages; [ ] (or Shift+left/right) between claims;
-  // 1-4 label the reference in view, once it has a relevant passage.
+  // 1-4 label the reference in view; without a relevant passage only 1 applies.
   const refId = claim && focus ? session.references.find((r) => r.file === focus.file)?.reference_id : undefined
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -620,8 +621,8 @@ function Body({
         if (target === '#claim-decision') setDecisionTurns((n) => n + 1)
         return
       }
-      const ref = cited.find((r) => r.reference_id === refId)
-      const refTag = referenceTag(ref, session.markers)
+      // An added passage on an unread reference does not have a PDF.
+      const labelRefId = refId ?? draft.added.find((p) => focus?.key === `added:${p.reference_id}:${p.passage}`)?.reference_id
       // A handled letter must not also be typed: E opens the edit box, which takes the focus.
       if (['k', 'e', 'x', 'r', 'n', 'l', 'm', 'h', '1', '2', '3', '4'].includes(key)) event.preventDefault()
       if (key === 'k') keyed({ status: 'accepted' }, DECISION_WORDS.accepted)
@@ -648,14 +649,17 @@ function Body({
         const index = nextUnfinishedIndex(claims, drafts, saved, cited, position)
         if (index != null) select(claims[index].claim_id)
       }
-      else if (['1', '2', '3', '4'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
-        const label = draft.labels[refId] ?? emptyLabel()
-        const level = Number(key) as Level
-        keyed({ labels: { ...draft.labels, [refId]: { ...label, evidence: level } } }, levelWords(refTag, level))
-      } else if (['l', 'm', 'h'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
-        const label = draft.labels[refId] ?? emptyLabel()
-        const confidence = key === 'l' ? 'low' : key === 'm' ? 'medium' : 'high'
-        keyed({ labels: { ...draft.labels, [refId]: { ...label, confidence } } }, confidenceWords(refTag, confidence))
+      else if (deciding && labelRefId && referencesOf(claim, draft).includes(labelRefId)) {
+        const label = draft.labels[labelRefId] ?? emptyLabel()
+        const refTag = referenceTag(cited.find((r) => r.reference_id === labelRefId), session.markers)
+        if (['1', '2', '3', '4'].includes(key)) {
+          const level = Number(key) as Level
+          if (level !== 1 && !relevantPassages(claim, draft, labelRefId).length) return
+          keyed({ labels: { ...draft.labels, [labelRefId]: { ...label, evidence: level } } }, levelWords(refTag, level))
+        } else if (['l', 'm', 'h'].includes(key)) {
+          const confidence = key === 'l' ? 'low' : key === 'm' ? 'medium' : 'high'
+          keyed({ labels: { ...draft.labels, [labelRefId]: { ...label, confidence } } }, confidenceWords(refTag, confidence))
+        }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -828,22 +832,21 @@ function Body({
 
   // Everything done to one claim, in the order it is done. Wide screens keep it beside the
   // papers, scrolling by itself, so the papers never move while you work.
-  // A reference with a passage you called relevant needs a level; the others are optional.
   const grade = (id: string) => {
-    const tag = referenceTag(cited.find((r) => r.reference_id === id), session.markers)
-    return relevantPassages(claim, draft, id).length > 0 || draft.labels[id]?.evidence ? (
+    const ref = cited.find((r) => r.reference_id === id)
+    const tag = referenceTag(ref, session.markers)
+    return (
       <LabelForm
         tag={tag}
-        title={cited.find((r) => r.reference_id === id)?.label ?? id}
+        title={ref?.label ?? id}
         active={id === refId}
         label={draft.labels[id]}
+        noRelevantPassage={!relevantPassages(claim, draft, id).length}
         others={session.others[`${claim.claim_id}|${id}`] ?? []}
         onChange={(label) =>
           patch({ labels: { ...draft.labels, [id]: label } }, labelChangeWords(tag, draft.labels[id] ?? emptyLabel(), label))
         }
       />
-    ) : (
-      <p className="text-sm text-ink-muted">Mark a passage relevant to grade this reference</p>
     )
   }
 
