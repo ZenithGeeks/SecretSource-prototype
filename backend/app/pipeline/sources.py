@@ -9,6 +9,8 @@ they can be indexed.
 
 import os
 import re
+import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -1245,7 +1247,9 @@ def _download(pdf_url: str, name: str) -> Path:
         size = 0
         head = b""
         try:
-            with partial.open("wb") as handle:
+            # On Unix the spool has no directory entry. If the process dies during
+            # the network transfer, the OS reclaims it when it closes the descriptor.
+            with tempfile.TemporaryFile(dir=path.parent) as spool:
                 for chunk in response.iter_content(chunk_size=64 * 1024):
                     if not chunk:
                         continue
@@ -1254,21 +1258,23 @@ def _download(pdf_url: str, name: str) -> Path:
                         raise NotDownloadable(f"the PDF is larger than 100 MB: {pdf_url}")
                     if len(head) < 1024:
                         head += chunk
-                    handle.write(chunk)
-            content_type = response.headers.get("Content-Type", "").lower()
-            prefix = head[:1024].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
-            is_html = (
-                "html" in content_type
-                or prefix.startswith((b"<!doctype html", b"<html"))
-                or b"<html" in prefix[:512]
-            )
-            if not head.startswith(b"%PDF"):
-                if is_html:
-                    raise WebSource(f"a web page, not a paper: {pdf_url}")
-                raise NotDownloadable(f"not a PDF: {pdf_url}")
-            # Written aside, then renamed, as save_upload does: another worker that finds this
-            # name never reads half a file. The link goes next to the PDF first, so a PDF on
-            # disk always says where it came from (#424).
+                    spool.write(chunk)
+                content_type = response.headers.get("Content-Type", "").lower()
+                prefix = head[:1024].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+                is_html = (
+                    "html" in content_type
+                    or prefix.startswith((b"<!doctype html", b"<html"))
+                    or b"<html" in prefix[:512]
+                )
+                if not head.startswith(b"%PDF"):
+                    if is_html:
+                        raise WebSource(f"a web page, not a paper: {pdf_url}")
+                    raise NotDownloadable(f"not a PDF: {pdf_url}")
+                # Only name a staging file once the transfer is complete and validated.
+                spool.seek(0)
+                with partial.open("wb") as handle:
+                    shutil.copyfileobj(spool, handle, length=64 * 1024)
+            # Put the source link in place before publishing the complete PDF (#424).
             _write_whole(_link_file(path), _safe_locator(pdf_url).encode())
             os.replace(partial, path)
         except Exception:

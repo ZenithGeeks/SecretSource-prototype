@@ -120,3 +120,28 @@ def test_empty_chunks_are_skipped_and_later_chunks_are_not_reread_into_the_head(
     path = sources._download("https://example.org/chunked.pdf", "chunked")
 
     assert path.read_bytes() == body
+
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix temporary files have no directory entry")
+def test_streaming_download_has_no_named_partial_while_waiting_for_the_body(monkeypatch, tmp_path):
+    monkeypatch.setattr(sources, "PAPERS_DIR", tmp_path)
+
+    class Interrupted(_Response):
+        def iter_content(self, chunk_size=1):
+            yield b"%PDF-1.7 " + b"x" * chunk_size
+            assert list(tmp_path.iterdir()) == []
+            raise ConnectionError("response interrupted")
+
+        def close(self):
+            closed.append(True)
+
+    closed = []
+    fake = type("requests", (), {"get": staticmethod(lambda *args, **kwargs: Interrupted())})
+    monkeypatch.setitem(sys.modules, "requests", fake)
+
+    with pytest.raises(ConnectionError, match="response interrupted"):
+        sources._download("https://example.org/interrupted.pdf", "interrupted")
+
+    assert closed == [True]
+    assert list(tmp_path.iterdir()) == []
