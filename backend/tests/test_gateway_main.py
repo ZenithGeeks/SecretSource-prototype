@@ -414,7 +414,7 @@ def test_a_recheck_passes_source_outcome_to_the_check(monkeypatch):
             "citations": [{"ref": "b1", "key": "s1"}],
             "verdicts": [{"cited": "s1", "verdict": "refutes"}],
         }],
-        "stages": [],
+        "stages": [{"stage": "rechecking", "ref": "b1", "attempt": "current"}],
     }
     monkeypatch.setattr(
         main, "prepare_source", lambda source, expected=None: {
@@ -434,7 +434,7 @@ def test_a_recheck_passes_source_outcome_to_the_check(monkeypatch):
     )
     monkeypatch.setattr("app.pipeline.sources.lookup_key", lambda citation: citation["key"])
 
-    asyncio.run(main._recheck_reference("g-recheck-outcome", "b1", Path("paper.pdf")))
+    asyncio.run(main._recheck_reference("g-recheck-outcome", "b1", Path("paper.pdf"), "current"))
 
     assert received == [outcome]
     assert main.analyses["g-recheck-outcome"]["claims"][0]["verdicts"][0]["source_outcome"] == outcome
@@ -533,20 +533,58 @@ def test_lookup_with_a_plain_dict_marks_a_stuck_recheck_and_leaves_a_finished_on
     assert main.lookup("stuck")["stages"][-1]["stage"] == "recheck-failed"
     assert main.lookup("quiet") is quiet
     assert main.lookup("gone") is None
-    assert saved == [stuck]
+    assert saved == []
+    assert main.analyses == {"quiet": quiet}
 
 
-def test_lookup_marks_a_stuck_recheck_when_the_row_is_loaded_from_the_store(monkeypatch):
-    stuck = _row("a1", stages=[{"stage": "rechecking", "ref": "b13", "at": 1.0}])
+def test_cold_recheck_recovery_saves_only_after_an_owner_load(monkeypatch):
+    stuck = _row("a1", "ada", stages=[{"stage": "rechecking", "ref": "b13", "at": 1.0}])
     saved = []
-    monkeypatch.setattr(main.store, "load", lambda analysis_id: stuck)
+    monkeypatch.setattr(main.store, "load", lambda analysis_id: {**stuck, "stages": stuck["stages"][:]})
     monkeypatch.setattr(main.store, "save", saved.append)
+    hold = main._hold
 
-    found = main.lookup("a1")
+    def publish(row):
+        assert row["stages"][-1]["stage"] == "recheck-failed"
+        return hold(row)
 
-    assert found["stages"][-1]["stage"] == "recheck-failed"
+    monkeypatch.setattr(main, "_hold", publish)
+    with pytest.raises(main.HTTPException) as denied:
+        main._owned("a1", "bo")
+    assert denied.value.status_code == 404
+    assert saved == []
+    assert "a1" not in main.analyses
+    assert main.lookup("a1")["stages"][-1]["stage"] == "recheck-failed"
+    assert saved == []
+    assert "a1" not in main.analyses
+
+    found = main._owned("a1", "ada")
+
     assert found["stages"][-1]["message"] == "interrupted by a restart"
-    assert saved == [stuck]
+    assert saved == [found]
+    assert main.analyses["a1"] is found
+
+
+def test_recovery_closes_the_pending_attempt_and_uses_the_gateway_saver(monkeypatch):
+    stages = [
+        {"stage": "rechecking", "ref": "b13", "attempt": "first"},
+        {"stage": "rechecking", "ref": "b13", "attempt": "latest"},
+        {"stage": "rechecked", "ref": "b13", "attempt": "first"},
+    ]
+    row = _row("a1", "ada", stages=stages)
+    monkeypatch.setattr(main.store, "load", lambda analysis_id: row)
+    monkeypatch.setattr(main.store, "save", lambda row: pytest.fail("bypassed gateway saver"))
+    saved = []
+    monkeypatch.setattr(main, "_save_soon", saved.append)
+
+    async def run():
+        monkeypatch.setattr(main, "_loop", asyncio.get_running_loop())
+        found = await asyncio.to_thread(main._owned, "a1", "ada")
+        assert found["stages"][-1]["stage"] == "recheck-failed"
+        assert found["stages"][-1]["attempt"] == "latest"
+
+    asyncio.run(run())
+    assert saved == ["a1"]
 
 
 def test_loading_an_owner_marks_a_finished_stuck_recheck_and_not_a_running_one(monkeypatch):
@@ -556,6 +594,14 @@ def test_loading_an_owner_marks_a_finished_stuck_recheck_and_not_a_running_one(m
     monkeypatch.setattr(main.store, "load_owned", lambda user: [stuck, running])
     monkeypatch.setattr(main.store, "save", saved.append)
 
+    hold = main._hold
+
+    def publish(row):
+        if row is stuck:
+            assert row["stages"][-1]["stage"] == "recheck-failed"
+        return hold(row)
+
+    monkeypatch.setattr(main, "_hold", publish)
     main.ensure_owner("ada")
 
     assert stuck["stages"][-1]["stage"] == "recheck-failed"

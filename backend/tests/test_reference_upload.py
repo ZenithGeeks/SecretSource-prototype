@@ -387,3 +387,113 @@ def test_a_stuck_rechecking_stage_is_marked_failed_on_restore(monkeypatch):
     assert stuck["stages"][-1]["ref"] == "b13"
     assert finished["stages"][-1]["stage"] == "rechecked"
     assert saved == [stuck]
+
+
+@pytest.mark.parametrize("ending", ["failure", "restart", "legacy_restart"])
+def test_a_retained_uploaded_verdict_stays_private(signed_in, monkeypatch, ending):
+    from pathlib import Path
+
+    from app.labeling import router as labeling
+
+    client, analysis, detached, _ = signed_in
+    ada = {"Authorization": "Bearer token-ada"}
+    bo = {"Authorization": "Bearer token-bo"}
+    monkeypatch.setattr(main, "prepare_source", lambda path: {"status": "ok", "path": path})
+    monkeypatch.setattr(main, "check_prepared", lambda *args: {
+        "status": "ok", "verdict": "supports", "source": Path(args[1]).name,
+        "evidence": [{"text": "p", "page": 1}],
+    })
+
+    def attach(content):
+        response = client.post(
+            "/analyses/a1/references/b13/pdf", files={"file": ("gmres.pdf", content)}, headers=ada,
+        )
+        assert response.status_code == 202
+        return response.json()["pdf"]
+
+    old = attach(b"%PDF-1.4 first")
+    asyncio.run(detached[0])
+    new = attach(b"%PDF-1.4 replacement")
+    if ending == "failure":
+        def crash(*args):
+            raise RuntimeError("check failed")
+
+        monkeypatch.setattr(main, "check_prepared", crash)
+        asyncio.run(detached[1])
+    else:
+        detached[1].close()
+        if ending == "legacy_restart":
+            del analysis["uploaded_reference_pdfs"]
+            for stage in analysis["stages"]:
+                stage.pop("attempt", None)
+        main.store.save(analysis)
+        main.restore()
+        analysis = main.analyses["a1"]
+
+    assert analysis["stages"][-1]["stage"] == "recheck-failed"
+    assert analysis["pdfs"]["b13"] == new
+    assert analysis["claims"][0]["verdicts"][0]["source"] == old
+    teammate = labeling.build_session(analysis, "user-bo")
+    assert teammate["references"][0]["file"] == ""
+    assert teammate["references"][1]["file"] == "x.pdf"
+    assert teammate["claims"][0]["candidates"][0]["reference_file"] == ""
+    assert labeling._reference_path(analysis, Path(old).stem, "user-bo") is None
+    assert labeling._reference_path(analysis, Path(old).stem, "user-ada") is not None
+    assert client.get(f"/papers/{old}", headers=ada).status_code == 200
+    assert client.get(f"/papers/{old}", headers=bo).status_code == 404
+
+
+@pytest.mark.parametrize("ending", ["cancel", "replace"])
+def test_only_the_current_recheck_can_finish_the_reference(api, monkeypatch, ending):
+    client, analysis, detached = api
+    assert upload(client).status_code == 202
+
+    async def run():
+        started = asyncio.Event()
+        finish = asyncio.Event()
+        original = asyncio.to_thread
+
+        async def to_thread(func, *args, **kwargs):
+            if func is main.prepare_source:
+                started.set()
+                await finish.wait()
+                return {"status": "error", "reason": "failed"}
+            return await original(func, *args, **kwargs)
+
+        monkeypatch.setattr(main.asyncio, "to_thread", to_thread)
+        task = asyncio.create_task(detached[0])
+        await started.wait()
+        if ending == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            assert upload(client, content=b"%PDF-1.4 replacement").status_code == 202
+            finish.set()
+            await task
+            await detached[1]
+
+    asyncio.run(run())
+    stages = analysis["stages"]
+    if ending == "cancel":
+        assert [s["stage"] for s in stages] == ["rechecking", "recheck-failed"]
+        assert stages[0]["attempt"] == stages[1]["attempt"]
+    else:
+        assert [s["stage"] for s in stages] == ["rechecking", "rechecking", "rechecked"]
+        assert stages[0]["attempt"] != stages[1]["attempt"] == stages[2]["attempt"]
+
+
+@pytest.mark.parametrize("obsolete", ["superseded", "deleted"])
+def test_an_obsolete_recheck_does_not_start(api, monkeypatch, obsolete):
+    client, analysis, detached = api
+    assert upload(client).status_code == 202
+    if obsolete == "superseded":
+        assert upload(client, content=b"%PDF-1.4 newer").status_code == 202
+        detached[1].close()
+    else:
+        del main.analyses["a1"]
+
+    monkeypatch.setattr(main, "prepare_source", lambda *args: pytest.fail("started obsolete work"))
+    stages = analysis["stages"][:]
+    asyncio.run(detached[0])
+    assert analysis["stages"] == stages

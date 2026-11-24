@@ -121,7 +121,7 @@ def _candidates(claim_id: str, reference_id: str, file: str, hits: list[dict]) -
 
 def _session_file(analysis: dict, file: str, user: str | None) -> str:
     """The PDF name a labeler may be given, or "" for an uploaded copy they may not open."""
-    if file and file in (analysis.get("pdfs") or {}).values() and user != analysis.get("owner"):
+    if file and user != analysis.get("owner") and file in pool.private_pdf_names(analysis):
         return ""
     return file
 
@@ -133,6 +133,7 @@ def build_session(analysis: dict, user: str | None = None) -> dict:
     `reference_file`) for it, so the viewer is not pointed at a 404 and Ask cannot
     open the full copy.
     """
+    private = pool.private_pdf_names(analysis) if user != analysis.get("owner") else set()
     paper_id = _paper_id(analysis)
     references: dict[str, dict] = {}
     claims = []
@@ -142,7 +143,8 @@ def build_session(analysis: dict, user: str | None = None) -> dict:
         for verdict in claim.get("verdicts") or []:
             if not verdict.get("source"):
                 continue
-            file = _session_file(analysis, Path(verdict["source"]).name, user)
+            name = Path(verdict["source"]).name
+            file = "" if name in private else name
             reference_id = Path(verdict["source"]).stem
             citation = find_citation(claim, verdict) or {}
             references.setdefault(
@@ -1089,7 +1091,7 @@ def _reference_path(analysis: dict, reference_id: str, user: str | None = None) 
         for verdict in claim.get("verdicts") or []:
             if verdict.get("source") and Path(verdict["source"]).stem == reference_id:
                 name = Path(verdict["source"]).name
-                if name in (analysis.get("pdfs") or {}).values() and user != analysis.get("owner"):
+                if not _session_file(analysis, name, user):
                     return None
                 # A verdict names the file only; local_pdf reads a bare name as a title to search.
                 return (config.PAPERS_DIR / name).as_posix()
