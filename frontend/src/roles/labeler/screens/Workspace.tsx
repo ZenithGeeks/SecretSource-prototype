@@ -88,7 +88,9 @@ const PANEL_MIN_PX = 432
 const SIDE_SPLIT_KEY = 'labeler.sidePanelRatio'
 const SIDE_PANEL_MIN_PX = 384
 const SIDE_PAPERS_KEY = 'labeler.sidePaperRatio' // the paper under review's share beside the reference
-const SIDE_PDF_MIN_PX = 320
+// The least a PDF pane gets, side by side or stacked. Stacked, the papers column scrolls when the
+// window is too short for two: at 200px each, a pane showed a strip of a page.
+const PDF_MIN_PX = 320
 // Below this a side-by-side pane shows a two-column page too small to read.
 const READABLE_PANE_PX = 520
 const GUTTER_PX = 12 // the space between the handle and the panel (ml-3), outside the panel's box
@@ -786,7 +788,7 @@ function Body({
       {otherReferences.length > 0 && <optgroup label="Not cited by this claim">{otherReferences.map(referenceOption)}</optgroup>}
     </select>
   )
-  const { done, unsaved, total } = progress(claims, drafts, cited, saved)
+  const { done, unsaved, ready, total } = progress(claims, drafts, cited, saved)
   const nextUnfinished = nextUnfinishedIndex(claims, drafts, saved, cited, position)
   const viewer = (target: Target, which: Picked['side'], onClose?: () => void) => (
     <PageViewer
@@ -997,6 +999,10 @@ function Body({
           onSearchAgain={searchAgain}
           grade={grade}
           empty={noPassagesLine}
+          // An extracted claim that cites no paper has nowhere a passage could come from. One that
+          // cites works with no PDF can still take a passage pasted in (#824), and a claim added by
+          // hand cites nothing, so any reference may hold its evidence.
+          canAdd={!(noPassagesLine && !unreadCount && claim.origin !== 'human_added')}
           // A blind check keeps the judge out of the label, so no Ask on its passages either (#867).
           onAsk={
             onOpenAsk && !session.blind
@@ -1134,7 +1140,7 @@ function Body({
   )
 
   const papers = (
-    <div ref={papersRef} className="relative mr-3 flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+    <div ref={papersRef} className={cn('relative mr-3 flex min-h-0 min-w-0 flex-1 flex-col gap-2', both && 'overflow-y-auto')}>
       {legend}
       {selection}
       {/* Above the papers in every view, on its own row: in the toolbar of a half-width viewer it
@@ -1159,7 +1165,8 @@ function Body({
         rightLabel="Cited reference"
         separatorLabel="Resize the paper under review and the reference"
         initialRatio={side ? 0.5 : 0.4}
-        minRight={side ? SIDE_PDF_MIN_PX : 120}
+        minRight={side || both ? PDF_MIN_PX : 120}
+        minLeft={both ? PDF_MIN_PX : 0}
         storageKey={side ? SIDE_PAPERS_KEY : STACKED_SPLIT_KEY}
         left={viewer(left_, 'paper')}
         right={referencePane}
@@ -1175,7 +1182,10 @@ function Body({
         <>
           {claimPin()}
           <div className="relative flex min-h-0 flex-1 flex-col">
-            <div ref={panelScrollRef} data-label-panel className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 scrollbar-gutter-stable">
+            {/* `relative`: an absolute child (a radio group's sr-only name) must anchor inside this
+                scroll box. Anchored outside it, it stuck out of the overflow-hidden panel, which
+                then scrolled and hid the claim header. */}
+            <div ref={panelScrollRef} data-label-panel className="relative flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 scrollbar-gutter-stable">
               {panel}
             </div>
           </div>
@@ -1195,7 +1205,7 @@ function Body({
         <p className="mb-1 flex items-center gap-1 whitespace-nowrap text-xs text-ink-muted tabular-nums">
           {done} of {total} claims finished
           <span aria-hidden={unsaved === 0 || undefined} className={cn('text-accent', unsaved === 0 && 'invisible')}>
-            · {unsaved} unsaved
+            · {unsaved} unsaved{ready > 0 && `, ${ready} ready to save`}
           </span>
         </p>
         <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded-sm bg-border-subtle">
@@ -1209,6 +1219,8 @@ function Body({
         type="button"
         disabled={nextUnfinished == null}
         aria-keyshortcuts="F"
+        // F does not skip a claim that is ready to save: it is not finished until it is written down.
+        title="The next claim not finished and saved, including one ready to save (F)"
         onClick={() => {
           /* v8 ignore next -- @preserve */
           if (nextUnfinished == null) return
@@ -1229,13 +1241,6 @@ function Body({
   // sharing the bar with the breadcrumb and Ask AI, twenty chips did not fit.
   const header = (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      {/* Past the claim strip and both papers, which hold about twenty Tab stops. */}
-      <a
-        href="#claim-decision"
-        className="sr-only rounded-lg bg-accent px-3 py-2 text-ui font-medium text-canvas focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
-      >
-        Skip to the decision
-      </a>
       {/* In the top bar the breadcrumb already names the paper, so the title is for screen readers. */}
       <div className={cn('min-w-0 lg:w-52 lg:shrink-0', inBar && 'sr-only')}>
         <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink lg:line-clamp-1">

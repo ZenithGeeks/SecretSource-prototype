@@ -569,7 +569,7 @@ describe('passages and levels in the panel', () => {
   it('adds a passage by hand, removes it again, and grades the reference', async () => {
     await open()
     key('k')
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'refB' } })
     fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'by hand' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
@@ -580,18 +580,22 @@ describe('passages and levels in the panel', () => {
   })
 
   it('takes a passage for a cited work with no PDF, which opens in no viewer', async () => {
+    const session = makeSession({ unread: [{ reference_id: 'refU', file: '', label: 'Ref U', ref: 'b9' }] })
+    Object.assign(session.claims[1], { cited: ['b9'] })
+    gateway.session = session
     await open()
     key(']')
     key('k')
     // The line shows once the search for passages has come back empty.
     expect(await screen.findByText(/^No passages: /)).toBeInTheDocument()
     expect(screen.queryByText(/Nothing to label yet/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'refU' } })
     fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'cited only' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
-    expect(screen.getByText('No reference paper')).toBeInTheDocument()
-    expect(screen.getByText('How well does Ref U support the claim?')).toBeInTheDocument()
+    // Only the paper under review is open: the work with no PDF opens in no viewer.
+    expect(screen.getAllByTestId('viewer')).toHaveLength(1)
+    expect(screen.getByText(/^How well does .* support the claim\?$/)).toBeInTheDocument()
   })
 
   it('shows who else labeled the pair', async () => {
@@ -711,7 +715,7 @@ describe('claims added by hand', () => {
     gateway.found = [{ cand_id: 'f1', reference_id: 'refB', reference_file: 'refB.pdf', rank: 1, score: 5, page: 3, passage: 'found by search' }]
     await open()
     fireEvent.click(screen.getByRole('button', { name: /^Claim 4,/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'mine' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
     await waitFor(() => expect(gateway.searches).toHaveLength(1))
@@ -852,7 +856,7 @@ describe('work kept from an earlier visit', () => {
     const onDirtyChange = vi.fn()
     await open({ onDirtyChange })
     expect(screen.getByText(/Unsaved labels from your last visit were kept in this browser/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Claim 4, in progress, unsaved, no reference to read: Typed last time/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Claim 4, ready to save, no reference to read: Typed last time/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Claim 5/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'ghost' }))
     expect(screen.getByText('How well does this reference support the claim?')).toBeInTheDocument()
@@ -1136,12 +1140,14 @@ describe('the progress count in the header', () => {
     await open()
     expect(screen.getByText('· 0 unsaved')).toHaveClass('invisible')
     expect(screen.getByText('· 0 unsaved')).toHaveAttribute('aria-hidden', 'true')
+    // A rejected claim has nothing left to decide, so it is ready to save, and still not finished.
     key('x')
-    expect(screen.getByText('· 1 unsaved')).not.toHaveClass('invisible')
-    expect(screen.getByText('· 1 unsaved')).not.toHaveAttribute('aria-hidden')
+    expect(screen.getByText('· 1 unsaved, 1 ready to save')).not.toHaveClass('invisible')
+    expect(screen.getByText('· 1 unsaved, 1 ready to save')).not.toHaveAttribute('aria-hidden')
+    expect(screen.getByRole('button', { name: /^Claim 1, ready to save:/ })).toBeInTheDocument()
     key(']')
     key('x')
-    expect(screen.getByText('· 2 unsaved')).toBeInTheDocument()
+    expect(screen.getByText('· 2 unsaved, 2 ready to save')).toBeInTheDocument()
   })
 
   it('has nowhere to go when every claim is finished', async () => {
@@ -1428,7 +1434,7 @@ describe('what an undo put back', () => {
   it('outlines nothing for an added passage', async () => {
     await open()
     key('k')
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     fireEvent.change(screen.getByRole('textbox', { name: 'The passage' }), { target: { value: 'my passage' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
     key('z')
@@ -1447,7 +1453,7 @@ describe('saving every unsaved claim', () => {
     await screen.findByRole('heading', { name: new RegExp(`^Claim ${n} of`) })
     key(k)
   }
-  const unsavedMarks = () => screen.getAllByRole('button', { name: /^Claim \d+, .*unsaved/ }).length
+  const unsavedMarks = () => screen.getAllByRole('button', { name: /^Claim \d+, .*(unsaved|ready to save)/ }).length
 
   it('offers Save all only from two unsaved claims, and saves them in order', async () => {
     await open()
@@ -1460,7 +1466,7 @@ describe('saving every unsaved claim', () => {
     await waitFor(() => expect(gateway.posts).toHaveLength(3))
     expect(gateway.posts.map((post) => post.claims[0].claim_id)).toEqual(['paperA#0', 'paperA#1', 'paperA#2'])
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/^3 saved$/))
-    expect(screen.queryByRole('button', { name: /^Claim \d+, .*unsaved/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Claim \d+, .*(unsaved|ready to save)/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Save all/ })).not.toBeInTheDocument()
   })
 
@@ -1646,7 +1652,7 @@ describe('undo names a level or confidence chosen in the form', () => {
   it('names a passage added or removed by hand', async () => {
     await open()
     key('k')
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'my passage' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add passage' }))
     key('z')

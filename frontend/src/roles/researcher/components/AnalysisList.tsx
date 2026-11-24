@@ -2,19 +2,18 @@
  * screen's list. The sidebar keeps the recent ones; this is where an older one is found.
  * One row per paper; its other runs, stopped ones included, fold under that row. */
 
-import { Search } from 'lucide-react'
+import { Search, X } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 
 import { StandingCounts, StandingKey } from '../../../components/StandingKey'
 import { FacetFilter } from '../../../components/FacetFilter'
-import { Badge, Input } from '../../../components/ui'
+import { Badge, IconButton, Input } from '../../../components/ui'
 import { analysisFailure } from '../../../lib/analysisError'
 import type { Analysis } from '../../../lib/api'
 import {
   analysisLabel,
   byRunTime,
   countsOf,
-  countsText,
   groupRuns,
   ranked,
   runTime,
@@ -107,16 +106,23 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
           Search your analyses
         </label>
         {kinds.length > 0 && (
-          <FacetFilter
-            label="Has a claim"
-            options={kinds.map((kind) => ({
-              value: kind,
-              label: STANDING_LABELS[kind],
-              count: runs.filter((run) => has(run, kind)).length,
-            }))}
-            selected={shows}
-            onChange={(next) => pick(standingsIn(next.join(',')))}
-          />
+          <div className="flex items-center gap-1">
+            <FacetFilter
+              label="Has a claim"
+              options={kinds.map((kind) => ({
+                value: kind,
+                label: STANDING_LABELS[kind],
+                count: runs.filter((run) => has(run, kind)).length,
+              }))}
+              selected={shows}
+              onChange={(next) => pick(standingsIn(next.join(',')))}
+            />
+            {shows.length > 0 && (
+              <IconButton onClick={() => pick([])} aria-label="Clear the Has a claim filter">
+                <X className="size-4" aria-hidden="true" />
+              </IconButton>
+            )}
+          </div>
         )}
         <div className="relative w-full sm:w-72">
           <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" />
@@ -205,8 +211,6 @@ function RunRow({
     <button
       type="button"
       onClick={() => onOpen(analysis.id)}
-      // The full split, which the row cuts to the worst three.
-      title={counted ? countsText(analysis.claims) : undefined}
       className="flex min-h-12 w-full items-center gap-3 px-4 py-2 text-left text-ui hover:bg-accent-soft/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
     >
       <span className="flex min-w-0 flex-1 flex-col gap-1">
@@ -214,8 +218,8 @@ function RunRow({
         {details && details !== label && <span className="text-xs text-ink">{details}</span>}
         {/* The list has the run's error but not its steps, so the reason only. */}
         {analysis.status === 'error' && <span className="text-xs text-ink-muted">{analysisFailure(analysis.message).text}</span>}
-        {/* On a line of their own, so they never cut the title short. */}
-        {counted && <StandingCounts counts={countsOf(ranked(analysis.claims))} limit={3} />}
+        {/* On a line of their own, so they never cut the title short. All of them: there are at most six. */}
+        {counted && <StandingCounts counts={countsOf(ranked(analysis.claims))} />}
       </span>
       <RunState analysis={analysis} />
     </button>

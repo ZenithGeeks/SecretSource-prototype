@@ -398,12 +398,12 @@ describe('passages the person added', () => {
 describe('adding a passage retrieval missed', () => {
   it('offers nothing when the paper has no references', () => {
     setup({ references: [] })
-    expect(screen.queryByRole('button', { name: 'Add a passage retrieval missed' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add a missed passage' })).not.toBeInTheDocument()
   })
 
   it('adds a passage under the first reference, ignoring a blank one', () => {
     const props = setup()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     const form = screen.getByLabelText('The passage').closest('form') as HTMLFormElement
     fireEvent.submit(form)
     expect(props.onAdd).not.toHaveBeenCalled()
@@ -416,7 +416,7 @@ describe('adding a passage retrieval missed', () => {
 
   it('adds a passage under the chosen reference and page, and marks a reference with no PDF', () => {
     const props = setup()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     expect(screen.getByRole('option', { name: 'Ref C (no PDF)' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'refC' } })
     fireEvent.change(screen.getByLabelText('Page'), { target: { value: '12' } })
@@ -427,8 +427,8 @@ describe('adding a passage retrieval missed', () => {
 
   it('closes the form with Cancel', () => {
     setup()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.getByRole('button', { name: 'Add a passage retrieval missed' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add a missed passage' })).toBeInTheDocument()
   })
 })

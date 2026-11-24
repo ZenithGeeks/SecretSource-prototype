@@ -81,13 +81,9 @@ it('stays open when the reader clicks inside it', () => {
   expect(details.open).toBe(true)
 })
 
-it('shows only the worst badges up to the limit and names the rest in a "+N" badge', () => {
-  render(
-    <StandingCounts
-      limit={3}
-      counts={{ refutes: 1, insufficient: 2, unchecked: 0, supports: 3, named: 4, uncited: 5 }}
-    />,
-  )
-  expect(screen.getAllByText(/: \d/)).toHaveLength(3)
-  expect(screen.getByText('+2')).toHaveAttribute('title', expect.stringContaining('No citation: 5'))
+it('shows a badge for every standing with a claim, worst first', () => {
+  render(<StandingCounts counts={{ refutes: 1, insufficient: 2, unchecked: 0, supports: 3, named: 4, uncited: 5 }} />)
+  expect(screen.getAllByText(/: \d/).map((badge) => badge.textContent)).toEqual([
+    'Source contradicts: 1', 'Source is silent: 2', 'Source backs it: 3', 'Names a tool or dataset: 4', 'No citation: 5',
+  ])
 })

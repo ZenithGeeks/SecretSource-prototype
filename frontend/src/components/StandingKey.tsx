@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { Standing } from '../lib/claims'
 import { STANDING_MEANINGS, STANDINGS, standingCount } from '../lib/claims'
-import { Badge, StandingBadge, VerdictBadge } from './ui'
+import { StandingBadge, VerdictBadge } from './ui'
 
 /** A disclosure's summary: link colour, a chevron and no browser marker, as "What do these mean?" has. */
 export const DISCLOSURE_SUMMARY =
@@ -19,19 +19,13 @@ export const DISCLOSURE_SUMMARY =
 /** A key cap, as the labeler draws its shortcuts. */
 export const KEY_CAP = 'rounded-sm border border-border-subtle bg-canvas px-1 font-mono text-caption leading-4 text-ink-muted'
 
-/** Every standing with a count, worst first, as badges: "Source contradicts: 3". With `limit`,
- * only the worst few show and a "+2" badge names the rest on hover. */
-export function StandingCounts({ counts, limit }: { counts: Record<Standing, number>; limit?: number }) {
-  const kinds = STANDINGS.filter((kind) => counts[kind] > 0)
-  const rest = limit === undefined ? [] : kinds.slice(limit)
+/** Every standing with a count, worst first, as badges: "Source contradicts: 3". */
+export function StandingCounts({ counts }: { counts: Record<Standing, number> }) {
   return (
     <span className="flex flex-wrap gap-1.5">
-      {kinds.slice(0, limit).map((kind) => (
+      {STANDINGS.filter((kind) => counts[kind] > 0).map((kind) => (
         <VerdictBadge key={kind} verdict={kind} text={standingCount(kind, counts[kind])} title={STANDING_MEANINGS[kind]} />
       ))}
-      {rest.length > 0 && (
-        <Badge title={rest.map((kind) => standingCount(kind, counts[kind])).join(' · ')}>+{rest.length}</Badge>
-      )}
     </span>
   )
 }

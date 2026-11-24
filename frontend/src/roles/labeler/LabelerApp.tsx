@@ -91,11 +91,14 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
   }
   usePaperNotices(openPaper)
   // The open paper's title ends the breadcrumb, so the top bar names it and not only the list.
-  // The list's name is text, not a button: the sidebar's own entry already goes back to it, and a
-  // second one was a second Tab stop to the same place.
+  // With a paper open, the list's name goes back to the list, as the crumbs of the other roles do.
   const pool = usePool()
   const openTitle = pool.data?.papers.find((p) => p.analysis_id === (analysis ?? labels))?.title
-  const breadcrumb: Crumb[] = openTitle ? [TITLES[screen], openTitle] : [TITLES[screen]]
+  const backToList = leave(() => {
+    setAnalysis(null)
+    setLabels(null)
+  })
+  const breadcrumb: Crumb[] = openTitle ? [{ label: TITLES[screen], onSelect: backToList }, openTitle] : [TITLES[screen]]
   // Where the workspace draws its claim tools (review, questions about the paper and its
   // references) inside the Ask panel's "This claim" mode.
   const [claimSlot, setClaimSlot] = useState<HTMLDivElement | null>(null)
@@ -174,7 +177,21 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
       wide={analysis ? 'full' : true}
       foldable
       breadcrumb={breadcrumb}
-      toolbarLead={blind ? undefined : ask.button}
+      toolbarLead={
+        <>
+          {/* First in the top bar: Ask AI, the workspace's controls, the claim strip and both
+              papers all come before the decision in Tab order. */}
+          {analysis && (
+            <a
+              href="#claim-decision"
+              className="sr-only rounded-lg bg-accent px-3 py-2 text-ui font-medium text-canvas focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+            >
+              Skip to the decision
+            </a>
+          )}
+          {!blind && ask.button}
+        </>
+      }
       panel={blind ? undefined : ask.panel}
       notifications={<PaperBell onOpen={openPaper} />}
     >

@@ -105,13 +105,15 @@ export function SaveBar({
               Save all unsaved ({unsavedCount})
             </Button>
           )}
+          {/* Filled only when the claim is complete: with work left it saves as not finished, so it
+              is not the step the page points to. */}
           {hasNext && (
-            <Button onClick={() => onSave(true)} disabled={off} title={blocked ?? undefined}>
+            <Button variant={left.length > 0 ? 'ghost' : 'solid'} onClick={() => onSave(true)} disabled={off} title={blocked ?? undefined}>
               Save claim {claimNumber} and next
             </Button>
           )}
           <Button
-            variant={hasNext ? 'ghost' : 'solid'}
+            variant={hasNext || left.length > 0 ? 'ghost' : 'solid'}
             onClick={() => onSave(false)}
             disabled={off}
             title={blocked ?? undefined}

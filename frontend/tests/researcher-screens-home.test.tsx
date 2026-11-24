@@ -23,7 +23,6 @@ vi.mock('../src/lib/supabase', () => ({
 }))
 
 const EMPTY_HOME = {
-  alert: 'Nothing new.',
   conflicts: [],
   queue: [],
   library: { papers: 0, claims: 0, verified: 0, tally: { backed: 0, silent: 0, contradicted: 0, unchecked: 0 } },
@@ -114,7 +113,7 @@ describe('Home', () => {
     expect(await screen.findByText('Your library could not load')).toBeInTheDocument()
     expect(screen.getByText('the list is down')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /retry/i }))
-    expect(await screen.findByText(/Nothing new\.$/)).toBeInTheDocument()
+    expect(await screen.findByText(/Analyze a paper to start your library\.$/)).toBeInTheDocument()
   })
 
   it('shows the gateway error and retries on request', async () => {
@@ -132,7 +131,7 @@ describe('Home', () => {
     renderHome()
     expect(await screen.findByText('gateway is down')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /retry/i }))
-    expect(await screen.findByText(/Nothing new\.$/)).toBeInTheDocument()
+    expect(await screen.findByText(/Analyze a paper to start your library\.$/)).toBeInTheDocument()
   })
 
   it('says the server did not answer when a proxy error carries no message', async () => {
@@ -211,10 +210,37 @@ describe('Home', () => {
   })
 
   it('All N in Library goes to the Library screen when more conflicts exist than are listed', async () => {
-    gateway({ home: { ...EMPTY_HOME, conflictsTotal: 5 } })
+    const refuted = { text: 'c', citations: [], verdicts: [{ verdict: 'refutes' }] }
+    gateway({ analyses: [{ id: 'a1', paper: '10.1/x', status: 'done', claims: [refuted, refuted], stages: [] }] })
     const { onOpen } = renderHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'All 5 in Library' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'All 2 in Library' }))
     expect(onOpen).toHaveBeenCalledWith('library')
+  })
+
+  it('counts the greeting line from the same runs as the library bar, once per paper', async () => {
+    const claim = (verdict?: string) => ({ text: 'c', citations: [], verdicts: verdict ? [{ verdict }] : [] })
+    const run = (id: string, file: string, claims: unknown[]) => ({ id, paper: '10.1/x', file, title: 'X', status: 'done', claims, stages: [] })
+    // The same paper uploaded twice under two file names: only its newest run counts.
+    gateway({ analyses: [run('new', 'b.pdf', [claim('refutes')]), run('old', 'a.pdf', [claim('refutes'), claim('refutes')])] })
+    renderHome()
+    expect(await screen.findByText(/· 1 claim in your papers contradicted by the work they cite\.$/)).toBeInTheDocument()
+  })
+
+  it.each([
+    [['supports', undefined], '1 of 2 claims'],
+    [['insufficient'], '1 of 1 claim'],
+  ])('without a contradiction the greeting line says how many claims were checked (%j)', async (verdicts, words) => {
+    const claims = verdicts.map((verdict) => ({ text: 'c', citations: [], verdicts: verdict ? [{ verdict }] : [] }))
+    gateway({ analyses: [{ id: 'a1', paper: '10.1/x', status: 'done', claims, stages: [] }] })
+    renderHome()
+    expect(await screen.findByText(`${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })} · ${words} in your papers checked against their sources.`)).toBeInTheDocument()
+  })
+
+  it('greets while the library loads, so the Analyze card does not move', async () => {
+    gateway()
+    renderHome()
+    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument()
+    expect(screen.getByText('Loading your library…')).toBeInTheDocument()
   })
 })
 

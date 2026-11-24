@@ -210,13 +210,13 @@ describe('narrowing an open analysis to a section', () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   })
 
-  it('picking a section lists only its claims and Show all claims undoes it', async () => {
+  it('picking a section lists only its claims and its × undoes it', async () => {
     renderAnalyses('&analysis=good')
     const contents = await screen.findByRole('navigation', { name: 'Contents of this paper' })
     fireEvent.click(within(contents).getByTitle('1 Introduction, page 1 · 1 claim'))
     expect(await screen.findByText(/Claims from/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Show all claims' }))
-    await waitFor(() => expect(screen.queryByText('Show all claims')).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the section filter' }))
+    await waitFor(() => expect(screen.queryByText(/Claims from/)).not.toBeInTheDocument())
   })
 })
 

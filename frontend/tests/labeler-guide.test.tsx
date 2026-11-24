@@ -173,6 +173,15 @@ describe('GuideButton', () => {
     }
   })
 
+  it('gives focus back to its button even when the click did not focus it', async () => {
+    render(<GuideButton />)
+    const button = screen.getByRole('button', { name: 'Labeling guide' })
+    fireEvent.click(button)
+    const dialog = await screen.findByRole('dialog', { name: 'Labeling guide' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(button).toHaveFocus())
+  })
+
   it('closes from its Close button', async () => {
     const { dialog } = await openGuide()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))

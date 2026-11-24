@@ -318,25 +318,29 @@ describe('the Labeler shell', () => {
   describe('the breadcrumb', () => {
     const crumbs = () => within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
 
-    it('ends with the title of the open paper; the list is named as text, and the sidebar goes back to it', async () => {
+    it('ends with the title of the open paper, and the list crumb goes back to the list', async () => {
       renderApp('?analysis=a1')
       await screen.findByText('Method Y improves recall.')
       await waitFor(() => expect(crumbs().getByText('Paper A')).toBeInTheDocument())
-      // One Tab stop to the list, the sidebar's: the crumb would only repeat it.
-      expect(crumbs().getByText('Papers to label')).toBeInTheDocument()
-      expect(crumbs().queryByRole('button')).not.toBeInTheDocument()
-      fireEvent.click(within(sidebar()).getByRole('button', { name: 'Papers to label' }))
+      // In the top bar, so it comes before Ask AI in Tab order.
+      const skip = screen.getByRole('link', { name: 'Skip to the decision' })
+      expect(skip).toHaveAttribute('href', '#claim-decision')
+      const ask = screen.getAllByRole('button', { name: /^Ask AI/ })[0]
+      expect(skip.compareDocumentPosition(ask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      fireEvent.click(crumbs().getByRole('button', { name: 'Papers to label' }))
       expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
       expect(window.location.search).toBe('')
       expect(crumbs().queryByText('Paper A')).not.toBeInTheDocument()
     })
 
-    it('asks before leaving through the sidebar when labels are unsaved', async () => {
+    it('asks before leaving through the sidebar or the crumb when labels are unsaved', async () => {
       const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
       renderApp('?analysis=a1')
       await screen.findByText('Method Y improves recall.')
       fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
       fireEvent.click(within(sidebar()).getByRole('button', { name: 'Papers to label' }))
+      fireEvent.click(await crumbs().findByRole('button', { name: 'Papers to label' }))
+      expect(confirm).toHaveBeenCalledTimes(2)
       expect(confirm).toHaveBeenCalledWith('You have unsaved labels. Leave without saving?')
       expect(screen.getByText('Method Y improves recall.')).toBeInTheDocument()
     })

@@ -4,7 +4,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
   result: {} as Record<string, unknown>,
@@ -285,17 +285,21 @@ describe('the results', () => {
       expect(screen.queryByText(text)).not.toBeInTheDocument()
     })
 
-    it('opens the claim in the paper on O when only the paper’s own sentence is there, and says so in that card', () => {
+    it('opens the claim in the paper on O when only the paper’s own sentence is there, and says so in the viewer', () => {
       load(analysis({ claims: [{ ...refuted, verdicts: [verdict('refutes')] }, backed] }))
       view()
       const first = document.querySelector<HTMLElement>('[data-claim-toggle]')!
       first.focus()
       fireEvent.keyDown(first, { key: 'o' })
-      expect(screen.getByTestId('viewer')).toHaveAttribute('data-paper', 'mine.pdf')
-      const text = 'No quote from a cited work for claim 1 · showing it in this paper'
-      expect(within(first.closest('[data-claim-card]') as HTMLElement).getByText(text)).toBeInTheDocument()
+      const viewer = screen.getByTestId('viewer')
+      expect(viewer).toHaveAttribute('data-paper', 'mine.pdf')
+      expect(screen.getByRole('status')).toHaveTextContent('No quote from a cited work for claim 1 · showing it in this paper')
+      // The card keeps its own section and page line; the note goes under the viewer's label.
+      const note = 'No cited work quotes this claim, so this is where it sits in the paper.'
+      expect(within(viewer).getByText(note)).toBeInTheDocument()
+      expect(within(first.closest('[data-claim-card]') as HTMLElement).queryByText(/No quote from a cited work/)).not.toBeInTheDocument()
       fireEvent.keyDown(first, { key: 'j' })
-      expect(screen.queryByText(text)).not.toBeInTheDocument()
+      expect(screen.queryByText(note)).not.toBeInTheDocument()
     })
   })
 
@@ -307,6 +311,7 @@ describe('the results', () => {
     expect(heading()).not.toHaveClass('flex-col')
     fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }))
     expect(tiles()).not.toHaveClass('sm:grid-flow-col')
+    expect(tiles()).toHaveClass('flex-wrap')
     expect(heading()).toHaveClass('flex-col')
   })
 
@@ -392,10 +397,12 @@ describe('the results', () => {
     expect(onFilter).toHaveBeenCalledWith('refutes')
   })
 
-  it('clears the standing filter from its Show all claims button', () => {
+  it('clears the standing filter from its × button', () => {
     view()
     fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Show all claims' }))
+    // One filter on: its own × only, no Clear all.
+    expect(screen.queryByRole('button', { name: 'Clear all' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the Source backs it filter' }))
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Source backs it' })).not.toBeInTheDocument()
     expect(screen.getByText('The refuted claim.')).toBeInTheDocument()
@@ -406,13 +413,24 @@ describe('the results', () => {
     view({ section: '2', onClearSection })
     expect(screen.getByText('Section 2 · Method')).toBeInTheDocument()
     expect(screen.queryByText('The refuted claim.')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Show all claims' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the section filter' }))
     expect(onClearSection).toHaveBeenCalledTimes(1)
+  })
+
+  it('with a section and a standing both on, one Clear all clears both', () => {
+    const onClearSection = vi.fn()
+    view({ section: '2', onClearSection })
+    fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }))
+    expect(onClearSection).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
   })
 
   it('names the section without a clear button when the screen gives none', () => {
     view({ section: '2' })
-    expect(screen.queryByRole('button', { name: 'Show all claims' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
+    expect(screen.queryByRole('button', { name: 'Clear the section filter' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear all' })).not.toBeInTheDocument()
   })
 
   it('says when no claim comes from the section, naming it plainly when the outline lost it', () => {
@@ -644,5 +662,38 @@ describe('the Teacher presentation', () => {
     view({ presentation: 'teacher' })
     fireEvent.click(screen.getAllByRole('button', { expanded: true })[0])
     expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
+  })
+})
+
+describe('Back and Forward into an analysis', () => {
+  afterEach(() => window.history.replaceState(null, '', '/'))
+
+  const toggles = () => [...document.querySelectorAll<HTMLElement>('[data-claim-toggle]')]
+
+  it('keeps the open page and the opened cards in the history entry, and restores them on return', () => {
+    window.history.replaceState(null, '', '/?analysis=a1')
+    const { unmount } = view()
+    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }))
+    fireEvent.click(toggles()[1])
+    expect(window.history.state.analysisView).toMatchObject({ id: 'a1', target: { paper: 'mine.pdf' }, parts: [['claim 1', true]] })
+    unmount()
+
+    const onTargetChange = vi.fn()
+    view({ onTargetChange })
+    expect(screen.getByTestId('viewer')).toHaveAttribute('data-paper', 'mine.pdf')
+    expect(onTargetChange).toHaveBeenCalledWith(true)
+    expect(toggles()[1]).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close viewer' }))
+    expect(window.history.state.analysisView.target).toBeNull()
+  })
+
+  it('writes nothing once the address names another page, and ignores what another analysis saved', () => {
+    window.history.replaceState({ analysisView: { id: 'other', target: { paper: 'x.pdf', label: 'X', source: null }, parts: [] } }, '', '/?analysis=b2')
+    view()
+    expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }))
+    fireEvent.click(toggles()[1])
+    expect(window.history.state.analysisView.id).toBe('other')
   })
 })

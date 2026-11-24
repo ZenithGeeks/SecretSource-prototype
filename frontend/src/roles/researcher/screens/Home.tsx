@@ -55,9 +55,20 @@ function TallyBar({ counts }: { counts: Record<Standing, number> }) {
   )
 }
 
-/** Each paper's newest finished run, as the gateway's library counts papers. */
+/** Each paper's newest finished run. */
 function libraryRuns(analyses: Analysis[]) {
   return groupRuns(analyses).flatMap(({ run, earlier }) => [run, ...earlier].find((analysis) => analysis.status === 'done') ?? [])
+}
+
+/** The line under the greeting, counted from the same runs as the library bar so the two agree.
+ * The gateway's own line counts a paper once per uploaded file, so a paper uploaded twice counted twice. */
+function summaryLine(papers: number, claims: number, counts: Record<Standing, number>) {
+  if (papers === 0) return 'Analyze a paper to start your library.'
+  if (counts.refutes > 0) {
+    return `${counts.refutes} ${counts.refutes === 1 ? 'claim' : 'claims'} in your papers contradicted by the work they cite.`
+  }
+  const checked = counts.supports + counts.insufficient
+  return `${checked} of ${claims} ${claims === 1 ? 'claim' : 'claims'} in your papers checked against their sources.`
 }
 
 const CARD = 'rounded-2xl border border-border-subtle bg-surface shadow-sm'
@@ -91,9 +102,28 @@ export function Home({
       onStarted={onOpenAnalysis}
     />
   )
+  // Prefer the signed-in identity (set at sign-up and by Google) over the Settings display name,
+  // the same precedence AppShell's profile menu uses — so the greeting matches who is logged in.
+  const metaName = session?.user?.user_metadata?.full_name as string | undefined
+  const firstName = (metaName?.trim() || displayName).split(/\s+/)[0]
+  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+  // The greeting shows while the library loads, so the Analyze card under it does not jump.
+  const header = (line?: string) => (
+    <header className="flex items-center gap-5">
+      <Mascot role="researcher" size={84} className="hidden shrink-0 sm:block" />
+      <div className="flex flex-col gap-2">
+        <h1 className="type-display font-serif text-ink">{greeting(firstName)}</h1>
+        <p className="text-reading leading-6 text-ink-muted">
+          {today}
+          {line && ` · ${line}`}
+        </p>
+      </div>
+    </header>
+  )
   if (isError || analyses.isError) {
     return (
       <FadeIn className="flex flex-col gap-7 pt-4">
+        {header()}
         {analyze}
         <ErrorState
           title="Your library could not load"
@@ -109,32 +139,21 @@ export function Home({
   if (!home || !analyses.data) {
     return (
       <FadeIn className="flex flex-col gap-7 pt-4">
+        {header()}
         {analyze}
         <LoadingScreen label="Loading your library…" />
       </FadeIn>
     )
   }
 
-  // Prefer the signed-in identity (set at sign-up and by Google) over the Settings display name,
-  // the same precedence AppShell's profile menu uses — so the greeting matches who is logged in.
-  const metaName = session?.user?.user_metadata?.full_name as string | undefined
-  const firstName = (metaName?.trim() || displayName).split(/\s+/)[0]
-  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
-  const conflictsTotal = home.conflictsTotal ?? home.conflicts.length
   const papers = libraryRuns(analyses.data)
   const claims = papers.flatMap((paper) => paper.claims)
+  const counts = countsOf(ranked(claims))
+  const conflictsTotal = counts.refutes
 
   return (
     <FadeIn className="flex flex-col gap-7 pt-4">
-      <header className="flex items-center gap-5">
-        <Mascot role="researcher" size={84} className="hidden shrink-0 sm:block" />
-        <div className="flex flex-col gap-2">
-          <h1 className="type-display font-serif text-ink">{greeting(firstName)}</h1>
-          <p className="text-reading leading-6 text-ink-muted">
-            {today} · {home.alert}
-          </p>
-        </div>
-      </header>
+      {header(summaryLine(papers.length, claims.length, counts))}
 
       {analyze}
 
@@ -247,7 +266,7 @@ export function Home({
             Open library
           </TextButton>
         </div>
-        <TallyBar counts={countsOf(ranked(claims))} />
+        <TallyBar counts={counts} />
       </section>
     </FadeIn>
   )

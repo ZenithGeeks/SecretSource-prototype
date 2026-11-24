@@ -1,14 +1,15 @@
 /** Recent analyses in the sidebar: a "Recent analyses" label with "+ New", then one row per
  * paper (paper title, claim count and how many a source contradicts), newest first like the
- * Analyses list. The open paper's row stays in its place, highlighted, with its table of
- * contents under it, and is scrolled into view when it opens. Selecting one reopens its
+ * Analyses list. The open paper's row stays in its place, highlighted, and is scrolled into
+ * view when it opens. Its table of contents sits above the list, so it is in reach without
+ * scrolling to a paper far down. Selecting one reopens its
  * results. The rows are one Tab stop; the arrow keys move between them. Deleting one (its button,
  * or the Delete key on the row) hides it at once and removes it for good after a few seconds,
  * unless the reader undoes it from the toast. */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Trash2 } from 'lucide-react'
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { api, type Analysis } from '../lib/api'
@@ -54,7 +55,7 @@ export function HistoryList({
   onSelect: (id: string | null) => void
   /** Starts a new analysis; the "+ New" link shows only when given. */
   onNew?: () => void
-  /** Shown under the selected analysis, e.g. its table of contents. */
+  /** Shown above the list while one of its papers is open, e.g. its table of contents. */
   contents?: ReactNode
   /** The list is still being fetched, so an empty list is not "no analyses". */
   loading?: boolean
@@ -166,72 +167,71 @@ export function HistoryList({
     const isTabStop = open ? isSelected : paper === papers[0]
     const counts = analysis.status === 'done' ? countsText(analysis.claims) : ''
     return (
-      <Fragment key={analysis.id}>
-        <div
+      <div
+        key={analysis.id}
+        className={cn(
+          'group flex items-center gap-1 rounded-lg pr-1 transition-colors',
+          isSelected ? 'bg-accent-soft' : 'hover:bg-accent-soft/60',
+        )}
+      >
+        <button
+          data-closes-menu
+          onClick={() => onSelect(analysis.id)}
+          onKeyDown={(event) => {
+            // Only a plain Delete on the row itself: never one meant for something inside it.
+            const modified = event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+            if (event.key === 'Delete' && event.target === event.currentTarget && !modified) deleteLater(analysis)
+          }}
+          aria-keyshortcuts="Delete"
+          aria-current={isSelected ? 'true' : undefined}
+          data-history-row
+          tabIndex={isTabStop ? 0 : -1}
+          data-ask-target={askTarget({ kind: 'paper', id: analysis.id })}
           className={cn(
-            'group flex items-center gap-1 rounded-lg pr-1 transition-colors',
-            isSelected ? 'bg-accent-soft' : 'hover:bg-accent-soft/60',
+            'flex min-h-11 min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1 text-left text-ui leading-5 font-medium lg:min-h-8',
+            isSelected ? 'text-accent' : 'text-ink',
           )}
-        >
-          <button
-            data-closes-menu
-            onClick={() => onSelect(analysis.id)}
-            onKeyDown={(event) => {
-              // Only a plain Delete on the row itself: never one meant for something inside it.
-              const modified = event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
-              if (event.key === 'Delete' && event.target === event.currentTarget && !modified) deleteLater(analysis)
-            }}
-            aria-keyshortcuts="Delete"
-            aria-current={isSelected ? 'true' : undefined}
-            data-history-row
-            tabIndex={isTabStop ? 0 : -1}
-            data-ask-target={askTarget({ kind: 'paper', id: analysis.id })}
-            className={cn(
-              'flex min-h-11 min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1 text-left text-ui leading-5 font-medium lg:min-h-8',
-              isSelected ? 'text-accent' : 'text-ink',
-            )}
-            title={counts ? `${name}
+          title={counts ? `${name}
 ${counts}` : name}
-          >
-            <span className="min-w-0 flex-1">
-              {/* Wrapped at words and cut after two lines; the full title is on hover. */}
-              <span className="line-clamp-2">{name}</span>
-              <span className="block text-xs font-normal text-ink-muted">
-                {opened ? otherRunDetail(analysis, opened) : rowDetail(analysis)}
-              </span>
+        >
+          <span className="min-w-0 flex-1">
+            {/* Wrapped at words and cut after two lines; the full title is on hover. */}
+            <span className="line-clamp-2">{name}</span>
+            <span className="block text-xs font-normal text-ink-muted">
+              {opened ? otherRunDetail(analysis, opened) : rowDetail(analysis)}
             </span>
-          </button>
-          {/* Out of the Tab order, which is one stop for the whole list: the Delete key on a
-              row does the same. */}
-          <button
-            tabIndex={-1}
-            onClick={() => deleteLater(analysis)}
-            aria-label={`Delete analysis of ${name}`}
-            className="grid size-8 shrink-0 place-items-center rounded-sm text-ink-muted opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:text-refutes max-lg:size-11 max-lg:opacity-100"
-          >
-            <Trash2 className="size-4" />
-          </button>
-        </div>
-        {isSelected && contents}
-      </Fragment>
+          </span>
+        </button>
+        {/* Out of the Tab order, which is one stop for the whole list: the Delete key on a
+            row does the same. */}
+        <button
+          tabIndex={-1}
+          onClick={() => deleteLater(analysis)}
+          aria-label={`Delete analysis of ${name}`}
+          className="grid size-8 shrink-0 place-items-center rounded-sm text-ink-muted opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:text-refutes max-lg:size-11 max-lg:opacity-100"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      </div>
     )
   }
 
   return (
-    <section aria-label="Recent analyses">
-      {header}
-      {/* The open paper's contents sit inside the list with keys of their own, so only a key
-          pressed on a row moves between rows. */}
-      <nav
-        ref={list}
-        aria-label="Analyses"
-        onKeyDown={(event) => {
-          if (event.target instanceof HTMLElement && event.target.matches(ROW)) moveFocus(event, ROW, false)
-        }}
-        className="space-y-0.5"
-      >
-        {papers.map(row)}
-      </nav>
-    </section>
+    <>
+      {open && contents}
+      <section aria-label="Recent analyses">
+        {header}
+        <nav
+          ref={list}
+          aria-label="Analyses"
+          onKeyDown={(event) => {
+            if (event.target instanceof HTMLElement && event.target.matches(ROW)) moveFocus(event, ROW, false)
+          }}
+          className="space-y-0.5"
+        >
+          {papers.map(row)}
+        </nav>
+      </section>
+    </>
   )
 }

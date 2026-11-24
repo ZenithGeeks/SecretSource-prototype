@@ -55,10 +55,10 @@ export type LibrarySummary = {
   tally: ClaimTally
 }
 
+// The gateway also sends `alert` and `conflictsTotal`. Home counts them from the analyses list
+// instead, the runs its library bar uses, so the numbers on the screen agree.
 export type ResearcherHome = {
-  alert: string // the one-line "what changed" under the greeting
   conflicts: Conflict[] // the newest few
-  conflictsTotal?: number // all of them; older gateways leave it out
   queue: QueueEntry[]
   library: LibrarySummary
 }

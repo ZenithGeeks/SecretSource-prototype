@@ -49,6 +49,7 @@ export function SplitPane({
   separatorLabel = `Resize the ${leftLabel.toLowerCase()} and the ${rightLabel.toLowerCase()}`,
   initialRatio = 0.5,
   minRight = 0,
+  minLeft = 0,
   storageKey,
   direction = 'horizontal',
   hideLeft = false,
@@ -63,6 +64,9 @@ export function SplitPane({
   initialRatio?: number
   /** The narrowest the right (or bottom) pane may get, in px, so its content never has to squeeze. */
   minRight?: number
+  /** The narrowest (or shortest) the first pane may get, in px. With it, the whole split never gets
+   * smaller than both minimums, and a parent that scrolls shows the rest. */
+  minLeft?: number
   /** Where to keep the ratio. Left out, the ratio is not kept. */
   storageKey?: string
   direction?: 'horizontal' | 'vertical'
@@ -81,7 +85,8 @@ export function SplitPane({
 
   // The share the first pane may take: the second keeps `minRight` px of the measured size,
   // even when that is less than MIN. A size of 0 is the page before it is laid out: no limit yet.
-  const limit = (value: number, size: number) => Math.min(clamp(value), size ? 1 - (minRight + HANDLE_PX) / size : MAX)
+  const limit = (value: number, size: number) =>
+    size ? Math.max(Math.min(clamp(value), 1 - (minRight + HANDLE_PX) / size), minLeft / size) : clamp(value)
 
   const change = (value: number) => {
     // Unreachable fallback: change() only runs from the mounted handle.
@@ -130,7 +135,12 @@ export function SplitPane({
     <div
       ref={container}
       className={vertical ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1 flex-col lg:flex-row'}
-      style={{ '--split': `${ratio * 100}%` } as React.CSSProperties}
+      style={
+        {
+          '--split': `${ratio * 100}%`,
+          ...(minLeft > 0 && { [vertical ? 'minHeight' : 'minWidth']: minLeft + HANDLE_PX + minRight }),
+        } as React.CSSProperties
+      }
     >
       <section
         aria-label={leftLabel}
@@ -141,7 +151,11 @@ export function SplitPane({
             : 'flex min-h-0 min-w-0 flex-1 flex-col lg:flex-none lg:basis-(--split)'
         }
         // A window narrowed after the ratio was saved must still leave the second pane its size.
-        style={minRight ? { [vertical ? 'maxHeight' : 'maxWidth']: `calc(100% - ${minRight + HANDLE_PX}px)` } : undefined}
+        style={{
+          ...(minRight > 0 && { [vertical ? 'maxHeight' : 'maxWidth']: `calc(100% - ${minRight + HANDLE_PX}px)` }),
+          // A ratio saved for a larger window must not take it under its minimum either.
+          ...(minLeft > 0 && { [vertical ? 'minHeight' : 'minWidth']: minLeft }),
+        }}
       >
         {left}
       </section>

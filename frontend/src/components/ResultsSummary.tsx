@@ -64,7 +64,7 @@ export function ResultsSummary({
   teacherDecisions?: { supports: number; contradicts: number; inconclusive: number; notReviewed: number }
   /** Put "Open PDF" and "Export" in the shell's toolbar; without a toolbar they sit above the summary. */
   actionsInToolbar?: boolean
-  /** The page viewer takes most of the width: tiles go two to a row. */
+  /** The page viewer takes most of the width: the tiles become one row of compact chips. */
   narrow?: boolean
 }) {
   if (!teacherMode) {
@@ -190,9 +190,10 @@ function ResearcherSummary({
             ))}
           </div>
           {/* Each count is the filter for its own kind. None starts selected, so every claim shows.
-              One row from sm up, however many kinds there are (a fixed 4 left a fifth tile alone),
-              unless the page viewer leaves too little width for the labels. */}
-          <div className={cn('grid grid-cols-2 gap-2.5', !narrow && 'sm:auto-cols-fr sm:grid-flow-col')}>
+              One row from sm up, however many kinds there are (a fixed 4 left a fifth tile alone).
+              Beside the page viewer the tiles shrink to one wrapping row of "3 Source contradicts"
+              chips, so the claims stay above the fold. */}
+          <div className={narrow ? 'flex flex-wrap gap-2' : 'grid grid-cols-2 gap-2.5 sm:auto-cols-fr sm:grid-flow-col'}>
             {kinds.map((kind) => {
               const active = filter === kind
               return (
@@ -208,18 +209,26 @@ function ResearcherSummary({
                   // The title shows on hover only; the description reaches keyboard and screen reader users.
                   aria-describedby={`${meaningId}-${kind}`}
                   className={cn(
-                    'flex flex-col items-start gap-0.5 rounded-xl px-3.5 py-3 text-left transition-colors',
+                    narrow
+                      ? 'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-left transition-colors'
+                      : 'flex flex-col items-start gap-0.5 rounded-xl px-3.5 py-3 text-left transition-colors',
                     'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
                     'disabled:cursor-default disabled:opacity-60',
                     active ? 'bg-accent-soft ring-2 ring-accent' : 'bg-neutral-soft enabled:hover:bg-accent-soft',
                   )}
                 >
-                  <span aria-hidden="true" className={cn('text-[26px] leading-8 font-semibold tracking-tight tabular-nums', COUNT_STYLES[kind])}>
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      narrow ? 'text-sm font-semibold tabular-nums' : 'text-[26px] leading-8 font-semibold tracking-tight tabular-nums',
+                      COUNT_STYLES[kind],
+                    )}
+                  >
                     {counts[kind]}
                   </span>
                   {/* The badge's own words, so a tile and the claims it filters say the same thing.
                       Two lines tall even when one, so the tiles stay level when a label wraps. */}
-                  <span aria-hidden="true" className="min-h-8 text-xs leading-4 font-medium text-ink-muted">
+                  <span aria-hidden="true" className={cn('text-xs leading-4 font-medium text-ink-muted', !narrow && 'min-h-8')}>
                     {STANDING_LABELS[kind]}
                   </span>
                   <span id={`${meaningId}-${kind}`} className="sr-only">

@@ -151,7 +151,7 @@ export function ClaimDecision({
     target?.focus({ preventScroll: true })
   }, [decisionTurns])
   return (
-    // The target of the Workspace's "Skip to the decision" link.
+    // The target of the top bar's "Skip to the decision" link (LabelerApp).
     <section
       ref={section}
       id="claim-decision"
@@ -258,6 +258,8 @@ export function ClaimDecision({
             value={draft.edited}
             onChange={(event) => onChange({ edited: event.target.value })}
             onBlur={() => reword && onRewordBlur?.()}
+            // Esc leaves the box, keeping the wording, so Z and the other keys work again.
+            onKeyDown={(event) => event.key === 'Escape' && event.currentTarget.blur()}
             aria-describedby={reword ? `${edit}-reword` : undefined}
             rows={3}
             maxLength={4000}

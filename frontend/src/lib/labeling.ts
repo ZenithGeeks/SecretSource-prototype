@@ -1051,7 +1051,7 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
 }
 
 /** Claims finished and saved, for the progress bar: an unsaved draft is not finished yet, and
- * is counted apart in `unsaved`. */
+ * is counted apart in `unsaved`. `ready` counts the unsaved ones with every decision made. */
 export function progress(
   claims: WorkClaim[],
   drafts: Record<string, Draft>,
@@ -1059,6 +1059,7 @@ export function progress(
   saved: Record<string, Draft>,
 ) {
   const done = claims.filter((c) => isSavedDone(c, drafts, saved, references)).length
-  const unsaved = claims.filter((c) => !sameDraft(draftOf(drafts, c.claim_id), saved[c.claim_id])).length
-  return { done, unsaved, total: claims.length }
+  const changed = claims.filter((c) => !sameDraft(draftOf(drafts, c.claim_id), saved[c.claim_id]))
+  const ready = changed.filter((c) => isDone(c, draftOf(drafts, c.claim_id), references)).length
+  return { done, unsaved: changed.length, ready, total: claims.length }
 }

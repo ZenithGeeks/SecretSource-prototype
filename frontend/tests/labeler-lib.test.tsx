@@ -247,14 +247,14 @@ describe('sameDraft and progress', () => {
   it('counts a claim only when it is finished and saved', () => {
     const rejected: Draft = { ...emptyDraft(), status: 'rejected' }
     const claims = [claim({ claim_id: 'a' }), claim({ claim_id: 'b' }), claim({ claim_id: 'c' })]
-    expect(progress(claims, { a: rejected, b: rejected }, [], { a: rejected })).toEqual({ done: 1, unsaved: 1, total: 3 })
+    expect(progress(claims, { a: rejected, b: rejected }, [], { a: rejected })).toEqual({ done: 1, unsaved: 1, ready: 1, total: 3 })
   })
 
   it('counts every claim whose draft differs from what was saved as unsaved', () => {
     const rejected: Draft = { ...emptyDraft(), status: 'rejected' }
     const claims = [claim({ claim_id: 'a' }), claim({ claim_id: 'b' })]
-    expect(progress(claims, { a: rejected, b: rejected }, [], {})).toEqual({ done: 0, unsaved: 2, total: 2 })
-    expect(progress(claims, { a: rejected }, [], { a: rejected })).toEqual({ done: 1, unsaved: 0, total: 2 })
+    expect(progress(claims, { a: rejected, b: rejected }, [], {})).toEqual({ done: 0, unsaved: 2, ready: 2, total: 2 })
+    expect(progress(claims, { a: rejected }, [], { a: rejected })).toEqual({ done: 1, unsaved: 0, ready: 0, total: 2 })
   })
 })
 

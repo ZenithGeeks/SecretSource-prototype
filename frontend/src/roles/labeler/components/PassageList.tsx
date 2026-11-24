@@ -228,6 +228,7 @@ export function PassageList({
   search,
   onSearchAgain,
   onAsk,
+  canAdd = true,
 }: {
   claim: WorkClaim
   draft: Draft
@@ -248,6 +249,8 @@ export function PassageList({
   onSearchAgain?: () => void
   /** Ask AI about one passage; without it the cards have no Ask button. */
   onAsk?: (passage: AskedPassage) => void
+  /** False hides "Add a missed passage", for a claim with no paper a passage could come from. */
+  canAdd?: boolean
 }) {
   // Automatic focus opens the PDF while leaving the label panel at the claim decision.
   const revealFocused = !focus?.automatic
@@ -349,7 +352,12 @@ export function PassageList({
         const addedKey = (a: AddedPassage) => `added:${a.reference_id}:${a.passage}`
         return (
           <section key={id} aria-label={labelOf(id)} data-ask-target={askTarget({ kind: 'reference', id })} className="flex flex-col gap-2">
-            {refIds.length === 1 && <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>}
+            {/* One heading: the title is a muted line under it, as on the claim. */}
+            {refIds.length === 1 && (
+              <p title={labelOf(id)} className="truncate text-xs text-ink-muted">
+                {labelOf(id)}
+              </p>
+            )}
             {cands.length > 0 && (
               <p className="text-caption text-ink-muted pointer-coarse:hidden">R relevant · N not relevant · J/U or ↓/↑ next/previous</p>
             )}
@@ -404,7 +412,7 @@ export function PassageList({
         )
       })()}
 
-      <AddPassage references={references} onAdd={onAdd} />
+      {canAdd && <AddPassage references={references} onAdd={onAdd} />}
     </section>
   )
 }
@@ -421,7 +429,7 @@ function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p:
     return (
       <Button variant="ghost" className="justify-start" onClick={() => setOpen(true)}>
         <Plus className="size-4" />
-        Add a passage retrieval missed
+        Add a missed passage
       </Button>
     )
   return (

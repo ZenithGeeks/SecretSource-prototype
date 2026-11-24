@@ -247,6 +247,15 @@ describe('the Analyses list', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(3)
   })
 
+  it('clears the Has a claim filter from the × beside it, which shows only while a standing is picked', () => {
+    wrap(<AnalysisList analyses={list} onOpen={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Clear the Has a claim filter' })).not.toBeInTheDocument()
+    pickStanding('Source contradicts')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the Has a claim filter' }))
+    expect(screen.getAllByRole('listitem')).toHaveLength(4)
+    expect(screen.queryByRole('button', { name: 'Clear the Has a claim filter' })).not.toBeInTheDocument()
+  })
+
   it('names the search alone when a search leaves nothing and no filter is on', () => {
     wrap(<AnalysisList analyses={list} onOpen={vi.fn()} />)
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search your analyses' }), { target: { value: 'nothing' } })
@@ -304,8 +313,8 @@ describe('a failed run', () => {
     expect(screen.getByText(`Finished ${shortDate(new Date(completed))}`)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Open the finished run' }))
     expect(onOpen).toHaveBeenCalledWith('later')
-    // Running it again is still possible, but no longer the main action.
-    expect(screen.getByRole('button', { name: 'Run it again' }).className).toContain('text-ink-muted')
+    // Running it again is still possible, but as a link, no longer a button beside the main action.
+    expect(screen.getByRole('button', { name: 'Run it again' }).className).toContain('hover:underline')
     expect(screen.getByRole('button', { name: 'Open the finished run' }).className).toContain('bg-accent')
   })
 
@@ -410,6 +419,12 @@ describe('a failed run', () => {
     wrap(<FailedRun analysis={failed} onOpen={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Run it again' }))
     expect(await screen.findByText('Could not start it: the queue is full')).toBeInTheDocument()
+  })
+
+  it('tells an uploaded paper stopped by a busy service to wait, then upload it again', () => {
+    wrap(<FailedRun analysis={{ ...failed, paper: 'papers/x-1.pdf' }} onOpen={vi.fn()} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('The checking service was busy, so the analysis stopped. Try again in a few minutes.')
+    expect(screen.getByText('Upload the PDF again to run a new check.')).toBeInTheDocument()
   })
 
   it('asks for the PDF again when the paper was an upload, and hides details that add nothing', () => {
@@ -655,12 +670,17 @@ describe('moving through the sidebar rows', () => {
     expect(row('Paper B')).toHaveFocus()
   })
 
-  it('leaves focus alone when a key comes from the contents under the open row', () => {
+  it('puts the open paper’s contents above the list, in reach without scrolling to its row', () => {
     wrap(<HistoryList analyses={papers} selected="a" onSelect={vi.fn()} contents={<button type="button">Section</button>} />)
     const section = screen.getByRole('button', { name: 'Section' })
-    section.focus()
-    fireEvent.keyDown(section, { key: 'ArrowDown' })
-    expect(section).toHaveFocus()
+    const list = screen.getByRole('region', { name: 'Recent analyses' })
+    expect(list).not.toContainElement(section)
+    expect(section.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('shows no contents when the open analysis is not in the list', () => {
+    wrap(<HistoryList analyses={papers} selected="gone" onSelect={vi.fn()} contents={<button type="button">Section</button>} />)
+    expect(screen.queryByRole('button', { name: 'Section' })).not.toBeInTheDocument()
   })
 
   it('shows just the claim count when no source contradicts', () => {
@@ -822,14 +842,14 @@ describe('the order and the memory of the Analyses list', () => {
     expect(window.history.state.analysisList.openGroups).toEqual([])
   })
 
-  it('shows the worst three standings on a row and names the rest in a +N badge', () => {
+  it('shows every standing on a row, so none is hidden behind a +N badge', () => {
     const verdict = (kind: string) => ({ claim: kind, citations: [], verdicts: [{ verdict: kind }] })
     const named = { claim: 'n', citations: [{ doi: '10.1/d' }], named: ['10.1/d'], verdicts: [] }
     const claims = [verdict('refutes'), verdict('insufficient'), verdict('supports'), named] as unknown as Analysis['claims']
     wrap(<AnalysisList analyses={[analysis({ id: 'x', title: 'Paper', claims })]} onOpen={vi.fn()} />)
     const row = screen.getByRole('button', { name: /^Paper/ })
-    expect(within(row).getByText('+1')).toHaveAttribute('title', 'Names a tool or dataset: 1')
-    expect(row).toHaveAttribute('title', expect.stringContaining('Names a tool or dataset: 1'))
+    expect(within(row).getByText('Names a tool or dataset: 1')).toBeInTheDocument()
+    expect(within(row).queryByText('+1')).not.toBeInTheDocument()
   })
 
   it('starts at the top with no saved state', () => {

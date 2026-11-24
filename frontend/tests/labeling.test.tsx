@@ -644,7 +644,7 @@ describe('the workspace', () => {
     expect(screen.getByRole('radio', { name: /^High/ })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText('Every decision made, not saved yet')).toBeInTheDocument()
     expect(screen.getByText('0 of 2 claims finished')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Claim 1, in progress, unsaved/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Claim 1, ready to save/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^Save claim \d+$/ }))
     expect(await screen.findByText('1 of 2 claims finished')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Claim 1, finished:/ })).toBeInTheDocument()
@@ -742,7 +742,7 @@ describe('the workspace', () => {
     try {
       await open()
       fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
-      fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
       fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'unread-b2' } })
       expect(screen.getByRole('option', { name: 'Ref C (no PDF)' })).toBeInTheDocument()
       fireEvent.change(screen.getByLabelText('The passage'), { target: { value: 'CoT is not explainability' } })

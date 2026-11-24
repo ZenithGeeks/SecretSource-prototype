@@ -407,9 +407,11 @@ describe('pages, crops and passages of the leading answer', () => {
   it('opens a page chip at its page with the located crop box', () => {
     card({ verdicts: [verdict({ pages, page_model: 'vidore/colqwen2-v1.0' })] }, { onShow, standing: 'supports', startCollapsed: false })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
-    fireEvent.click(screen.getByRole('button', { name: 'Page 8 in the cited paper' }))
-    expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ page: 8, source: location, label: 'Claim 1 · page 8 of Batch Normalization' }))
-    expect(screen.getByRole('button', { name: 'Figure 4 in the cited paper' })).toHaveAttribute(
+    // The figures and tables with a crop show as pictures, so only the plain page has a chip.
+    expect(screen.queryByRole('button', { name: 'Page 8 in the cited paper' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Page 3 in the cited paper' }))
+    expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ page: 3, label: 'Claim 1 · page 3 of Batch Normalization' }))
+    expect(screen.getByRole('button', { name: 'Page 3 in the cited paper' })).toHaveAttribute(
       'title',
       'Found by searching the pages as images',
     )
@@ -418,14 +420,14 @@ describe('pages, crops and passages of the leading answer', () => {
   it('gives a page chip no title when no page search found it', () => {
     card({ verdicts: [verdict({ pages })] }, { onShow })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
-    expect(screen.getByRole('button', { name: 'Figure 4 in the cited paper' })).not.toHaveAttribute('title')
+    expect(screen.getByRole('button', { name: 'Page 3 in the cited paper' })).not.toHaveAttribute('title')
   })
 
   it('shows chips as plain labels without a viewer', () => {
     card({ verdicts: [verdict({ pages })] })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
-    expect(screen.getByText('Figure 4 in the cited paper')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Figure 4 in the cited paper' })).not.toBeInTheDocument()
+    expect(screen.getByText('Page 3 in the cited paper')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Page 3 in the cited paper' })).not.toBeInTheDocument()
   })
 
   it('shows the crops of figures and tables, not of whole pages, with a stutter-free caption', () => {
@@ -508,13 +510,13 @@ describe('pages, crops and passages of the leading answer', () => {
   })
 
   it('counts the preprint note, the page chips, the crops and the passages in More evidence', () => {
-    // 1 note + 5 pages + 4 crops (the plain page has none) + 1 passage.
+    // 1 note + 1 page chip + 4 crops (each figure or table once, as its picture) + 1 passage.
     card({ verdicts: [verdict({ pages, evidence, source_version: 'preprint', arxiv: '1502.03167' })] })
     open()
-    const details = screen.getByText('More evidence (11)').closest('details') as HTMLElement
+    const details = screen.getByText('More evidence (7)').closest('details') as HTMLElement
     expect(details).not.toHaveAttribute('open')
     expect(within(details).getByText(/Checked against the arXiv preprint 1502\.03167/)).toBeInTheDocument()
-    expect(within(details).getByText('Figure 4 in the cited paper')).toBeInTheDocument()
+    expect(within(details).getByText('Page 3 in the cited paper')).toBeInTheDocument()
     expect(within(details).getByText('“A passage.”')).toBeInTheDocument()
   })
 

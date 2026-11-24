@@ -194,6 +194,8 @@ describe('the workspace help and notices', () => {
       await screen.findByRole('heading', { name: 'Claim 1 of 2' })
       fireEvent.keyDown(window, { key: 'k' })
       expect(await screen.findByText(line)).toBeInTheDocument()
+      // A claim that cites no paper has nowhere a missed passage could come from.
+      expect(screen.queryByRole('button', { name: 'Add a missed passage' }) !== null).toBe(refs.length > 0)
     } finally {
       delete claim.unchecked
     }

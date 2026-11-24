@@ -8,7 +8,7 @@
  */
 
 import { useQueryClient } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { Loader2, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
@@ -28,7 +28,7 @@ import type { Target } from './PageViewer'
 import { PageViewer } from './PageViewer'
 import { ResultsSummary } from './ResultsSummary'
 import { KEY_CAP } from './StandingKey'
-import { Card, Empty } from './ui'
+import { Card, Empty, IconButton } from './ui'
 
 /** A section picked in the table of contents, to open at its page. `at` tells a newer pick
  * from the page the reader opened or closed since. */
@@ -41,6 +41,39 @@ function verdictOf(standing: Standing): Target['verdict'] {
 
 /** "Show all claims", after a section or a standing narrowed the list. */
 const CLEAR_BUTTON = 'rounded-sm text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent'
+
+/** The open page and the card parts the reader opened, kept in the history entry so Back and
+ * Forward into this analysis find them as the reader left them. */
+type SavedView = { id: string; target: Target | null; parts: [string, boolean][] }
+
+function savedView(id: string | null): SavedView | undefined {
+  const view = (window.history.state as { analysisView?: SavedView } | null)?.analysisView
+  return id !== null && view?.id === id ? view : undefined
+}
+
+function saveView(id: string | null, change: Partial<SavedView>) {
+  // Only into this analysis's own entry: after Back, the address already names the page before it.
+  if (id === null || new URLSearchParams(window.location.search).get('analysis') !== id) return
+  const view: SavedView = { target: null, parts: [], ...savedView(id), ...change, id }
+  window.history.replaceState({ ...window.history.state, analysisView: view }, '')
+}
+
+/** OpenParts for one analysis, filled from and written through to its history entry. */
+class SavedParts extends Map<string, boolean> {
+  private readonly id: string | null
+
+  constructor(id: string | null) {
+    super()
+    this.id = id
+    for (const [key, open] of savedView(id)?.parts ?? []) super.set(key, open)
+  }
+
+  set(key: string, open: boolean) {
+    super.set(key, open)
+    saveView(this.id, { parts: [...this] })
+    return this
+  }
+}
 
 /** A claim the run has finished with: it has an answer, a failure, or nothing to check. */
 function settled(claim: Claim) {
@@ -109,7 +142,10 @@ export function AnalysisView({
   /** Opens another run of the paper from a failed one: its retry, or a later run that finished. */
   onRetried?: (id: string) => void
 }) {
-  const [opened, setOpened] = useState<{ target: Target | null; at: number }>({ target: null, at: 0 })
+  const restorable = presentation !== 'teacher'
+  const [restored] = useState(() => (restorable ? (savedView(id)?.target ?? null) : null))
+  const [opened, setOpened] = useState<{ target: Target | null; at: number }>({ target: restored, at: 0 })
+  const restoredNotified = useRef(false)
   const activeLookup = useRef<number | undefined>(undefined)
   useLayoutEffect(() => {
     activeLookup.current = undefined
@@ -118,11 +154,12 @@ export function AnalysisView({
   const filter = shownFilter === undefined ? ownFilter : shownFilter
   const keepFilter = onFilter ?? setOwnFilter
   const [paperDismissedFor, setPaperDismissedFor] = useState<string | null>(null)
-  // What a shortcut did instead, or could not do: shown on the claim's own card and read out.
-  const [keyNotice, setKeyNotice] = useState<{ claim: number; text: string } | null>(null)
+  // What a shortcut did instead, or could not do: read out, and shown on the claim's card, or in
+  // the viewer's header when the viewer opened (`inViewer`), so the card keeps its section and page.
+  const [keyNotice, setKeyNotice] = useState<{ claim: number; text: string; inViewer?: boolean } | null>(null)
   const paperNotifiedFor = useRef<string | null>(null)
   // What the reader opened on the claim cards, kept here so a filter change does not fold it.
-  const [openParts] = useState(() => new Map<string, boolean>())
+  const [openParts] = useState(() => (restorable ? new SavedParts(id) : new Map<string, boolean>()))
   const queryClient = useQueryClient()
   const analysis = useAnalysis(id)
   const running = analysis.data?.status === 'running'
@@ -162,7 +199,7 @@ export function AnalysisView({
           action?.click()
           if (!action) setKeyNotice({ claim, text: `No quoted passage to show for claim ${claim + 1}` })
           else if (action.dataset.inPaper !== undefined) {
-            setKeyNotice({ claim, text: `No quote from a cited work for claim ${claim + 1} · showing it in this paper` })
+            setKeyNotice({ claim, text: `No quote from a cited work for claim ${claim + 1} · showing it in this paper`, inViewer: true })
           }
         }
         const toggle = inCard('[data-claim-toggle][aria-expanded="false"]')
@@ -224,12 +261,21 @@ export function AnalysisView({
     activeLookup.current = next?.locating ? next.lookup : undefined
     setKeyNotice(null)
     setOpened({ target: next, at: Date.now() })
+    // A lookup still running would never finish after a restore: its final target is saved instead.
+    if (restorable && !next?.locating) saveView(id, { target: next && { ...next, lookup: undefined } })
     if (!next && id) setPaperDismissedFor(id)
     onTargetChange?.(next !== null)
     const inPaper = next !== null && next.paper === file
     const page = next?.source?.page ?? next?.page
     onCurrentSection?.(inPaper ? (next.section ?? (page ? sectionOfPage(outline, page) : null)) : null)
   }
+
+  // A page restored from the history entry widens the shell, as opening one does.
+  useEffect(() => {
+    if (!restored || restoredNotified.current) return
+    restoredNotified.current = true
+    onTargetChange?.(true)
+  }, [restored, onTargetChange])
 
   useEffect(() => {
     if (!id || !file || !openPaperOnLoad || paperDismissedFor === id || paperNotifiedFor.current === id) return
@@ -387,11 +433,17 @@ export function AnalysisView({
                 <kbd className={KEY_CAP}>O</kbd> shows the evidence
               </p>
               {filter && (
-                <p className="text-ui text-ink-muted" aria-live="polite">
-                  Showing {shown.length} of {standings.length}{' '}
-                  <button type="button" onClick={() => keepFilter(null)} className={CLEAR_BUTTON}>
-                    Show all claims
-                  </button>
+                <p className="flex items-center gap-1 text-ui text-ink-muted" aria-live="polite">
+                  Showing {shown.length} of {standings.length}
+                  <IconButton onClick={() => keepFilter(null)} aria-label={`Clear the ${STANDING_LABELS[filter]} filter`}>
+                    <X className="size-4" aria-hidden="true" />
+                  </IconButton>
+                  {/* Each × clears its own filter; with a section picked too, one button clears both. */}
+                  {section && onClearSection && (
+                    <button type="button" onClick={showAllClaims} className={CLEAR_BUTTON}>
+                      Clear all
+                    </button>
+                  )}
                 </p>
               )}
             </div>
@@ -405,9 +457,9 @@ export function AnalysisView({
                 Claims from <span className="font-medium text-ink">{sectionName(outline, section)}</span>
               </span>
               {onClearSection && (
-                <button type="button" onClick={onClearSection} className={CLEAR_BUTTON}>
-                  Show all claims
-                </button>
+                <IconButton onClick={onClearSection} aria-label="Clear the section filter">
+                  <X className="size-4" aria-hidden="true" />
+                </IconButton>
               )}
             </p>
           )}
@@ -435,7 +487,7 @@ export function AnalysisView({
                 sourceUpload={sourceUpload}
                 actions={renderClaimActions?.(claim, index)}
                 stacked={target !== null && !teacher}
-                notice={keyNotice?.claim === index ? keyNotice.text : undefined}
+                notice={keyNotice?.claim === index && !keyNotice.inViewer ? keyNotice.text : undefined}
                 onSelect={presentation === 'teacher' && file && claim.source
                   ? () => setTarget({
                       paper: file,
@@ -462,14 +514,21 @@ export function AnalysisView({
             <PageViewer
               key={target.paper}
               onLabel={target.claim === undefined ? undefined : backToClaim}
-              notice={hiddenClaim !== null && (
-                <p className="text-xs text-ink-muted">
-                  Claim {hiddenClaim + 1} is hidden by the current filter ·{' '}
-                  <button type="button" onClick={showAllClaims} className={CLEAR_BUTTON}>
-                    Show all claims
-                  </button>
-                </p>
-              )}
+              notice={
+                <>
+                  {keyNotice?.inViewer && (
+                    <p className="text-xs text-ink-muted">No cited work quotes this claim, so this is where it sits in the paper.</p>
+                  )}
+                  {hiddenClaim !== null && (
+                    <p className="text-xs text-ink-muted">
+                      Claim {hiddenClaim + 1} is hidden by the current filter ·{' '}
+                      <button type="button" onClick={showAllClaims} className={CLEAR_BUTTON}>
+                        Show all claims
+                      </button>
+                    </p>
+                  )}
+                </>
+              }
               className={actionsInToolbar ? 'h-[calc(100vh-var(--spacing)*21)]' : undefined}
               target={target}
               onClose={() => setTarget(null)}

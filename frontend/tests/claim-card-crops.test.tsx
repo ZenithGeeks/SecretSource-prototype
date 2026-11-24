@@ -81,8 +81,14 @@ describe('the crops on the claim card', () => {
     expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ paper: 'colbert.pdf', page: 8, source: region }))
   })
 
-  it('opens a page chip with the box outlined too', () => {
-    const onShow = claimCard(verdict())
+  it('gives a cropped table no chip as well, since its picture already opens it', () => {
+    claimCard(verdict())
+
+    expect(screen.queryByRole('button', { name: 'Table 3 in the cited paper' })).not.toBeInTheDocument()
+  })
+
+  it('opens the chip of a table without a crop with the box outlined too', () => {
+    const onShow = claimCard(verdict({ pages: [{ ...table, image: undefined }] }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Table 3 in the cited paper' }))
 

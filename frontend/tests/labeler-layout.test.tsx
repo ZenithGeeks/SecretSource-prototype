@@ -126,7 +126,7 @@ describe('the labeler workspace layout', () => {
       screen.getByRole('progressbar', { name: 'Claims finished' }).closest('header'),
     )
     fireEvent.click(screen.getByRole('button', { name: 'Add claim' }))
-    expect(screen.getByRole('button', { name: 'Claim 3, in progress, unsaved, no reference to read: A new claim' })).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByRole('button', { name: 'Claim 3, ready to save, no reference to read: A new claim' })).toHaveAttribute('aria-current', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Add a missed claim' }))
     expect(screen.getByRole('textbox', { name: 'A claim extraction missed' })).toHaveValue('')
   })

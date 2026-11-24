@@ -22,7 +22,7 @@ const PLAIN: { match: RegExp; text: string; retry: boolean; advice?: string }[] 
   },
 ]
 
-/** `advice` is when to retry, shown only where a retry is offered. */
+/** `advice` is when to retry, shown only where a retry can help. */
 export type AnalysisFailure = { text: string; retry: boolean; advice: string; details: string }
 
 /** The plain sentence for a failure message, and whether running it again may help. */

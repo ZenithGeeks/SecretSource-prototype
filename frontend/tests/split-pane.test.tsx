@@ -31,6 +31,25 @@ describe('SplitPane', () => {
     expect(screen.getByRole('region', { name: 'Paper' })).toHaveStyle({ maxWidth: 'calc(100% - 438px)' })
   })
 
+  it('never makes the first pane, or the whole split, smaller than both minimums', () => {
+    // 1000px tall: the top pane keeps 320px, so Home stops at 0.32 instead of 0.25.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ height: 1000 } as DOMRect)
+    render(pane({ direction: 'vertical', minLeft: 320, minRight: 300 }))
+    const handle = screen.getByRole('separator')
+
+    fireEvent.keyDown(handle, { key: 'Home' })
+
+    expect(handle).toHaveAttribute('aria-valuenow', '32')
+    expect(screen.getByRole('region', { name: 'Paper' })).toHaveStyle({ minHeight: '320px', maxHeight: 'calc(100% - 306px)' })
+    expect(handle.parentElement).toHaveStyle({ minHeight: '626px' })
+  })
+
+  it('keeps the same minimums across, side by side', () => {
+    render(pane({ minLeft: 320, minRight: 300 }))
+    expect(screen.getByRole('region', { name: 'Paper' })).toHaveStyle({ minWidth: '320px' })
+    expect(screen.getByRole('separator').parentElement).toHaveStyle({ minWidth: '626px' })
+  })
+
   it('keeps the ratio under its key and starts from it next time', () => {
     const { unmount } = render(pane({ storageKey: KEY }))
     fireEvent.keyDown(screen.getByRole('separator'), { key: 'ArrowRight' })

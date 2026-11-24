@@ -261,6 +261,17 @@ describe('ClaimDecision', () => {
     expect(onChange).toHaveBeenCalledWith({ edited: 'Mine, better' })
   })
 
+  it('leaves the wording box on Escape, keeping the wording, so the next key is a shortcut again', () => {
+    render(<ClaimDecision claim={claim('c1', 'Original.')} position={1} count={2} draft={{ ...emptyDraft(), status: 'edited', edited: 'Mine' }} onChange={vi.fn()} />)
+    const box = screen.getByRole('textbox', { name: 'The claim, as it should read' })
+    box.focus()
+    fireEvent.keyDown(box, { key: 'z' })
+    expect(box).toHaveFocus()
+    fireEvent.keyDown(box, { key: 'Escape' })
+    expect(box).not.toHaveFocus()
+    expect(box).toHaveValue('Mine')
+  })
+
   it('reopens a saved decision so it can be changed', () => {
     const onChange = vi.fn()
     render(<ClaimDecision claim={claim('c1', 'Original.')} position={1} count={2} draft={{ ...emptyDraft(), status: 'accepted' }} onChange={onChange} />)
@@ -406,6 +417,17 @@ describe('LabelForm', () => {
     return onChange
   }
 
+  it('leaves the reason box on Escape, keeping what was typed', () => {
+    form({ label: { ...emptyLabel(), evidence: 3, rationale: 'n = 12' } })
+    const box = screen.getByRole('textbox', { name: /Why this level/ })
+    box.focus()
+    fireEvent.keyDown(box, { key: 'a' })
+    expect(box).toHaveFocus()
+    fireEvent.keyDown(box, { key: 'Escape' })
+    expect(box).not.toHaveFocus()
+    expect(box).toHaveValue('n = 12')
+  })
+
   it('shows who else labeled the pair, and sends each change', () => {
     const onChange = form({ others: ['Somchai', 'Ann'] })
     expect(screen.getByText('Also labeled by Somchai, Ann. Their levels are not shown here, so choose yours on your own.')).toBeInTheDocument()
@@ -456,16 +478,16 @@ describe('LabelForm keys and level rules', () => {
   const form = (over: Partial<Parameters<typeof LabelForm>[0]> = {}) =>
     render(<LabelForm tag="[7]" title="Ref B" active label={emptyLabel()} others={[]} onChange={vi.fn()} {...over} />)
 
-  it('draws each level number as its key on the reference in view only, once', () => {
+  it('shows the key chip of each level on the reference in view only', () => {
     const { unmount } = form()
     const clear = screen.getByRole('radio', { name: '3 · Clear' })
     expect(clear).toHaveAttribute('aria-keyshortcuts', '3')
-    expect(within(clear).getByText('3')).toHaveClass('border')
-    expect(clear).toHaveTextContent(/^3Clear$/)
+    expect(clear.querySelector('kbd')).toHaveTextContent('3')
+    expect(clear).toHaveTextContent(/^3Clear3$/)
     unmount()
     form({ active: false })
     expect(screen.getByRole('radio', { name: '3 · Clear' })).not.toHaveAttribute('aria-keyshortcuts')
-    expect(within(screen.getByRole('radio', { name: '3 · Clear' })).getByText('3')).not.toHaveClass('border')
+    expect(screen.getByRole('radio', { name: '3 · Clear' }).querySelector('kbd')).toBeNull()
   })
 
   it('shows the rule of the level pointed at or focused, else of the chosen one', () => {
@@ -517,6 +539,18 @@ describe('SaveBar', () => {
     expect(props.onSave).toHaveBeenLastCalledWith(false)
     fireEvent.click(screen.getByRole('button', { name: /^Save claim \d+ and next$/ }))
     expect(props.onSave).toHaveBeenLastCalledWith(true)
+  })
+
+  it('fills a save button only when the claim is complete, so a partial save is never the obvious step', () => {
+    const filled = () => screen.queryAllByRole('button', { name: /^Save claim/ }).filter((b) => b.classList.contains('bg-accent')).map((b) => b.textContent)
+    const { unmount } = render(<SaveBar left={['Give Ref B a level']} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={3} />)
+    expect(filled()).toEqual([])
+    unmount()
+    const again = render(<SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={3} />)
+    expect(filled()).toEqual(['Save claim 3 and next'])
+    again.unmount()
+    render(<SaveBar left={['Give Ref B a level']} dirty saving={false} error={null} savedRows={null} hasNext={false} onSave={vi.fn()} claimNumber={3} />)
+    expect(filled()).toEqual([])
   })
 
   it('shows the shortcut when unsaved with nothing left', () => {

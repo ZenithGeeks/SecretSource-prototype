@@ -4,8 +4,8 @@
  * is one Tab stop, on the marked section, and the arrow keys move along it.
  *
  * Figma: "Table of contents" (TocItem set, and the list under the selected analysis in 03
- * Results and 04 Page viewer). It sits in the History sidebar, directly under the analysis it
- * belongs to, and knows nothing about the researcher screens, so another role can place it too.
+ * Results and 04 Page viewer). It sits in the History sidebar, above the recent analyses, and
+ * knows nothing about the researcher screens, so another role can place it too.
  */
 
 import { useQuery } from '@tanstack/react-query'

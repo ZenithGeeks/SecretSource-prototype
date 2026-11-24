@@ -103,11 +103,12 @@ export function LabelForm({
                 : 'border-border-subtle bg-surface text-ink-muted hover:border-accent',
             )}
           >
-            {/* The keys set the level of the reference in view only, so on its form the number is drawn as its key. */}
-            <span className={cn('text-base font-semibold tabular-nums', active && 'rounded-sm border border-border-subtle bg-canvas px-1.5')}>
-              {level}
+            <span className="text-base font-semibold tabular-nums">{level}</span>
+            {/* The keys set the level of the reference in view only, so only its form shows them. */}
+            <span className="flex items-center gap-1 text-xs">
+              {name}
+              {active && <Kbd>{String(level)}</Kbd>}
             </span>
-            <span className="text-xs">{name}</span>
           </button>
         ))}
       </div>
@@ -154,6 +155,8 @@ export function LabelForm({
           id={why}
           value={value.rationale}
           onChange={(event) => onChange({ ...value, rationale: event.target.value })}
+          // Esc leaves the box, keeping the text, so the next shortcut key is not typed into it.
+          onKeyDown={(event) => event.key === 'Escape' && event.currentTarget.blur()}
           rows={2}
           maxLength={2000}
         />

@@ -10,7 +10,7 @@ import { api, type Analysis } from '../lib/api'
 import { analysisFailure } from '../lib/analysisError'
 import { groupRuns, runTime } from '../lib/claims'
 import { OFFLINE_REASON, useFeature } from '../lib/features'
-import { Button } from './ui'
+import { Button, TextButton } from './ui'
 
 /** An uploaded paper is stored as a server path, which cannot be sent back as a new request. */
 const restartable = (paper: string) => !paper.toLowerCase().endsWith('.pdf')
@@ -38,9 +38,12 @@ export function FailedRun({ analysis, onOpen }: { analysis: Analysis; onOpen?: (
   const online = useFeature('analyses')
   const later = onOpen && laterFinishedRun(analysis, runs)
   // One message per state: a finished later run makes retry advice beside it noise, and an
-  // offline server makes "try again in a few minutes" a promise nobody keeps.
-  const advice = canRetry && !later && online ? failure.advice : ''
+  // offline server makes "try again in a few minutes" a promise nobody keeps. An uploaded paper
+  // gets the advice too: it is retried by uploading it again.
+  const advice = failure.retry && !later && online ? failure.advice : ''
 
+  // Beside a finished run, running it again is the rare choice: a link, not a second button.
+  const RetryButton = later ? TextButton : Button
   const reasonId = useId()
   // Why "Run it again" is off, or what it costs, as text beside it: a disabled button shows no tooltip.
   const retryNote = retry.isError
@@ -60,15 +63,10 @@ export function FailedRun({ analysis, onOpen }: { analysis: Analysis; onOpen?: (
           {/* The same words the Analyses list dates that run by. */}
           {later && <span className="text-ink-muted">{runTime(later)}</span>}
           {canRetry && (
-            <Button
-              variant={later ? 'ghost' : 'solid'}
-              disabled={!online || retry.isPending}
-              aria-describedby={retryNote ? reasonId : undefined}
-              onClick={() => retry.mutate()}
-            >
-              <RotateCcw className="size-4" aria-hidden="true" />
+            <RetryButton disabled={!online || retry.isPending} aria-describedby={retryNote ? reasonId : undefined} onClick={() => retry.mutate()}>
+              {!later && <RotateCcw className="size-4" aria-hidden="true" />}
               {retry.isPending ? 'Starting…' : 'Run it again'}
-            </Button>
+            </RetryButton>
           )}
           {canRetry && retryNote && (
             <span id={reasonId} className={retry.isError ? 'text-refutes' : 'text-ink-muted'}>

@@ -11,11 +11,9 @@ vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sess
 vi.mock('react-pdf', () => ({ Document: () => null, Page: () => null, pdfjs: { GlobalWorkerOptions: {}, version: '0' } }))
 
 const HOME = {
-  alert: '3 new papers disagree with something in your library.',
   conflicts: [
     { claim: 'Late interaction wins', paper: 'ColBERTv2', for: ['PLAID', 'A very long cited work title'], against: ['BEIR'], analysis: 'a1', claimIndex: 1 },
   ],
-  conflictsTotal: 28,
   queue: [{ paper: 'PLAID (2022)', note: 'Cited by 3', identifier: '10.1/plaid', analysis: 'a1' }],
   library: { papers: 9, claims: 53, verified: 40, tally: { backed: 28, silent: 7, contradicted: 1, unchecked: 17 } },
 }
@@ -74,8 +72,9 @@ function renderHome(home: typeof HOME = HOME, analyses: object[] = LIBRARY) {
 test('greets the reader with the summary line', async () => {
   renderHome()
   expect(await screen.findByRole('heading', { level: 1, name: /^Good morning/ })).toBeInTheDocument()
-  // No date label above the title: the date leads the summary line.
-  const meta = screen.getByText((_, el) => el?.tagName === 'P' && el.textContent?.endsWith(` · ${HOME.alert}`) === true)
+  // No date label above the title: the date leads the summary line, counted from the same runs as the library bar.
+  const line = ' · 1 claim in your papers contradicted by the work they cite.'
+  const meta = await screen.findByText((_, el) => el?.tagName === 'P' && el.textContent?.endsWith(line) === true)
   expect(meta).toBeInTheDocument()
 })
 
@@ -120,7 +119,7 @@ test('/ puts focus in the analyze box, except while typing in a field', async ()
 })
 
 test('the conflicts card counts every conflict and gives each cited work its own pill', async () => {
-  renderHome()
+  renderHome(HOME, [run('a1', 'ColBERTv2', { refutes: 28 })])
   expect(await screen.findByRole('button', { name: 'All 28 in Library' })).toBeInTheDocument()
   expect(screen.getByTitle('BEIR')).toHaveAttribute('data-verdict', 'refutes')
   expect(screen.getByTitle('PLAID')).toHaveAttribute('data-verdict', 'supports')

@@ -424,12 +424,15 @@ function hitTarget(verdict: Verdict, hit: Hit, name: string): Target {
   }
 }
 
+/** A figure or table match with a picture of it; a page match has none. */
+const hasCrop = (hit: Hit) => hit.kind !== 'page' && Boolean(hit.image)
+
 /** The figure and table crops the cited work was matched on: naming a figure and making the
  * reader open a page to see it is most of the work of looking it up. Pages have no crop. The
  * crop the verdict was read off comes first and says so; the others follow in match order. */
 function FigureCrops({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
   const name = useContext(SourceName)
-  const hits = (verdict.pages ?? []).filter((hit) => hit.kind !== 'page' && hit.image)
+  const hits = (verdict.pages ?? []).filter(hasCrop)
   if (!hits.length) return null
   const ordered = [...hits.filter((hit) => isJudged(verdict, hit)), ...hits.filter((hit) => !isJudged(verdict, hit))]
   return (
@@ -519,8 +522,9 @@ function PreprintNote({ verdict }: { verdict: Verdict }) {
 function MoreEvidence({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
   const [open, setOpen] = useOpenPart(`${useContext(CardKey)} more ${verdict.source}`, false)
   const pages = verdict.pages ?? []
-  const crops = pages.filter((hit) => hit.kind !== 'page' && hit.image).length
-  const count = (verdict.source_version === 'preprint' ? 1 : 0) + pages.length + crops + verdict.evidence.length
+  // A match with a crop shows as its picture below, so it gets no chip as well.
+  const chips = pages.filter((hit) => !hasCrop(hit))
+  const count = (verdict.source_version === 'preprint' ? 1 : 0) + pages.length + verdict.evidence.length
   if (!count) return null
   return (
     <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
@@ -530,9 +534,9 @@ function MoreEvidence({ verdict, onShow }: { verdict: Verdict; onShow?: (target:
       </summary>
       <div className="mt-2 flex flex-col gap-3">
         <PreprintNote verdict={verdict} />
-        {pages.length > 0 && (
+        {chips.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
-            <PageChips verdict={verdict} pages={pages} onShow={onShow} />
+            <PageChips verdict={verdict} pages={chips} onShow={onShow} />
           </div>
         )}
         <FigureCrops verdict={verdict} onShow={onShow} />
