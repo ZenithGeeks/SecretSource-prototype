@@ -3,18 +3,38 @@
  * cut by labelerGuide() and checked by a test. The production image is built from frontend/ alone. */
 
 import { X } from 'lucide-react'
-import { Fragment, useId } from 'react'
+import { Fragment, useEffect, useId, useState } from 'react'
 
 import { DialogPanel, Modal } from '../../../components/library'
 import { IconButton } from '../../../components/ui'
 import { parseGuide, parseInline, type Block } from '../../../lib/guideMarkdown'
-import guide from '../annotation-guideline.md?raw'
+// A static file, not ?raw: the text then stays out of the JS bundle budget.
+import guideUrl from '../annotation-guideline.md?url'
 
-const BLOCKS = parseGuide(guide)
+async function fetchGuide() {
+  const response = await fetch(guideUrl)
+  if (!response.ok) throw new Error(`Labeling guide request failed: ${response.status}`)
+  return parseGuide(await response.text())
+}
 
 export default function LabelingGuide({ onClose }: { onClose: () => void }) {
   const titleId = useId()
-  const headings = BLOCKS.filter((block) => block.kind === 'heading')
+  const [guide, setGuide] = useState<Block[] | 'error'>()
+
+  useEffect(() => {
+    let ignore = false
+    fetchGuide()
+      .catch(() => 'error' as const)
+      .then((result) => {
+        if (!ignore) setGuide(result)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  const blocks = Array.isArray(guide) ? guide : []
+  const headings = blocks.filter((block) => block.kind === 'heading')
   return (
     <Modal titleId={titleId} onClose={onClose}>
       <DialogPanel className="flex max-h-[80vh] w-full max-w-3xl flex-col">
@@ -27,23 +47,27 @@ export default function LabelingGuide({ onClose }: { onClose: () => void }) {
           </IconButton>
         </header>
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pt-3 text-sm leading-6 text-ink-muted">
-          <nav aria-label="Sections">
-            <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              {headings.map((heading) => (
-                <li key={heading.id}>
-                  {/* Buttons, not #links: the hash belongs to the app's routing. */}
-                  <button
-                    type="button"
-                    onClick={() => document.getElementById(heading.id)?.scrollIntoView()}
-                    className="text-accent hover:underline"
-                  >
-                    {heading.text}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </nav>
-          {BLOCKS.map((block, index) => (
+          {guide === undefined && <p>Loading the guide...</p>}
+          {guide === 'error' && <p role="alert">Could not load the guide. Close it and try again.</p>}
+          {headings.length > 0 && (
+            <nav aria-label="Sections">
+              <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                {headings.map((heading) => (
+                  <li key={heading.id}>
+                    {/* Buttons, not #links: the hash belongs to the app's routing. */}
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById(heading.id)?.scrollIntoView()}
+                      className="text-accent hover:underline"
+                    >
+                      {heading.text}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          )}
+          {blocks.map((block, index) => (
             <GuideBlock key={index} block={block} />
           ))}
         </div>

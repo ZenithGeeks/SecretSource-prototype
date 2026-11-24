@@ -41,8 +41,8 @@ function runDetails(analysis: Analysis) {
   return [runTime(analysis), claims].filter(Boolean).join(' · ')
 }
 
-/** The search, open earlier-runs groups and scroll a reader leaves the list with, kept
- * in its history entry so Back from an analysis finds the list as it was. */
+/** The search, open earlier-runs groups and scroll a reader leaves the list with, kept in its
+ * history entry so Back from an analysis finds the list as it was. The filter is in the address. */
 type ListState = { query: string; openGroups: string[]; scrollY: number }
 
 function savedState(): ListState | undefined {
@@ -67,9 +67,7 @@ const CLEAR_BUTTON = 'rounded-sm text-accent hover:underline focus-visible:outli
 export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpen: (id: string) => void }) {
   const [saved] = useState(savedState)
   const [query, setQuery] = useState(saved?.query ?? '')
-  const [picked, setPicked] = useState<Standing[]>(
-    () => standingsIn(new URLSearchParams(window.location.search).get('standing')),
-  )
+  const [picked, setPicked] = useState(() => standingsIn(new URLSearchParams(window.location.search).get('standing')))
   const [openGroups, setOpenGroups] = useState<string[]>(saved?.openGroups ?? [])
   // Back from an analysis returns to where the reader was; anything else starts at the top.
   useEffect(() => {
@@ -84,17 +82,18 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
     setPicked(next)
     writeStandingParam(next)
   }
+  // Sorted once, so the options and the rows group a paper's runs alike and pick the same run.
+  const sorted = [...analyses].sort(byRunTime)
   // Every standing some paper has: the same set an analysis's tiles offer.
-  const ordered = [...analyses].sort(byRunTime)
-  const runs = groupRuns(ordered).map(({ run }) => run)
+  const runs = groupRuns(sorted).map(({ run }) => run)
   const kinds = STANDINGS.filter((kind) => runs.some((run) => has(run, kind)))
   // A standing whose last paper was deleted has no option left, so it stops filtering.
   const shows = picked.filter((kind) => kinds.includes(kind))
   const searchId = useId()
   const words = query.trim().toLowerCase()
   const shown = words
-    ? ordered.filter((analysis) => `${analysisLabel(analysis)} ${analysis.paper}`.toLowerCase().includes(words))
-    : ordered
+    ? sorted.filter((analysis) => `${analysisLabel(analysis)} ${analysis.paper}`.toLowerCase().includes(words))
+    : sorted
   const papers = groupRuns(shown)
     .filter(({ run }) => !shows.length || shows.some((kind) => has(run, kind)))
     .sort((a, b) => byRunTime(a.run, b.run))

@@ -175,7 +175,7 @@ describe('the Analyses list', () => {
   it('offers one filter per standing that needs reading and some paper has', () => {
     const silent = { claim: 's', citations: [], verdicts: [{ verdict: 'insufficient' }] }
     const backed = { claim: 'b', citations: [], verdicts: [{ verdict: 'supports' }] }
-    const runs = [...list, analysis({ id: 'a5', paper: '10.1/quiet', title: 'Quiet one', claims: [silent, backed] as Analysis['claims'] })]
+    const runs = [...list, analysis({ id: 'a5', paper: '10.5/quiet', title: 'Quiet one', claims: [silent, backed] as Analysis['claims'] })]
     wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Has a claim' }))
     const group = screen.getByRole('group', { name: 'Has a claim' })
@@ -191,7 +191,7 @@ describe('the Analyses list', () => {
 
   it('keeps the papers that match any of the standings picked', () => {
     const silent = { claim: 's', citations: [], verdicts: [{ verdict: 'insufficient' }] }
-    const runs = [...list, analysis({ id: 'a5', paper: '10.1/quiet', title: 'Quiet one', claims: [silent] as Analysis['claims'] })]
+    const runs = [...list, analysis({ id: 'a5', paper: '10.5/quiet', title: 'Quiet one', claims: [silent] as Analysis['claims'] })]
     wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
     pickStanding('Source contradicts')
     pickStanding('Source is silent')
@@ -388,7 +388,7 @@ describe('a failed run', () => {
 })
 
 describe('deleting from the sidebar', () => {
-  const rows = [analysis({ id: 'a1', title: 'First paper' }), analysis({ id: 'a2', paper: '10.1/second', title: 'Second paper' })]
+  const rows = [analysis({ id: 'a1', paper: '10.1/first', title: 'First paper' }), analysis({ id: 'a2', paper: '10.1/second', title: 'Second paper' })]
 
   beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }))
   afterEach(() => vi.useRealTimers())
@@ -560,25 +560,37 @@ describe('the open run in the sidebar', () => {
   const rowDetail = (title: string) => screen.getByRole('button', { name: new RegExp(`^${title}`) })
 
   it('says an earlier stopped run is open while the row counts a later finished one', () => {
-    const runs = [analysis({ id: 'ok', title: 'Paper A' }), analysis({ id: 'old', status: 'error', title: 'Paper A' })]
+    const runs = [
+      analysis({ id: 'ok', title: 'Paper A', completed: '2026-11-10T10:00:00' }),
+      analysis({ id: 'old', status: 'error', title: 'Paper A', started: '2026-11-01T10:00:00' }),
+    ]
     wrap(<HistoryList analyses={runs} selected="old" onSelect={vi.fn()} />)
     expect(rowDetail('Paper A')).toHaveTextContent('Viewing an earlier run · stopped')
   })
 
-  it('says a later stopped run is open when it comes before the finished one in the list', () => {
-    const runs = [analysis({ id: 'new', status: 'error', title: 'Paper A' }), analysis({ id: 'ok', title: 'Paper A' })]
+  it('says a later stopped run is open by its time, though the list gives it after the finished one', () => {
+    const runs = [
+      analysis({ id: 'ok', title: 'Paper A', completed: '2026-11-01T10:00:00' }),
+      analysis({ id: 'new', status: 'error', title: 'Paper A', started: '2026-11-10T10:00:00' }),
+    ]
     wrap(<HistoryList analyses={runs} selected="new" onSelect={vi.fn()} />)
     expect(rowDetail('Paper A')).toHaveTextContent('Viewing a later run · stopped')
   })
 
   it('says a finished run is open when the row counts another finished one', () => {
-    const runs = [analysis({ id: 'first', title: 'Paper A' }), analysis({ id: 'second', title: 'Paper A' })]
+    const runs = [
+      analysis({ id: 'first', title: 'Paper A', completed: '2026-11-10T10:00:00' }),
+      analysis({ id: 'second', title: 'Paper A', completed: '2026-11-01T10:00:00' }),
+    ]
     wrap(<HistoryList analyses={runs} selected="second" onSelect={vi.fn()} />)
     expect(rowDetail('Paper A')).toHaveTextContent('Viewing an earlier run · finished')
   })
 
   it('says a running run is open when another run of the paper is running too', () => {
-    const runs = [analysis({ id: 'one', title: 'Paper A', status: 'running' }), analysis({ id: 'two', title: 'Paper A', status: 'running' })]
+    const runs = [
+      analysis({ id: 'one', title: 'Paper A', status: 'running', started: '2026-11-10T10:00:00' }),
+      analysis({ id: 'two', title: 'Paper A', status: 'running', started: '2026-11-01T10:00:00' }),
+    ]
     wrap(<HistoryList analyses={runs} selected="two" onSelect={vi.fn()} />)
     expect(rowDetail('Paper A')).toHaveTextContent('Viewing an earlier run · running')
   })
@@ -680,20 +692,6 @@ describe('the order and the memory of the Analyses list', () => {
     expect(rowTitles()[2]).toMatch(/^Old/)
   })
 
-  it('counts facets from the same newest run it uses for the row', () => {
-    const backed = { ...claim, verdicts: [{ verdict: 'supports' }] } as Analysis['claims'][number]
-    const runs = [
-      analysis({ id: 'old', title: 'Paper', completed: '2026-11-03T10:00:00', claims: [claim] }),
-      analysis({ id: 'new', title: 'Paper', completed: '2026-11-12T10:00:00', claims: [backed] }),
-    ]
-    const onOpen = vi.fn()
-    wrap(<AnalysisList analyses={runs} onOpen={onOpen} />)
-    pickStanding('Source backs it')
-    expect(screen.queryByRole('checkbox', { name: /Source contradicts/ })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^Paper/ }))
-    expect(onOpen).toHaveBeenCalledWith('new')
-  })
-
   it('lists the earlier runs of a paper newest first', () => {
     const runs = [
       analysis({ id: 'a', title: 'Paper', completed: '2026-11-03T10:00:00' }),
@@ -708,12 +706,24 @@ describe('the order and the memory of the Analyses list', () => {
     expect(dates[1]).toContain(day('2026-11-03T10:00:00'))
   })
 
+  it('offers the standings of the run the row shows, the newest one', () => {
+    const supports = { claim: 's', citations: [], verdicts: [{ verdict: 'supports' }] } as unknown as Analysis['claims'][number]
+    const runs = [
+      analysis({ id: 'old', title: 'Paper', completed: '2026-11-01T10:00:00', claims: [claim] }),
+      analysis({ id: 'new', title: 'Paper', completed: '2026-11-12T10:00:00', claims: [supports] }),
+    ]
+    wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Has a claim/ }))
+    expect(screen.getByRole('checkbox', { name: /^Source backs it/ })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /^Source contradicts/ })).not.toBeInTheDocument()
+  })
+
   it('says why a stopped run stopped, in the row', () => {
     wrap(<AnalysisList analyses={[analysis({ status: 'error', title: 'Paper', message: 'litellm 429 too many requests' })]} onOpen={vi.fn()} />)
     expect(screen.getByText('The checking service was busy, so the analysis stopped.')).toBeInTheDocument()
   })
 
-  it('saves the search in history and the filter in the URL before opening a row', () => {
+  it('saves the search and the filter in the history entry before opening a row', () => {
     const onOpen = vi.fn()
     vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120)
     wrap(<AnalysisList analyses={[analysis({ id: 'x', title: 'Dense retrieval', claims: [claim] })]} onOpen={onOpen} />)
@@ -721,12 +731,13 @@ describe('the order and the memory of the Analyses list', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search your analyses' }), { target: { value: 'dense' } })
     fireEvent.click(screen.getByRole('button', { name: /Dense retrieval/ }))
     expect(window.history.state.analysisList).toEqual({ query: 'dense', openGroups: [], scrollY: 120 })
-    expect(window.location.search).toBe('?standing=refutes')
+    expect(new URLSearchParams(window.location.search).get('standing')).toBe('refutes')
     expect(onOpen).toHaveBeenCalledWith('x')
   })
 
-  it('restores search and scroll while preferring the URL over a stale filter snapshot', () => {
-    window.history.replaceState({ analysisList: { query: 'dense', shows: ['supports'], openGroups: [], scrollY: 340 } }, '', '?standing=refutes')
+  it('brings back the saved search, the filter and the scroll position', () => {
+    // A filter left in the saved entry by an older build loses to the address.
+    window.history.replaceState({ analysisList: { query: 'dense', shows: ['supports'], openGroups: [], scrollY: 340 } }, '', '/?standing=refutes')
     const runs = [analysis({ id: 'x', title: 'Dense retrieval', claims: [claim] }), analysis({ id: 'y', paper: '10.1/other', title: 'Other paper' })]
     wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
     expect(screen.getByRole('searchbox', { name: 'Search your analyses' })).toHaveValue('dense')
@@ -746,7 +757,7 @@ describe('the order and the memory of the Analyses list', () => {
   it('starts with the standing named in the address picked', () => {
     const named = { claim: 'n', citations: [{ doi: '10.1/d' }], named: ['10.1/d'], verdicts: [] }
     window.history.replaceState(null, '', '/?standing=named')
-    const runs = [analysis({ id: 'x', title: 'Dense retrieval', claims: [claim] }), analysis({ id: 'y', paper: '10.1/tool', title: 'Own tool', claims: [named] as unknown as Analysis['claims'] })]
+    const runs = [analysis({ id: 'x', title: 'Dense retrieval', claims: [claim] }), analysis({ id: 'y', paper: '10.9/tool', title: 'Own tool', claims: [named] as unknown as Analysis['claims'] })]
     wrap(<AnalysisList analyses={runs} onOpen={vi.fn()} />)
     expect(screen.getByRole('button', { name: /^Has a claim/ })).toHaveTextContent('Names a tool or dataset')
     expect(screen.getAllByRole('listitem')).toHaveLength(1)

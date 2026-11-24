@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GUIDE_SECTIONS, labelerGuide, parseGuide, parseInline, RENAMED } from '../src/lib/guideMarkdown'
 import { emptyLabel } from '../src/lib/labeling'
@@ -94,17 +94,54 @@ describe('labelerGuide numbering', () => {
 })
 
 describe('GuideButton', () => {
+  const fetchMock = vi.fn()
+
+  beforeEach(() => {
+    fetchMock.mockResolvedValue(new Response(copy))
+    vi.stubGlobal('fetch', fetchMock)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   async function openGuide() {
     render(<GuideButton />)
     const button = screen.getByRole('button', { name: 'Labeling guide' })
     button.focus()
     fireEvent.click(button)
-    return { button, dialog: await screen.findByRole('dialog', { name: 'Labeling guide' }) }
+    const dialog = await screen.findByRole('dialog', { name: 'Labeling guide' })
+    return { button, dialog }
   }
+
+  it('fetches the guide as a file and says so while it loads', async () => {
+    const { dialog } = await openGuide()
+    expect(within(dialog).getByText('Loading the guide...')).toBeInTheDocument()
+    expect(await within(dialog).findByRole('navigation', { name: 'Sections' })).toBeInTheDocument()
+    expect(within(dialog).queryByText('Loading the guide...')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('annotation-guideline.md'))
+  })
+
+  it('says when the guide cannot be loaded', async () => {
+    fetchMock.mockResolvedValue(new Response('', { status: 404 }))
+    const { dialog } = await openGuide()
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Could not load the guide.')
+    expect(within(dialog).queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('drops a guide that arrives after it was closed', async () => {
+    const { promise, resolve } = Promise.withResolvers<Response>()
+    fetchMock.mockReturnValue(promise)
+    const { dialog } = await openGuide()
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    resolve(new Response(copy))
+    await promise
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
 
   it('shows the labeler sections, with the team-only parts left out', async () => {
     const { dialog } = await openGuide()
-    expect(within(dialog).getByRole('heading', { name: '7. The four levels' })).toBeInTheDocument()
+    expect(await within(dialog).findByRole('heading', { name: '7. The four levels' })).toBeInTheDocument()
     expect(within(dialog).getAllByRole('table').length).toBeGreaterThan(0)
     expect(within(dialog).queryByRole('heading', { name: '8. Agreement and adjudication' })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: /Annotation guideline/ })).not.toBeInTheDocument()
@@ -116,7 +153,7 @@ describe('GuideButton', () => {
     const { dialog } = await openGuide()
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
-    const nav = within(dialog).getByRole('navigation', { name: 'Sections' })
+    const nav = await within(dialog).findByRole('navigation', { name: 'Sections' })
     fireEvent.click(within(nav).getByRole('button', { name: '9. Hard cases' }))
     expect(scrollIntoView).toHaveBeenCalledTimes(1)
   })

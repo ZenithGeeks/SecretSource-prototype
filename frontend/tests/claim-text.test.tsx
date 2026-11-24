@@ -61,6 +61,13 @@ describe('printedMarkers', () => {
   it('leaves an id the markers do not cover', () => {
     expect(printedMarkers('See [b9].', markers)).toBe('See [b9].')
   })
+
+  it("gives a reference cited alone and in a group its own number, whichever comes last", () => {
+    const grouped = { ref: 'b6', text: '[7,8]' }
+    const alone = { ref: 'b6', text: '[7]' }
+    expect(printedMarkers('See [b6].', [alone, grouped])).toBe('See [7].')
+    expect(printedMarkers('See [b6].', [grouped, alone])).toBe('See [7].')
+  })
 })
 
 describe('printedRef', () => {

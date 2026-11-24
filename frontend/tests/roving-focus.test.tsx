@@ -61,6 +61,26 @@ describe('onRadioKeys', () => {
   })
 })
 
+describe('onRadioKeys inside a list that has arrow keys of its own', () => {
+  it('keeps a key that moved between radios from reaching the list', () => {
+    const listKeys = vi.fn()
+    render(
+      <div onKeyDown={(event) => listKeys(event.key)}>
+        <div role="radiogroup" aria-label="Passage" onKeyDown={onRadioKeys}>
+          <button role="radio" aria-checked={false}>Yes</button>
+          <button role="radio" aria-checked={false}>No</button>
+        </div>
+      </div>,
+    )
+    const yes = screen.getByRole('radio', { name: 'Yes' })
+    yes.focus()
+    fireEvent.keyDown(yes, { key: 'ArrowDown' })
+    expect(screen.getByRole('radio', { name: 'No' })).toHaveFocus()
+    fireEvent.keyDown(document.activeElement!, { key: 'j' })
+    expect(listKeys.mock.calls).toEqual([['j']])
+  })
+})
+
 describe('Segmented', () => {
   it('is one Tab stop on the chosen option, and the arrow keys move without choosing', () => {
     const chosen: string[] = []

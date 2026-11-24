@@ -36,31 +36,11 @@ describe('groupRuns', () => {
     expect(ids(groups[4].earlier)).toEqual(['titled-punctuation-id'])
   })
 
-  it('keeps identifier punctuation and joins prefixed forms of the same id', () => {
-    const groups = groupRuns([
-      run({ id: 'dash', paper: 'doi:10.1/a-b' }),
-      run({ id: 'dot', paper: '10.1/a.b' }),
-      run({ id: 'older-dash', paper: 'https://dx.doi.org/10.1/A-B' }),
-    ])
-    expect(ids(groups.map(({ run }) => run))).toEqual(['dash', 'dot'])
-    expect(ids(groups[0].earlier)).toEqual(['older-dash'])
-  })
-
-  it('groups old titles for one id under its newest title, including runs with another id', () => {
-    const groups = groupRuns([
-      run({ id: 'new', paper: 'arxiv:1234.1', title: 'Published title' }),
-      run({ id: 'old', paper: 'https://arxiv.org/abs/1234.1', title: 'Working title' }),
-      run({ id: 'doi', paper: '10.1/paper', title: 'Published Title!' }),
-    ])
-    expect(groups).toHaveLength(1)
-    expect(ids(groups[0].earlier)).toEqual(['old', 'doi'])
-  })
-
   it('keeps papers in the order of their first run', () => {
     const papers = groupRuns([
-      run({ id: 'a1', title: 'A' }),
+      run({ id: 'a1', paper: '10.1/a', title: 'A' }),
       run({ id: 'b1', paper: '10.1/b', title: 'B' }),
-      run({ id: 'a2', title: 'A' }),
+      run({ id: 'a2', paper: '10.1/a', title: 'A' }),
     ])
     expect(papers.map(({ run: main }) => main.id)).toEqual(['a1', 'b1'])
   })
@@ -84,6 +64,26 @@ describe('groupRuns', () => {
     ])
     expect(rest).toHaveLength(0)
     expect(ids(paper.earlier)).toEqual(['broke'])
+  })
+
+  it('keeps ids that differ only in their punctuation apart', () => {
+    const papers = groupRuns([
+      run({ id: 'dash', paper: 'doi:10.1/a-b', status: 'error' }),
+      run({ id: 'dot', paper: 'doi:10.1/a.b', status: 'error' }),
+      run({ id: 'older-dash', paper: 'https://dx.doi.org/10.1/A-B', status: 'error' }),
+    ])
+    expect(papers).toHaveLength(2)
+    expect(ids(papers[0].earlier)).toEqual(['older-dash'])
+  })
+
+  it('keeps every run of one id in one group when a later run read another title', () => {
+    const [paper, ...rest] = groupRuns([
+      run({ id: 'new', paper: '10.1/x', title: 'Dense Retrieval for QA' }),
+      run({ id: 'old', paper: '10.1/x', title: 'Dense retrieval' }),
+      run({ id: 'arxiv', paper: 'arxiv:1234.1', title: 'Dense Retrieval for QA!' }),
+    ])
+    expect(rest).toHaveLength(0)
+    expect(ids(paper.earlier)).toEqual(['old', 'arxiv'])
   })
 
   it('keeps a stopped run of a paper nobody titled on its own, by its id', () => {

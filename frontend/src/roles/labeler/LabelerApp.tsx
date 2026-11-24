@@ -174,8 +174,8 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
       wide={analysis ? 'full' : true}
       foldable
       breadcrumb={breadcrumb}
-      toolbarLead={!blind && ask.button}
-      panel={!blind && ask.panel}
+      toolbarLead={blind ? undefined : ask.button}
+      panel={blind ? undefined : ask.panel}
       notifications={<PaperBell onOpen={openPaper} />}
     >
       {unsaved && backBlockedOn === analysis && (

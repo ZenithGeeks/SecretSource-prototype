@@ -43,6 +43,8 @@ export function History({
 }) {
   const analyses = useAnalyses()
   if (!selected) {
+    // Nothing until the list arrives: the first-visit form would be swapped out under the reader's typing.
+    if (analyses.isPending) return null
     return (
       // Keyed so a "+ New" while the list shows opens the form.
       <NewAnalysis key={String(formOpen)} formOpen={formOpen} onStarted={onSelect}>

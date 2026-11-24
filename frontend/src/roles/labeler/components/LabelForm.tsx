@@ -18,7 +18,7 @@ const SURE: { value: Confidence; label: string; key: string }[] = [
 
 // Condensed from ../annotation-guideline.md, sections 5 to 7. Change both together.
 const HOW_TO_JUDGE = [
-  'Grade what the citation is for. Use related work for background claims and the cited work’s own statements for its results.',
+  'Grade what the citation is for. Use related work only for background the cited work states. Use its own statements for its results.',
   '3: minor omissions, rounding, one of several cases, or a synonym.',
   '2: wider scope, stronger certainty, missing condition, wrong entity or number.',
   'For contradictions, start the level 1 reason with “Contradicts:”.',
