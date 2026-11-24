@@ -65,12 +65,16 @@ export function ClaimDecision({
   draft,
   position,
   count,
+  pinned = false,
   onChange,
 }: {
   claim: WorkClaim
   draft: Draft
   position: number
   count: number
+  /** The claim wording is already pinned at the top of the panel, so the sentence quote
+   * below would repeat it. */
+  pinned?: boolean
   onChange: (patch: Partial<Draft>) => void
 }) {
   const name = useId()
@@ -96,7 +100,7 @@ export function ClaimDecision({
       {!draft.status && (
         <p className="text-[15px] leading-6 text-ink">{claim.claim}</p>
       )}
-      {!draft.status && claim.sentence && claim.sentence !== claim.claim && (
+      {!pinned && !draft.status && claim.sentence && claim.sentence !== claim.claim && (
         <p className="border-l-2 border-border-subtle pl-3 text-[13px] leading-5 text-ink-muted">
           The paper says: “{claim.sentence}”
         </p>

@@ -636,14 +636,21 @@ describe('the workspace', () => {
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
   })
 
-  it('shows each reference as one section, with its passages and then its level form', async () => {
+  it('shows each reference as one section, with the level form beside the passage in focus', async () => {
     await open()
+    expect(screen.getByText(/The paper says/)).toHaveTextContent('We show Y improves recall.')
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    expect(screen.queryByText(/The paper says/)).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Claim being judged' })).toHaveTextContent('Method Y improves recall.')
     const section = screen.getByRole('region', { name: 'Ref B' })
     expect(within(section).getAllByRole('radiogroup', { name: /^Passage/ })).toHaveLength(2)
-    expect(within(section).getByText('Mark a passage relevant to grade this reference')).toBeInTheDocument()
+    const focused = within(section).getByRole('button', { name: /recall rose by 4 points/ }).closest('li')
+    const form = focused?.nextElementSibling
+    expect(form).toHaveAttribute('data-level-form')
+    expect(form).toHaveTextContent('Mark a passage relevant to grade this reference')
     fireEvent.click(within(section).getAllByRole('radio', { name: /^Relevant/ })[0])
     expect(within(section).getByRole('radiogroup', { name: 'Support level for Ref B' })).toBeInTheDocument()
+    expect(focused?.nextElementSibling).toHaveAttribute('data-level-form')
   })
 
   it('takes a passage and a level for a cited work with no PDF, without opening a reference for it', async () => {
@@ -681,7 +688,11 @@ describe('the workspace', () => {
     const first = screen.getByText('recall rose by 4 points')
     const second = screen.getByText('unrelated text')
     expect(first).not.toHaveClass('line-clamp-3')
+    expect(first).toHaveClass('block')
     expect(second).toHaveClass('line-clamp-3')
+    expect(second).not.toHaveClass('block')
+    expect(screen.getByRole('button', { name: /recall rose by 4 points/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /unrelated text/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('looks for the whole focused passage in the reference, not only its first 300 characters', async () => {
