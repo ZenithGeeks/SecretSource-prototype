@@ -6,12 +6,13 @@
 
 import type { ReactNode } from 'react'
 
+import { STANDING_LABELS } from '../../../lib/claims'
 import { cn } from '../../../lib/utils'
 
 export type LegendColors = { supports: string; refutes: string; insufficient: string; inkMuted: string; accent: string; border: string }
 
 const BOX =
-  'absolute bottom-3 left-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-col gap-1.5 rounded-[10px] border border-border-subtle bg-surface px-3 py-2.5'
+  'absolute bottom-3 left-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-col gap-1.5 rounded-lg border border-border-subtle bg-surface px-3 py-2.5'
 const ROW = 'flex flex-wrap items-center gap-x-3 gap-y-1'
 
 function Name({ children }: { children: string }) {
@@ -20,7 +21,7 @@ function Name({ children }: { children: string }) {
 
 function Item({ children, mark }: { children: string; mark: ReactNode }) {
   return (
-    <span className="flex items-center gap-[5px] text-xs text-ink-muted">
+    <span className="flex items-center gap-1.25 text-xs text-ink-muted">
       {mark}
       {children}
     </span>
@@ -45,7 +46,7 @@ function NotIndexed({ color, count }: { color: string; count: number }) {
   if (count === 0) return null
   return (
     <span
-      className="flex items-center gap-[5px] text-xs text-ink-muted"
+      className="flex items-center gap-1.25 text-xs text-ink-muted"
       title="Semantic Scholar, arXiv and Unpaywall found nothing for this reference as it is written. This is not a Scopus check."
     >
       <span aria-hidden="true" className="size-2.5 rounded-full border-[1.5px] border-dashed" style={{ borderColor: color }} />
@@ -59,10 +60,11 @@ export function GraphClaimsLegend({ colors, notIndexed }: { colors: LegendColors
     <div className={BOX}>
       <div className={ROW}>
         <Name>Claim</Name>
-        <Item mark={<Dot color={colors.refutes} />}>contradicted</Item>
-        <Item mark={<Dot color={colors.insufficient} />}>silent</Item>
-        <Item mark={<Dot color={colors.supports} />}>backed</Item>
-        <Item mark={<Dot color={colors.inkMuted} />}>not checked</Item>
+        {/* The claim badges' words, in their order. */}
+        <Item mark={<Dot color={colors.refutes} />}>{STANDING_LABELS.refutes}</Item>
+        <Item mark={<Dot color={colors.insufficient} />}>{STANDING_LABELS.insufficient}</Item>
+        <Item mark={<Dot color={colors.inkMuted} />}>{STANDING_LABELS.unchecked}</Item>
+        <Item mark={<Dot color={colors.supports} />}>{STANDING_LABELS.supports}</Item>
       </div>
       <div className={ROW}>
         <Name>Edge</Name>

@@ -5,13 +5,14 @@
  */
 
 import { FileText } from 'lucide-react'
+import { useId } from 'react'
 
 import {
+  STANDING_COLORS,
   STANDING_LABELS,
   STANDING_MEANINGS,
   STANDINGS,
   verdictCountLabel,
-  verdictCountWord,
 } from '../lib/claims'
 import type { Standing, Standings } from '../lib/claims'
 import { API_BASE, type Claim } from '../lib/api'
@@ -19,6 +20,7 @@ import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
 import { ToolbarActions } from './AppShell'
 import { ExportMenu, TOOLBAR_BUTTON } from './ExportMenu'
+import { StandingKey } from './StandingKey'
 
 /** Muted for the two standings that are not a verdict, so a colour always means an answer. */
 const COUNT_STYLES: Record<Standing, string> = {
@@ -43,6 +45,7 @@ export function ResultsSummary({
   teacherMode = false,
   teacherDecisions,
   actionsInToolbar = false,
+  narrow = false,
 }: {
   claims: Claim[]
   standings: Standings
@@ -61,6 +64,8 @@ export function ResultsSummary({
   teacherDecisions?: { supports: number; contradicts: number; inconclusive: number; notReviewed: number }
   /** Put "Open PDF" and "Export" in the shell's toolbar; without a toolbar they sit above the summary. */
   actionsInToolbar?: boolean
+  /** The page viewer takes most of the width: tiles go two to a row. */
+  narrow?: boolean
 }) {
   if (!teacherMode) {
     return (
@@ -73,6 +78,7 @@ export function ResultsSummary({
         paper={paper}
         onOpenPaper={onOpenPaper}
         actionsInToolbar={actionsInToolbar}
+        narrow={narrow}
       />
     )
   }
@@ -106,10 +112,11 @@ type SummaryProps = {
 function headline(counts: Record<Standing, number>) {
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
   if (counts.refutes) {
-    return `${counts.refutes} ${plural(counts.refutes, 'claim is', 'claims are')} contradicted by a work they cite`
+    return `${counts.refutes} ${plural(counts.refutes, 'claim is contradicted by a work it cites', 'claims are contradicted by works they cite')}`
   }
   if (counts.insufficient) {
-    return `${counts.insufficient} ${plural(counts.insufficient, 'claim is', 'claims are')} not settled by the works they cite`
+    // "Silent", as on the tile, so the headline and the count below it use one word.
+    return `The works cited for ${counts.insufficient} ${plural(counts.insufficient, 'claim', 'claims')} are silent on ${plural(counts.insufficient, 'it', 'them')}`
   }
   if (counts.unchecked) {
     return `${counts.unchecked} ${plural(counts.unchecked, 'claim', 'claims')} could not be checked`
@@ -118,18 +125,9 @@ function headline(counts: Record<Standing, number>) {
   return 'Every checked citation says what the paper says it does'
 }
 
-const BAR_STYLES: Record<Standing, string> = {
-  refutes: 'bg-refutes',
-  insufficient: 'bg-insufficient',
-  supports: 'bg-supports',
-  unchecked: 'bg-neutral',
-  named: 'bg-neutral',
-  uncited: 'bg-neutral',
-}
-
-/** The four kinds the design counts; "names what it uses" and "no citation" join them only
- * when the paper has such a claim. */
-const TILES: Standing[] = ['refutes', 'insufficient', 'supports', 'unchecked']
+/** The four kinds the design always counts; "names a tool or dataset" and "no citation" join them
+ * only when the paper has such a claim. Tiles, bar and key all follow STANDINGS order. */
+const ALWAYS_COUNTED: Standing[] = ['refutes', 'insufficient', 'unchecked', 'supports']
 
 function ResearcherSummary({
   claims,
@@ -139,15 +137,17 @@ function ResearcherSummary({
   paper,
   onOpenPaper,
   actionsInToolbar,
-}: SummaryProps & { actionsInToolbar: boolean }) {
+  narrow,
+}: SummaryProps & { actionsInToolbar: boolean; narrow: boolean }) {
   // Only fetched when there is no page viewer to open it in; the link needs the user's token.
   const pdf = useAuthorizedUrl(paper && !onOpenPaper ? `${API_BASE}/api/papers/${encodeURIComponent(paper)}` : undefined)
-  const kinds = [...TILES, ...(['named', 'uncited'] as const).filter((kind) => counts[kind] > 0)]
+  const kinds = STANDINGS.filter((kind) => ALWAYS_COUNTED.includes(kind) || counts[kind] > 0)
+  const meaningId = useId()
 
   const actions = (
     <>
       {paper && onOpenPaper && (
-        <button type="button" onClick={onOpenPaper} title="Read the paper here, page by page" className={TOOLBAR_BUTTON}>
+        <button type="button" onClick={onOpenPaper} title="Open PDF: read the paper here, page by page" className={TOOLBAR_BUTTON}>
           <FileText className="size-4" aria-hidden="true" />
           Open PDF
         </button>
@@ -169,55 +169,69 @@ function ResearcherSummary({
       ) : (
         <div className="flex items-center justify-end gap-1">{actions}</div>
       )}
-      <section className="flex flex-col gap-[18px] rounded-2xl border border-border-subtle bg-surface p-5 shadow-card">
-        <p className="text-[15px] leading-5 font-semibold tracking-[-0.01em]" aria-live="polite">
+      <section className="flex flex-col gap-4.5 rounded-2xl border border-border-subtle bg-surface p-5 shadow-card">
+        <p className="text-reading leading-5 font-semibold tracking-[-0.01em]" aria-live="polite">
           {headline(counts)}
         </p>
 
-        <div
-          role="img"
-          aria-label={kinds.filter((kind) => counts[kind] > 0).map((kind) => verdictCountLabel(kind, counts[kind])).join(', ')}
-          className="flex gap-[3px]"
-        >
-          {STANDINGS.filter((kind) => counts[kind] > 0).map((kind) => (
-            <span
-              key={kind}
-              style={{ flexGrow: counts[kind] }}
-              className={cn('h-2 min-w-1 flex-1 basis-0 rounded', BAR_STYLES[kind])}
-            />
-          ))}
-        </div>
-
-        {/* Each count is the filter for its own kind. None starts selected, so every claim shows. */}
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-          {kinds.map((kind) => {
-            const active = filter === kind
-            return (
-              <button
+        {/* The bar shows the proportions, the tiles below it the counts and the filters: one block. */}
+        <div className="flex flex-col gap-1.5">
+          <div
+            role="img"
+            aria-label={kinds.filter((kind) => counts[kind] > 0).map((kind) => verdictCountLabel(kind, counts[kind])).join(', ')}
+            className="flex gap-0.75"
+          >
+            {STANDINGS.filter((kind) => counts[kind] > 0).map((kind) => (
+              <span
                 key={kind}
-                type="button"
-                onClick={() => onFilter(active ? null : kind)}
-                aria-pressed={active}
-                aria-label={verdictCountLabel(kind, counts[kind])}
-                disabled={counts[kind] === 0}
-                title={STANDING_MEANINGS[kind]}
-                className={cn(
-                  'flex flex-col items-start gap-0.5 rounded-xl px-3.5 py-3 text-left transition-colors',
-                  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-                  'disabled:cursor-default disabled:opacity-60',
-                  active ? 'bg-accent-soft ring-2 ring-accent' : 'bg-neutral-soft enabled:hover:bg-accent-soft',
-                )}
-              >
-                <span aria-hidden="true" className={cn('text-[26px] leading-8 font-semibold tracking-tight tabular-nums', COUNT_STYLES[kind])}>
-                  {counts[kind]}
-                </span>
-                <span aria-hidden="true" className="text-xs leading-4 font-medium text-ink-muted">
-                  {verdictCountWord(kind, counts[kind])}
-                </span>
-              </button>
-            )
-          })}
+                style={{ flexGrow: counts[kind] }}
+                className={cn('h-2 min-w-1 flex-1 basis-0 rounded-sm', STANDING_COLORS[kind])}
+              />
+            ))}
+          </div>
+          {/* Each count is the filter for its own kind. None starts selected, so every claim shows.
+              One row from sm up, however many kinds there are (a fixed 4 left a fifth tile alone),
+              unless the page viewer leaves too little width for the labels. */}
+          <div className={cn('grid grid-cols-2 gap-2.5', !narrow && 'sm:auto-cols-fr sm:grid-flow-col')}>
+            {kinds.map((kind) => {
+              const active = filter === kind
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => onFilter(active ? null : kind)}
+                  aria-pressed={active}
+                  // The words the tile shows, so what is heard and what is seen are one string.
+                  aria-label={`${counts[kind]} ${STANDING_LABELS[kind]}`}
+                  disabled={counts[kind] === 0}
+                  title={STANDING_MEANINGS[kind]}
+                  // The title shows on hover only; the description reaches keyboard and screen reader users.
+                  aria-describedby={`${meaningId}-${kind}`}
+                  className={cn(
+                    'flex flex-col items-start gap-0.5 rounded-xl px-3.5 py-3 text-left transition-colors',
+                    'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                    'disabled:cursor-default disabled:opacity-60',
+                    active ? 'bg-accent-soft ring-2 ring-accent' : 'bg-neutral-soft enabled:hover:bg-accent-soft',
+                  )}
+                >
+                  <span aria-hidden="true" className={cn('text-[26px] leading-8 font-semibold tracking-tight tabular-nums', COUNT_STYLES[kind])}>
+                    {counts[kind]}
+                  </span>
+                  {/* The badge's own words, so a tile and the claims it filters say the same thing.
+                      Two lines tall even when one, so the tiles stay level when a label wraps. */}
+                  <span aria-hidden="true" className="min-h-8 text-xs leading-4 font-medium text-ink-muted">
+                    {STANDING_LABELS[kind]}
+                  </span>
+                  <span id={`${meaningId}-${kind}`} className="sr-only">
+                    {STANDING_MEANINGS[kind]}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
         </div>
+        {/* Every standing, since a claim card or the list can show any of them. */}
+        <StandingKey />
       </section>
     </>
   )
@@ -233,7 +247,7 @@ function TeacherSummary({
   teacherDecisions,
 }: SummaryProps & { paperLabel?: string; onTeacherFeedback?: () => void; teacherDecisions?: { supports: number; contradicts: number; inconclusive: number; notReviewed: number } }) {
   return (
-    <div className="-mx-1 rounded-xl border border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur lg:sticky lg:top-0 lg:z-10">
+    <div className="-mx-1 rounded-xl border border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur-sm lg:sticky lg:top-0 lg:z-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-medium" title={paper}>

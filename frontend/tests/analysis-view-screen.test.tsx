@@ -2,7 +2,7 @@
  * sections, and the page viewer opened from a claim, the contents or the paper itself. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -22,15 +22,21 @@ vi.mock('../src/components/PageViewer', () => ({
   PageViewer: ({
     target,
     onClose,
+    onLabel,
     markers,
+    notice,
   }: {
     target: { paper: string; label: string; section?: string; page?: number }
     onClose: () => void
+    onLabel?: () => void
     markers?: unknown[]
+    notice?: ReactNode
   }) => (
     <div data-testid="viewer" data-paper={target.paper} data-section={target.section} data-markers={markers?.length ?? 'none'}>
       {target.label}
       <button onClick={onClose}>Close viewer</button>
+      {onLabel && <button onClick={onLabel}>Back to claim</button>}
+      {notice}
     </div>
   ),
 }))
@@ -230,6 +236,104 @@ describe('the results', () => {
     expect(first).toHaveFocus()
   })
 
+  it('opens the cited paper on O from inside an open claim', async () => {
+    view()
+    const first = document.querySelector<HTMLElement>('[data-claim-toggle]')!
+    expect(first).toHaveAttribute('aria-expanded', 'true')
+    first.focus()
+    fireEvent.keyDown(first, { key: 'o' })
+    await waitFor(() => expect(screen.getByTestId('viewer')).toHaveAttribute('data-paper', 'cited.pdf'))
+  })
+
+  it('opens a folded claim on O, keeps focus on it and shows its cited paper', async () => {
+    vi.useFakeTimers()
+    try {
+      const quoted = { ...backed, verdicts: [verdict('supports', { quote: 'It backs it.' })] }
+      load(analysis({ claims: [refuted, quoted] }))
+      view()
+      const rows = () => [...document.querySelectorAll<HTMLElement>('[data-claim-toggle]')]
+      expect(rows()[1]).toHaveAttribute('aria-expanded', 'false')
+      rows()[1].focus()
+      fireEvent.keyDown(rows()[1], { key: 'o' })
+      expect(rows()[1]).toHaveAttribute('aria-expanded', 'true')
+      await act(async () => {
+        vi.runAllTimers()
+      })
+      expect(rows()[1]).toHaveFocus()
+      vi.useRealTimers()
+      await waitFor(() => expect(screen.getByTestId('viewer')).toBeInTheDocument())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  describe('a claim with no quoted passage', () => {
+    const unquoted: Claim = { ...refuted, source: undefined, verdicts: [verdict('refutes')] }
+
+    it('says so on O instead of staying silent, and clears the line on the next key', () => {
+      load(analysis({ claims: [unquoted, backed] }))
+      view()
+      const first = document.querySelector<HTMLElement>('[data-claim-toggle]')!
+      first.focus()
+      fireEvent.keyDown(first, { key: 'o' })
+      const text = 'No quoted passage to show for claim 1'
+      expect(screen.getByRole('status')).toHaveTextContent(text)
+      // The same words sit in the card the key was pressed on, not under the heading.
+      expect(within(first.closest('[data-claim-card]') as HTMLElement).getByText(text)).toBeInTheDocument()
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
+      fireEvent.keyDown(first, { key: 'j' })
+      expect(screen.queryByText(text)).not.toBeInTheDocument()
+    })
+
+    it('opens the claim in the paper on O when only the paper’s own sentence is there, and says so in that card', () => {
+      load(analysis({ claims: [{ ...refuted, verdicts: [verdict('refutes')] }, backed] }))
+      view()
+      const first = document.querySelector<HTMLElement>('[data-claim-toggle]')!
+      first.focus()
+      fireEvent.keyDown(first, { key: 'o' })
+      expect(screen.getByTestId('viewer')).toHaveAttribute('data-paper', 'mine.pdf')
+      const text = 'No quote from a cited work for claim 1 · showing it in this paper'
+      expect(within(first.closest('[data-claim-card]') as HTMLElement).getByText(text)).toBeInTheDocument()
+      fireEvent.keyDown(first, { key: 'j' })
+      expect(screen.queryByText(text)).not.toBeInTheDocument()
+    })
+  })
+
+  it('stacks the heading row and drops the side-by-side tiles while the page viewer is open', () => {
+    view()
+    const tiles = () => screen.getAllByRole('button', { pressed: false })[0].parentElement as HTMLElement
+    const heading = () => screen.getByRole('heading', { name: 'Needs your attention' }).parentElement as HTMLElement
+    expect(tiles()).toHaveClass('sm:grid-flow-col')
+    expect(heading()).not.toHaveClass('flex-col')
+    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }))
+    expect(tiles()).not.toHaveClass('sm:grid-flow-col')
+    expect(heading()).toHaveClass('flex-col')
+  })
+
+  it('does nothing on O when focus is outside the claims', () => {
+    view()
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    fireEvent.keyDown(window, { key: 'o' })
+    expect(screen.queryByTestId('viewer')).not.toBeInTheDocument()
+  })
+
+  it('tells the reader about the J, K and O keys', () => {
+    view()
+    const hint = screen.getByText((_, element) => element?.textContent === 'J and K move between claims · O shows the evidence' && element.tagName === 'P')
+    expect([...hint.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual(['J', 'K', 'O'])
+  })
+
+  it('keeps Read the full reasoning open after a tile filter hides the card and shows it again', () => {
+    const long = 'It does not hold. '.repeat(25)
+    load(analysis({ claims: [{ ...refuted, verdicts: [verdict('refutes', { reasoning: long })] }, backed] }))
+    view()
+    fireEvent.click(screen.getByRole('button', { name: 'Read the full reasoning' }))
+    fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
+    expect(screen.queryByText('The refuted claim.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
+    expect(screen.getByRole('button', { name: 'Hide the full reasoning' })).toBeInTheDocument()
+  })
+
   it('does nothing on J when no claim rows are on screen', () => {
     load(analysis({ claims: [] }))
     view()
@@ -252,13 +356,31 @@ describe('the results', () => {
 
   it('narrows to one kind from the count tiles and says so', () => {
     view()
-    fireEvent.click(screen.getByRole('button', { name: '1 backs it' }))
-    expect(screen.getByText('Showing 1 backs it')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
+    expect(screen.getByRole('heading', { name: 'Source backs it' })).toBeInTheDocument()
+    expect(screen.getByText(/^Showing 1 of \d+$/)).toBeInTheDocument()
     expect(screen.queryByText('The refuted claim.')).not.toBeInTheDocument()
     expect(screen.getByText('supports reasoning')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '1 backs it' }))
+    fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /The backed claim/ })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('follows a filter the screen holds, and reports a picked tile to it', () => {
+    const onFilter = vi.fn()
+    view({ filter: 'supports', onFilter })
+    expect(screen.queryByText('The refuted claim.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '1 Source contradicts' }))
+    expect(onFilter).toHaveBeenCalledWith('refutes')
+  })
+
+  it('clears the standing filter from its Show all claims button', () => {
+    view()
+    fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show all claims' }))
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Source backs it' })).not.toBeInTheDocument()
+    expect(screen.getByText('The refuted claim.')).toBeInTheDocument()
   })
 
   it('narrows to one section, and can show all claims again', () => {
@@ -315,6 +437,40 @@ describe('the page viewer', () => {
     view({ onCurrentSection })
     fireEvent.click(screen.getByRole('button', { name: /Show in paper/ }))
     expect(onCurrentSection).toHaveBeenLastCalledWith('3.1')
+  })
+
+  it('leads from the label of a claim page back to that claim', () => {
+    const scrollIntoView = vi.fn()
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView
+    view()
+    fireEvent.click(screen.getByRole('button', { name: /Show in paper/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Back to claim' }))
+    expect(document.querySelector('[data-claim="0"] [data-claim-toggle]')).toHaveFocus()
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' })
+  })
+
+  it('gives the label no link when the page is not one of a claim', () => {
+    view()
+    fireEvent.click(screen.getByRole('button', { name: 'Open PDF' }))
+    expect(screen.queryByRole('button', { name: 'Back to claim' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the page of a claim that a picked standing hides, and says so with a way back', () => {
+    view()
+    fireEvent.click(screen.getByRole('button', { name: /Show in paper/ }))
+    fireEvent.click(screen.getByRole('button', { name: '1 Source backs it' }))
+    const viewer = screen.getByTestId('viewer')
+    expect(viewer).toHaveTextContent('Claim 1 is hidden by the current filter')
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Show all claims' }))
+    expect(screen.getByText('The refuted claim.')).toBeInTheDocument()
+    expect(viewer).not.toHaveTextContent('hidden by the current filter')
+  })
+
+  it('keeps the page of a claim that a picked standing still shows, with no note', () => {
+    view()
+    fireEvent.click(screen.getByRole('button', { name: /Show in paper/ }))
+    fireEvent.click(screen.getByRole('button', { name: '1 Source contradicts' }))
+    expect(screen.getByTestId('viewer')).not.toHaveTextContent('hidden by the current filter')
   })
 
   it('reports the section of the page when the target names none', () => {

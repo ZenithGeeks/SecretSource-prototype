@@ -16,7 +16,7 @@ export function SourceDialog({ label, children }: { label: string; children: Rea
       role="dialog"
       aria-modal="true"
       aria-label={label}
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/45 p-4 outline-none"
+      className="fixed inset-0 z-60 flex items-center justify-center bg-ink/45 p-4 outline-none"
     >
       {children}
     </div>

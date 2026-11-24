@@ -88,7 +88,7 @@ export function DialogPanel({
   onSubmit?: (event: FormEvent<HTMLFormElement>) => void
   children: ReactNode
 }) {
-  const panel = cn('relative w-[440px] max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl', className)
+  const panel = cn('relative w-110 max-w-full rounded-2xl border border-border-subtle bg-surface p-6 shadow-xl', className)
   if (onSubmit) {
     return (
       <m.form {...PANEL_MOTION} onSubmit={onSubmit} className={panel}>
@@ -131,8 +131,8 @@ export function ConfirmDialog({
   const cancel = () => !busy && onCancel()
   return (
     <Modal titleId={titleId} onClose={cancel}>
-      <DialogPanel className="w-[420px]">
-        <h2 id={titleId} className="font-serif text-lg font-semibold break-words text-ink">
+      <DialogPanel className="w-105">
+        <h2 id={titleId} className="font-serif text-lg font-semibold wrap-break-word text-ink">
           {title}
         </h2>
         <div className="mt-2 text-sm leading-5 text-ink-muted">{children}</div>
@@ -222,9 +222,9 @@ export function NewProjectDialog({
         <h2 id={titleId} className="font-serif text-xl font-semibold text-ink">
           New project
         </h2>
-        <p className="mt-1 text-[13px] text-ink-muted">{hint}</p>
+        <p className="mt-1 text-ui text-ink-muted">{hint}</p>
 
-        <label htmlFor={nameId} className="mt-4 block text-[13px] font-medium text-ink">
+        <label htmlFor={nameId} className="mt-4 block text-ui font-medium text-ink">
           Project name
         </label>
         <Input
@@ -243,7 +243,7 @@ export function NewProjectDialog({
           className="mt-1.5 w-full"
         />
         {error && (
-          <p id={errorId} role="alert" className="mt-1.5 text-[13px] text-refutes">
+          <p id={errorId} role="alert" className="mt-1.5 text-ui text-refutes">
             {error}
           </p>
         )}
@@ -378,7 +378,7 @@ export function LibraryCard({
           buttons reaches them; pointer-events-none lets every other click through to open. */}
       <div className="pointer-events-none relative flex flex-col gap-3">
         {title}
-        <p className="text-[13px] text-ink-muted">{meta}</p>
+        <p className="text-ui text-ink-muted">{meta}</p>
         {bar}
         <div className="mt-1 flex items-center justify-between">
           <span className="text-xs text-ink-muted">{footer}</span>
@@ -394,7 +394,7 @@ export function LibraryCard({
 
 /** A project card's name, clear of the "⋯" button. */
 export function ProjectName({ children }: { children: ReactNode }) {
-  return <p className="pr-8 font-serif text-base font-semibold break-words text-ink">{children}</p>
+  return <p className="pr-8 font-serif text-base font-semibold wrap-break-word text-ink">{children}</p>
 }
 
 /** A Library page's header: a counts line, the title, one sentence, and the page's actions. */
@@ -423,7 +423,7 @@ export function LibraryHeader({
 
 /** A Library page's h1. */
 export function LibraryTitle({ children }: { children: ReactNode }) {
-  return <h1 className="type-display break-words text-ink">{children}</h1>
+  return <h1 className="type-display wrap-break-word text-ink">{children}</h1>
 }
 
 /** "← Projects · name": back to the Library landing. `hover` is the role's hover treatment for
@@ -446,7 +446,7 @@ export function BackLink({
       type="button"
       onClick={onClick}
       data-ask-target={askTarget}
-      className="flex items-center gap-1.5 self-start rounded text-[13px] focus-visible:outline-2 focus-visible:outline-accent"
+      className="flex items-center gap-1.5 self-start rounded-sm text-ui focus-visible:outline-2 focus-visible:outline-accent"
     >
       <span className={cn('font-medium text-accent', hover)}>← {label}</span>
       {trail && <span className="text-ink-muted">· {trail}</span>}

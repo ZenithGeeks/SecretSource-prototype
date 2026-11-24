@@ -9,8 +9,8 @@ import { request } from './api'
 export type Feature = 'analyses' | 'ask'
 
 export const OFFLINE_REASON: Record<Feature, string> = {
-  analyses: 'The checking server is offline, so new analyses cannot start. Try again later.',
-  ask: 'The library search is offline, so Ask cannot answer. Try again later.',
+  analyses: 'The checking server is offline, so analyses can start again when it is back online.',
+  ask: 'The library search is offline, so Ask can answer again when it is back online.',
 }
 
 // The gateway checks its dependencies at most every 30 s, so asking more often shows nothing new.

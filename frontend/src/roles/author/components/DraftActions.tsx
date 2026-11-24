@@ -105,7 +105,7 @@ export function NewProjectMenu({
         aria-expanded={open}
         aria-label="New project"
         data-ask-target={askTarget({ kind: 'action', id: 'new-project' })}
-        className="h-[34px] gap-1.5 border border-border-subtle bg-surface px-2.5 text-[13px] text-ink sm:px-3"
+        className="h-8.5 gap-1.5 border border-border-subtle bg-surface px-2.5 text-ui text-ink sm:px-3"
       >
         <Pen className="size-4" aria-hidden="true" />
         <span className="hidden sm:inline">New project</span>

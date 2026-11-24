@@ -31,6 +31,7 @@ import { AuthorizedImage } from '../src/components/AuthorizedImage'
 import { ExportMenu } from '../src/components/ExportMenu'
 import { PipelineStages } from '../src/components/PipelineStages'
 import { SourceDialog } from '../src/components/SourceDialog'
+import { StandingKey } from '../src/components/StandingKey'
 import { AnalysisContents, TableOfContents } from '../src/components/TableOfContents'
 import { VerdictDispute } from '../src/components/VerdictDispute'
 import type { Analysis, Claim, Stage, Verdict } from '../src/lib/api'
@@ -70,23 +71,70 @@ describe('AnalysisHeader', () => {
     expect(screen.getByText(label)).toBeInTheDocument()
   })
 
-  it('says just Analyzed for a run with no times, and counts its claims', () => {
-    const claim: Claim = { claim: 'c', citations: [] }
-    renderHeader(base({ claims: [claim] }))
+  it('says just Analyzed for a run with no times', () => {
+    renderHeader(base())
     expect(screen.getByText('Analyzed')).toBeInTheDocument()
-    expect(screen.getByText('1 claim')).toBeInTheDocument()
   })
 
-  it('shows the paper title with its file name and the plural claim count', () => {
+  it('shows the title and leaves the file name and claim count out of the meta line', () => {
     const claim: Claim = { claim: 'c', citations: [] }
     renderHeader(base({ title: 'A Great Paper', file: 'dir/upload.pdf', claims: [claim, claim] }))
     expect(screen.getByRole('heading', { level: 1, name: 'A Great Paper' })).toBeInTheDocument()
-    expect(screen.getByText('upload.pdf · 2 claims')).toBeInTheDocument()
+    expect(screen.queryByText(/upload\.pdf|claims?$/)).not.toBeInTheDocument()
   })
 
-  it('shows Stopped for a run that ended in error', () => {
-    renderHeader(base({ status: 'error' }))
-    expect(screen.getByText('Stopped')).toBeInTheDocument()
+  it('names the first author with et al. when there are several, then the year and status', () => {
+    renderHeader(base({ title: 'A Great Paper', authors: ['Ada Lovelace', 'Alan Turing'], year: '2015' }))
+    expect(screen.getByText('Ada Lovelace et al. · 2015 · Analyzed')).toBeInTheDocument()
+  })
+
+  it('names a lone author as they are', () => {
+    renderHeader(base({ title: 'A Great Paper', authors: ['Ada Lovelace'] }))
+    expect(screen.getByText('Ada Lovelace · Analyzed')).toBeInTheDocument()
+  })
+
+  it('titles a run with nothing else by its paper id and does not repeat the id in the meta line', () => {
+    renderHeader(base({ paper: '10.1000/xyz' }))
+    expect(screen.getByRole('heading', { level: 1, name: '10.1000/xyz' })).toBeInTheDocument()
+    expect(screen.getByText('Analyzed')).toBeInTheDocument()
+  })
+
+  it('titles a run with no title by its file name and keeps the paper id in the meta line', () => {
+    renderHeader(base({ paper: '10.1000/xyz', file: 'dir/upload.pdf' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'upload.pdf' })).toBeInTheDocument()
+    expect(screen.getByText('10.1000/xyz · Analyzed')).toBeInTheDocument()
+  })
+
+  it('takes the title from another run of the same paper in the cached list', () => {
+    client.setQueryData(['analyses'], [base({ id: 'other', paper: '10.9/other', title: 'Not this one' }), base({ id: 'done', paper: '10.1000/xyz', title: 'The Real Title' })])
+    renderHeader(base({ paper: '10.1000/xyz' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'The Real Title' })).toBeInTheDocument()
+    expect(screen.getByText('10.1000/xyz · Analyzed')).toBeInTheDocument()
+  })
+
+  it('borrows the authors and year of the finished run of the same paper, and leaves the paper id out', () => {
+    client.setQueryData(['analyses'], [base({ id: 'done', paper: '10.1000/xyz', title: 'The Real Title', authors: ['Ada Lovelace', 'Alan Turing'], year: '2015' })])
+    renderHeader(base({ status: 'error', paper: '10.1000/xyz' }))
+    expect(screen.getByText('Ada Lovelace et al. · 2015')).toBeInTheDocument()
+  })
+
+  it('does not borrow authors from a run with another title', () => {
+    client.setQueryData(['analyses'], [base({ id: 'other', paper: '10.9/other', title: 'Not this one', authors: ['Grace Hopper'], year: '1952' })])
+    renderHeader(base({ status: 'error', paper: '10.1000/xyz', file: 'dir/upload.pdf' }))
+    expect(screen.getByText('10.1000/xyz')).toBeInTheDocument()
+    expect(screen.queryByText(/Grace Hopper/)).not.toBeInTheDocument()
+  })
+
+  it('keeps its own authors when the list holds a run with the same title', () => {
+    client.setQueryData(['analyses'], [base({ id: 'other', paper: '10.9/other', title: 'A Great Paper', authors: ['Grace Hopper'], year: '1952' })])
+    renderHeader(base({ title: 'A Great Paper', authors: ['Ada Lovelace'], year: '2015' }))
+    expect(screen.getByText('Ada Lovelace · 2015 · Analyzed')).toBeInTheDocument()
+  })
+
+  it('leaves the status out for a run that ended in error and shows no stop button', () => {
+    renderHeader(base({ status: 'error', title: 'A Great Paper' }))
+    expect(screen.queryByText(/Analy[sz]/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Stopped')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
@@ -122,6 +170,57 @@ describe('AnalysisHeader', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('500: worker busy')
     expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+  })
+  describe('the Help button', () => {
+    const claim: Claim = { claim: 'c', citations: [] }
+    const scrollIntoView = vi.fn()
+    const original = Element.prototype.scrollIntoView
+
+    beforeEach(() => {
+      scrollIntoView.mockClear()
+      Element.prototype.scrollIntoView = scrollIntoView
+    })
+    afterEach(() => {
+      Element.prototype.scrollIntoView = original
+    })
+
+    it('shows on a finished analysis with claims', () => {
+      renderHeader(base({ claims: [claim] }))
+      expect(screen.getByRole('button', { name: 'Help' })).toBeInTheDocument()
+    })
+
+    it('is left out while the analysis runs', () => {
+      renderHeader(base({ status: 'running', claims: [claim] }))
+      expect(screen.queryByRole('button', { name: 'Help' })).not.toBeInTheDocument()
+    })
+
+    it('is left out when a finished analysis has no claims', () => {
+      renderHeader(base())
+      expect(screen.queryByRole('button', { name: 'Help' })).not.toBeInTheDocument()
+    })
+
+    it('opens the key under the tiles, scrolls to it and focuses its summary', () => {
+      render(
+        withClient(
+          <>
+            <AnalysisHeader analysis={base({ claims: [claim] })} />
+            <StandingKey />
+          </>,
+        ),
+      )
+      const key = screen.getByText('What do these mean?').closest('details')!
+      expect(key.open).toBe(false)
+      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+      expect(key.open).toBe(true)
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
+      expect(screen.getByText('What do these mean?')).toHaveFocus()
+    })
+
+    it('does nothing when the page has no key to open', () => {
+      renderHeader(base({ claims: [claim] }))
+      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+      expect(scrollIntoView).not.toHaveBeenCalled()
+    })
   })
 })
 
@@ -225,10 +324,61 @@ describe('TableOfContents', () => {
     render(<TableOfContents outline={outline} claims={claims} current="2.1" onPick={() => {}} />)
     const encoder = screen.getByRole('button', { name: /Encoder/ })
     expect(encoder).toHaveAttribute('aria-current', 'location')
-    expect(encoder).toHaveAttribute('title', '2.1 Encoder, page 4')
-    expect(screen.getByTitle('2 claims from this section')).toHaveTextContent('2')
-    expect(screen.getByTitle('1 claim from this section, contradicted by a source')).toBeInTheDocument()
+    expect(encoder).toHaveAttribute('title', '2.1 Encoder, page 4 · 2 claims')
+    expect(screen.getByTitle('2 claims')).toHaveTextContent('2 claims')
     expect(screen.getByRole('button', { name: /Method/ })).not.toHaveAttribute('aria-current')
+  })
+
+  it('says how many claims of a section a source contradicts, with a dot', () => {
+    render(<TableOfContents outline={outline} claims={claims} current={null} onPick={() => {}} />)
+    const introduction = screen.getByRole('button', { name: /Introduction/ })
+    expect(introduction).toHaveAttribute('title', '1 Introduction, page 1 · 1 claim, 1 contradicted')
+    expect(screen.getByTitle('1 claim, 1 contradicted').querySelector('span[aria-hidden]')).toBeInTheDocument()
+  })
+
+  it('counts only the claims of the filtered standing', () => {
+    render(<TableOfContents outline={outline} claims={claims} current={null} filter="refutes" onPick={() => {}} />)
+    expect(screen.getByRole('button', { name: /Introduction/ })).toHaveAttribute('title', '1 Introduction, page 1 · 1 claim, 1 contradicted')
+    expect(screen.getByRole('button', { name: /Method/ })).toHaveAttribute('title', '2 Method, page 3')
+  })
+
+  it('mutes the sections and subsections with none of the filtered standing, and keeps them listed', () => {
+    render(<TableOfContents outline={outline} claims={claims} current={null} filter="refutes" onPick={() => {}} />)
+    expect(screen.getByRole('button', { name: /Introduction/ })).not.toHaveClass('text-ink-muted')
+    expect(screen.getByRole('button', { name: /Method/ })).toHaveClass('text-ink-muted')
+    expect(screen.getByRole('button', { name: /Encoder/ })).toHaveClass('text-ink-muted')
+  })
+
+  it('mutes nothing without a filter', () => {
+    render(<TableOfContents outline={outline} claims={claims} current={null} onPick={() => {}} />)
+    expect(screen.getByRole('button', { name: /Method/ })).not.toHaveClass('text-ink-muted')
+  })
+
+  it('is one Tab stop, on the marked section', () => {
+    render(<TableOfContents outline={outline} claims={claims} current="2" onPick={() => {}} />)
+    expect(screen.getByRole('button', { name: /Method/ })).toHaveAttribute('tabindex', '0')
+    expect(screen.getByRole('button', { name: /Introduction/ })).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('puts the first section on the Tab stop when none is marked', () => {
+    render(<TableOfContents outline={outline} claims={claims} current={null} onPick={() => {}} />)
+    expect(screen.getByRole('button', { name: /Introduction/ })).toHaveAttribute('tabindex', '0')
+    expect(screen.getByRole('button', { name: /Method/ })).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('moves focus to the next section on ArrowDown', () => {
+    render(<TableOfContents outline={outline} claims={claims} current={null} onPick={() => {}} />)
+    screen.getByRole('button', { name: /Introduction/ }).focus()
+    fireEvent.keyDown(screen.getByRole('button', { name: /Introduction/ }), { key: 'ArrowDown' })
+    expect(screen.getByRole('button', { name: /Method/ })).toHaveFocus()
+  })
+
+  it('shows a contradicted count only for a section with one, and keeps the words for screen readers', () => {
+    render(<TableOfContents outline={outline} claims={claims} current={null} onPick={() => {}} />)
+    expect(screen.getByRole('button', { name: /Introduction/ })).toHaveTextContent('1 claim, 1 contradicted')
+    const encoder = screen.getByRole('button', { name: /Encoder/ })
+    expect(encoder).toHaveTextContent('2 claims')
+    expect(encoder).not.toHaveTextContent('contradicted')
   })
 
   it('hands the picked row to the caller', () => {
@@ -247,6 +397,13 @@ describe('TableOfContents', () => {
     gateway.getAnalysis.mockResolvedValue({ id: 'a1', paper: 'p', status: 'done', claims, outline, stages: [] })
     render(withClient(<AnalysisContents id="a1" current="1" onPick={() => {}} />))
     expect(await screen.findByRole('navigation', { name: 'Contents of this paper' })).toBeInTheDocument()
+  })
+
+  it('passes the claim filter on to the contents', async () => {
+    gateway.getAnalysis.mockResolvedValue({ id: 'a1', paper: 'p', status: 'done', claims, outline, stages: [] })
+    render(withClient(<AnalysisContents id="a1" current={null} filter="refutes" onPick={() => {}} />))
+    expect(await screen.findByRole('button', { name: /Introduction/ })).toHaveAttribute('title', expect.stringContaining('1 claim, 1 contradicted'))
+    expect(screen.getByRole('button', { name: /Method/ })).toHaveAttribute('title', '2 Method, page 3')
   })
 
   it('shows no contents for an analysis without an outline', async () => {
@@ -288,11 +445,17 @@ describe('ExportMenu', () => {
   it('closes on Escape and on a click outside, but not on other keys or clicks inside', () => {
     render(<ExportMenu claims={claims} />)
     open()
-    fireEvent.keyDown(document, { key: 'Enter' })
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
     fireEvent.mouseDown(screen.getByRole('menu'))
     expect(screen.getByRole('menu')).toBeInTheDocument()
-    fireEvent.keyDown(document, { key: 'Escape' })
+    // Escape is used up by the menu, so a page viewer behind it stays open, and focus goes back.
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    act(() => {
+      screen.getAllByRole('menuitem')[0].dispatchEvent(escape)
+    })
+    expect(escape.defaultPrevented).toBe(true)
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Export/ })).toHaveFocus()
     open()
     fireEvent.mouseDown(document.body)
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()

@@ -21,7 +21,7 @@ export function Section({ title, children }: { title: string; children: ReactNod
   return (
     <section className="flex w-full flex-col items-start">
       <div className="flex w-full items-center pb-3 pr-10">
-        <h2 className="text-[22px] font-semibold leading-[26px] tracking-[-0.01em] text-ink">{title}</h2>
+        <h2 className="text-[22px] leading-6.5 font-semibold tracking-[-0.01em] text-ink">{title}</h2>
       </div>
       <div className="w-full divide-y divide-border-subtle">{children}</div>
     </section>
@@ -48,7 +48,7 @@ export function Row({
   return (
     <div className="flex w-full flex-col gap-3 border-t border-border-subtle py-3.5 sm:flex-row sm:items-center sm:gap-6">
       <div className="min-w-0 flex-1">
-        <p id={labelId} className="text-[13px] font-medium leading-[18px] text-ink">
+        <p id={labelId} className="text-ui leading-4.5 font-medium text-ink">
           {label}
         </p>
         {hint && <p className="mt-0.5 text-xs leading-4 text-ink-muted">{hint}</p>}
@@ -86,7 +86,7 @@ export function Toggle({
       <span
         className={cn(
           'inline-block size-4 rounded-full bg-white shadow-sm transition-transform',
-          on ? 'translate-x-[1.125rem]' : 'translate-x-0.5',
+          on ? 'translate-x-4.5' : 'translate-x-0.5',
         )}
       />
     </button>
@@ -118,7 +118,7 @@ export function Select({
       aria-labelledby={ariaLabelledBy}
       onChange={(e) => onChange(e.target.value)}
       className={cn(
-        'h-9 w-[180px] appearance-none rounded-[9px] border border-border-subtle bg-surface py-2 pl-3 pr-9 text-[13px] font-medium text-ink outline-none',
+        'h-9 w-45 appearance-none rounded-lg border border-border-subtle bg-surface py-2 pl-3 pr-9 text-ui font-medium text-ink outline-none',
         'focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50',
       )}
     >
@@ -154,7 +154,7 @@ export function Avatar({
       {image.url ? (
         <img src={image.url} alt="Profile photo" className="size-full object-cover" />
       ) : (
-        <span className="text-[13px] font-semibold text-accent">{initials}</span>
+        <span className="text-ui font-semibold text-accent">{initials}</span>
       )}
     </span>
   )

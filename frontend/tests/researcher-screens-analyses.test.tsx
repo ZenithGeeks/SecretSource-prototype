@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { UNDO_DELETE_MS } from '../src/components/HistoryList'
 import { ResearcherApp } from '../src/roles/researcher/ResearcherApp'
 
 vi.mock('../src/lib/supabase', () => ({ authEnabled: false, supabase: null, sessionStorageKey: '' }))
@@ -90,8 +91,15 @@ function renderAnalyses(search = '') {
 }
 
 const list = () => screen.getByRole('navigation', { name: 'Analyses' })
-const row = (name: string) => within(list()).getByTitle(name).closest('div')!
+// A row's button is named by its title and sub-line: "bad.pdf 2 claims · Source contradicts: 1".
+const rowButton = (name: string) => within(list()).getByRole('button', { name: new RegExp(`^${name}`) })
+const row = (name: string) => rowButton(name).closest('div')!
 const formHeading = () => screen.findByRole('heading', { name: /Does the paper.s evidence hold up/ })
+// With past analyses the list comes first; the form opens from the New analysis button.
+const openForm = async () => {
+  fireEvent.click(await screen.findByRole('button', { name: 'New analysis' }))
+  return screen.findByLabelText('Paper to analyze')
+}
 
 describe('recent analyses', () => {
   it('says it is loading, then lists nothing as "No analyses yet."', async () => {
@@ -101,55 +109,82 @@ describe('recent analyses', () => {
     expect(await screen.findByText('No analyses yet.')).toBeInTheDocument()
   })
 
-  it('lists each analysis by file name with its claim count, or a dash', async () => {
+  it('lists each analysis with its claim count, No claims, Running or Stopped', async () => {
     renderAnalyses()
     await screen.findByRole('navigation', { name: 'Analyses' })
-    expect(within(row('bad.pdf')).getByText('2')).toBeInTheDocument()
-    expect(within(row('good.pdf')).getByText('1')).toBeInTheDocument()
-    for (const name of ['empty.pdf', 'busy.pdf', 'broke.pdf']) {
-      expect(within(row(name)).getByText('—')).toBeInTheDocument()
-    }
-    expect(within(row('broke.pdf')).getByText('!')).toBeInTheDocument()
+    expect(within(row('bad.pdf')).getByText('2 claims, 1 contradicted by a source')).toBeInTheDocument()
+    expect(within(row('good.pdf')).getByText('1 claim')).toBeInTheDocument()
+    expect(within(row('empty.pdf')).getByText('No claims')).toBeInTheDocument()
+    expect(within(row('busy.pdf')).getByText('Running')).toBeInTheDocument()
+    // A stopped run says so in words, not with a red "!".
+    expect(within(row('broke.pdf')).getByText('Stopped')).toBeInTheDocument()
   })
 
-  it('colours the dot by the worst verdict, and pulses while running', async () => {
+  it('counts only contradicted claims on a row, the same way on every row', async () => {
     renderAnalyses()
     await screen.findByRole('navigation', { name: 'Analyses' })
-    const dot = (name: string) => row(name).querySelector('[aria-hidden="true"]')!
-    expect(dot('bad.pdf').className).toContain('bg-refutes')
-    expect(dot('silent.pdf').className).toContain('bg-insufficient')
-    expect(dot('good.pdf').className).toContain('bg-supports')
-    expect(dot('empty.pdf').className).toContain('bg-neutral')
-    expect(dot('busy.pdf').className).toContain('animate-pulse')
+    expect(within(row('silent.pdf')).getByText('1 claim')).toBeInTheDocument()
+    expect(within(row('busy.pdf')).getByText('Running')).toBeInTheDocument()
   })
 
   it('picking one opens it, marks it current and shows its contents', async () => {
     renderAnalyses()
     await screen.findByRole('navigation', { name: 'Analyses' })
-    fireEvent.click(within(row('good.pdf')).getByTitle('good.pdf'))
+    fireEvent.click(rowButton('good.pdf'))
     expect(await screen.findByText('Good one.')).toBeInTheDocument()
-    expect(within(row('good.pdf')).getByTitle('good.pdf')).toHaveAttribute('aria-current', 'true')
+    expect(rowButton('good.pdf')).toHaveAttribute('aria-current', 'true')
     expect(new URLSearchParams(window.location.search).get('analysis')).toBe('good')
     expect(await screen.findByRole('navigation', { name: 'Contents of this paper' })).toBeInTheDocument()
   })
 
-  it('+ New returns from an open analysis to the form', async () => {
+  it('+ New returns from an open analysis to the form above the list', async () => {
     renderAnalyses('&analysis=good')
     await screen.findByText('Good one.')
     fireEvent.click(screen.getByRole('button', { name: '+ New' }))
-    expect(await formHeading()).toBeInTheDocument()
+    expect(await screen.findByLabelText('Paper to analyze')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New analysis' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Does the paper.s evidence hold up/ })).not.toBeInTheDocument()
+    expect(within(list()).getByRole('button', { name: /^good\.pdf/ })).not.toHaveAttribute('aria-current')
     expect(new URLSearchParams(window.location.search).has('analysis')).toBe(false)
   })
 
-  it('deleting the open analysis returns to the form; deleting another keeps the open one', async () => {
-    renderAnalyses('&analysis=good')
-    await screen.findByText('Good one.')
-    fireEvent.click(screen.getByRole('button', { name: 'Delete analysis of empty.pdf' }))
-    await waitFor(() => expect(calls).toContainEqual({ method: 'DELETE', path: '/analyses/empty', body: undefined }))
-    expect(screen.getByText('Good one.')).toBeInTheDocument()
+  it('shows the past analyses under a New analysis button, and the form opens from it', async () => {
+    renderAnalyses()
+    const button = await screen.findByRole('button', { name: 'New analysis' })
+    expect(screen.queryByRole('heading', { name: /Does the paper.s evidence hold up/ })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Paper to analyze')).not.toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search your analyses' })).toBeInTheDocument()
+    fireEvent.click(button)
+    expect(await screen.findByLabelText('Paper to analyze')).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search your analyses' })).toBeInTheDocument()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete analysis of good.pdf' }))
-    expect(await formHeading()).toBeInTheDocument()
+  it('scrolls to the top when the list is shown', async () => {
+    renderAnalyses()
+    await screen.findByRole('button', { name: 'New analysis' })
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0)
+  })
+
+  it('deleting the open analysis returns to the form; deleting another keeps the open one', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      renderAnalyses('&analysis=good')
+      await screen.findByText('Good one.')
+      fireEvent.click(screen.getByRole('button', { name: 'Delete analysis of empty.pdf' }))
+      // Hidden at once, deleted only after the undo window.
+      expect(screen.queryByRole('button', { name: 'Delete analysis of empty.pdf' })).toBeNull()
+      expect(calls).not.toContainEqual({ method: 'DELETE', path: '/analyses/empty', body: undefined })
+      await vi.advanceTimersByTimeAsync(UNDO_DELETE_MS)
+      await waitFor(() => expect(calls).toContainEqual({ method: 'DELETE', path: '/analyses/empty', body: undefined }))
+      expect(screen.getByText('Good one.')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete analysis of good.pdf' }))
+      expect(await screen.findByRole('button', { name: 'New analysis' })).toBeInTheDocument()
+      await vi.advanceTimersByTimeAsync(UNDO_DELETE_MS)
+      await waitFor(() => expect(calls).toContainEqual({ method: 'DELETE', path: '/analyses/good', body: undefined }))
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('a finished-run notice opens that analysis from wherever the reader is', async () => {
@@ -178,7 +213,7 @@ describe('narrowing an open analysis to a section', () => {
   it('picking a section lists only its claims and Show all claims undoes it', async () => {
     renderAnalyses('&analysis=good')
     const contents = await screen.findByRole('navigation', { name: 'Contents of this paper' })
-    fireEvent.click(within(contents).getByTitle('1 Introduction, page 1'))
+    fireEvent.click(within(contents).getByTitle('1 Introduction, page 1 · 1 claim'))
     expect(await screen.findByText(/Claims from/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Show all claims' }))
     await waitFor(() => expect(screen.queryByText('Show all claims')).not.toBeInTheDocument())
@@ -189,7 +224,8 @@ describe('starting an analysis', () => {
   const box = () => screen.getByLabelText('Paper to analyze')
   const analyze = () => screen.getByRole('button', { name: 'Analyze' })
 
-  it('shows the form with the three steps when nothing is open', async () => {
+  it('shows the form with the three steps when there are no past analyses', async () => {
+    analyses = []
     renderAnalyses()
     expect(await formHeading()).toBeInTheDocument()
     expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(
@@ -199,7 +235,7 @@ describe('starting an analysis', () => {
 
   it('starts from a typed reference, opens the run and clears the box', async () => {
     renderAnalyses()
-    await formHeading()
+    await openForm()
     expect(analyze()).toBeDisabled()
     fireEvent.change(box(), { target: { value: ' 10.1/x ' } })
     fireEvent.click(analyze())
@@ -210,14 +246,14 @@ describe('starting an analysis', () => {
 
   it('does not start from a blank reference', async () => {
     renderAnalyses()
-    await formHeading()
+    await openForm()
     fireEvent.submit(box().closest('form')!)
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
   })
 
   it('Compare full text can be switched off for the run', async () => {
     renderAnalyses()
-    await formHeading()
+    await openForm()
     const toggle = screen.getByRole('switch')
     expect(toggle).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(toggle)
@@ -231,7 +267,7 @@ describe('starting an analysis', () => {
   it('shows the gateway message when the start is refused', async () => {
     startFails = true
     renderAnalyses()
-    await formHeading()
+    await openForm()
     fireEvent.change(box(), { target: { value: '10.1/z' } })
     fireEvent.click(analyze())
     expect(await screen.findByRole('alert')).toHaveTextContent('429: too many')
@@ -239,7 +275,7 @@ describe('starting an analysis', () => {
 
   it('a chosen PDF is uploaded, and an empty choice is ignored', async () => {
     renderAnalyses()
-    await formHeading()
+    await openForm()
     const input = screen.getByLabelText('PDF to analyze')
     fireEvent.change(input, { target: { files: [] } })
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
@@ -254,7 +290,7 @@ describe('starting an analysis', () => {
 
   it('a dropped file is uploaded and the zone highlights while it is over', async () => {
     renderAnalyses()
-    await formHeading()
+    await openForm()
     const zone = box().closest('form')!.parentElement!
     fireEvent.dragOver(zone)
     expect(zone.className).toContain('bg-accent-soft')
@@ -277,7 +313,7 @@ describe('starting an analysis', () => {
       return inner(url, init)
     })
     renderAnalyses()
-    await formHeading()
+    await openForm()
     const zone = box().closest('form')!.parentElement!
     const drop = () =>
       fireEvent.drop(zone, { dataTransfer: { files: [new File(['%PDF'], 'p.pdf', { type: 'application/pdf' })] } })
@@ -295,7 +331,7 @@ describe('starting an analysis', () => {
       String(url).endsWith('/health') ? Response.json({ features: { analyses: false } }) : online(url, init),
     )
     renderAnalyses()
-    await formHeading()
+    await openForm()
     expect(await screen.findByRole('status')).toHaveTextContent('The checking server is offline')
     expect(screen.getByRole('button', { name: /drop a PDF here/ })).toBeDisabled()
     const zone = box().closest('form')!.parentElement!

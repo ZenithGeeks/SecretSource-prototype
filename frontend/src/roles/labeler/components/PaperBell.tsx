@@ -161,7 +161,7 @@ export function PaperBell({ onOpen }: { onOpen: (analysisId: string) => void }) 
         {unseen > 0 && (
           <span
             aria-hidden="true"
-            className="absolute top-1 right-1 flex min-w-4 items-center justify-center rounded-full bg-refutes px-1 text-[10px] leading-4 font-semibold text-white tabular-nums"
+            className="absolute top-1 right-1 flex min-w-4 items-center justify-center rounded-full bg-refutes px-1 text-micro leading-4 font-semibold text-white tabular-nums"
           >
             {unseen}
           </span>
@@ -242,7 +242,7 @@ function Section({
         {papers.map((p) => (
           <li key={p.analysis_id} className="flex flex-col gap-1 rounded-lg border border-border-subtle px-3 py-2">
             <p className="line-clamp-2 text-sm text-ink">
-              {isNew?.(p) && <span className="mr-1.5 rounded bg-accent-soft px-1 text-[11px] font-medium text-accent">New</span>}
+              {isNew?.(p) && <span className="mr-1.5 rounded-sm bg-accent-soft px-1 text-caption font-medium text-accent">New</span>}
               {p.title}
             </p>
             {children(p)}

@@ -241,7 +241,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
 
   const renderClaimActions = (claim: Claim, claimIndex: number) => (
     <div className="space-y-3 border-t border-border-subtle pt-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-muted">Teacher review</p>
+      <p className="text-xs font-semibold uppercase tracking-widest text-ink-muted">Teacher review</p>
       {claim.citations.length === 0 && <p className="text-sm text-ink-muted">This claim has no cited source to include in student feedback.</p>}
       {claim.citations.map((citation, citationIndex) => {
         const reviewId = reviewIdFor(claim, claimIndex, citationIndex)
@@ -292,12 +292,12 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
   )
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] space-y-5">
+    <div className="mx-auto w-full max-w-360 space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border-subtle pb-4">
         <div className="min-w-0">
-          <button type="button" onClick={onBack} className="mb-2 inline-flex items-center gap-1 text-[11px] font-medium text-ink-muted hover:text-accent"><ChevronLeft className="size-3.5" />Back to assignment</button>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">{courseLabel} / Essay review</p>
-          <h1 className="mt-1 truncate font-serif text-[30px] font-semibold leading-9 text-ink">{data.student.name} <span className="font-normal text-ink-muted">· {assignmentLabel}</span></h1>
+          <button type="button" onClick={onBack} className="mb-2 inline-flex items-center gap-1 text-caption font-medium text-ink-muted hover:text-accent"><ChevronLeft className="size-3.5" />Back to assignment</button>
+          <p className="text-micro font-semibold uppercase tracking-widest text-accent">{courseLabel} / Essay review</p>
+          <h1 className="mt-1 truncate font-serif text-[30px] leading-9 font-semibold text-ink">{data.student.name} <span className="font-normal text-ink-muted">· {assignmentLabel}</span></h1>
           <p className="mt-1 truncate text-[12px] text-ink-muted">{data.student.fileName} <span aria-hidden="true">·</span> {data.reviews.length} citations to review</p>
         </div>
         {analysis?.id && <Button type="button" variant="ghost" disabled={recheckBusy} onClick={() => setRecheckOpen(true)}>{analyze.isPending ? 'Starting analysis...' : 'Recheck essay'}</Button>}
@@ -329,7 +329,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
       {analyze.isError && <div role="alert"><Card className="border-refutes text-sm text-refutes">{analyze.error instanceof Error ? analyze.error.message : 'Essay analysis could not start.'}</Card></div>}
       {notice && <div role="status" className="rounded-lg bg-supports-soft px-4 py-3 text-sm text-supports">{notice}</div>}
       {canAnalyze && (
-        <Card className="mx-auto flex min-h-64 w-full max-w-[620px] flex-col items-center justify-center px-8 text-center">
+        <Card className="mx-auto flex min-h-64 w-full max-w-150 flex-col items-center justify-center px-8 text-center">
           <FileText className="size-7 text-accent" />
           <h1 className="mt-4 font-serif text-[26px] font-semibold leading-tight">{data.student.name}</h1>
           <p className="mt-1 text-sm text-ink-muted">{data.student.fileName} · {data.assignment.name}</p>
@@ -356,7 +356,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
         <section aria-labelledby="teacher-feedback-heading" className="space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-accent">Student feedback</p>
+              <p className="text-caption font-semibold uppercase tracking-[0.04em] text-accent">Student feedback</p>
               <h2 id="teacher-feedback-heading" className="mt-1 font-serif text-2xl font-semibold text-ink">Write to {data.student.name}</h2>
               <p className="mt-1 text-sm leading-6 text-ink-muted">Add a personal note and choose which reviewed citations to include.</p>
             </div>
@@ -369,7 +369,7 @@ export function EssayCheck({ courseId, assignmentId, studentId, onBack, onReconn
           <label className="text-sm font-medium text-ink" htmlFor="teacher-feedback-body">Email message to the student</label>
           <textarea id="teacher-feedback-body" value={body} onChange={(event) => changeDraft({ body: event.target.value })} rows={6} className="w-full resize-y rounded-xl border border-border-subtle bg-surface px-4 py-3 text-sm leading-6 text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-accent" placeholder="Write feedback for the student..." />
           <div className="rounded-xl border border-border-subtle/70 bg-surface/65 px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Student preview</p>
+            <p className="text-caption font-semibold uppercase tracking-widest text-ink-muted">Student preview</p>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink">{body.trim() || 'Your written feedback will appear here.'}</p>
             {citationIds.length > 0 && <div className="mt-3 space-y-3 border-t border-border-subtle pt-3">
               {data.reviews.filter((review) => citationIds.includes(review.id)).map((review) => {

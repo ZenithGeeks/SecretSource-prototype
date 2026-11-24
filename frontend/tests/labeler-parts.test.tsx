@@ -1,9 +1,9 @@
 /** The small pieces of the labeler: filters, claim strip, label form, save bar and friends. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { useState, type ReactElement } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/lib/api', async (original) => ({
   ...(await original<typeof import('../src/lib/api')>()),
@@ -13,7 +13,7 @@ vi.mock('../src/lib/api', async (original) => ({
 }))
 
 import { emptyDraft, emptyLabel, type Draft, type Pool, type WorkClaim } from '../src/lib/labeling'
-import { ClaimDecision } from '../src/roles/labeler/components/ClaimDecision'
+import { ClaimDecision, ClaimSticky } from '../src/roles/labeler/components/ClaimDecision'
 import { ClaimNav } from '../src/roles/labeler/components/ClaimNav'
 import { LabelForm } from '../src/roles/labeler/components/LabelForm'
 import { NoMatch, PaperFilters } from '../src/roles/labeler/components/PaperFilters'
@@ -193,6 +193,49 @@ describe('ClaimNav', () => {
     expect(props.onSelect).toHaveBeenCalledWith('c2')
   })
 
+  it('is one Tab stop, moved along with the arrow keys, Home and End, without opening a claim', () => {
+    const props = renderNav({ claims: [...claims, claim('c3', 'Third claim.')] })
+    const chip = (n: number) => screen.getByRole('button', { name: new RegExp(`^Claim ${n},`) })
+    expect(chip(1)).toHaveAttribute('tabindex', '0')
+    expect(chip(2)).toHaveAttribute('tabindex', '-1')
+    chip(1).focus()
+    fireEvent.keyDown(chip(1), { key: 'ArrowRight' })
+    expect(chip(2)).toHaveFocus()
+    fireEvent.keyDown(chip(2), { key: 'End' })
+    expect(chip(3)).toHaveFocus()
+    fireEvent.keyDown(chip(3), { key: 'ArrowRight' })
+    expect(chip(3)).toHaveFocus()
+    fireEvent.keyDown(chip(3), { key: 'Home' })
+    expect(chip(1)).toHaveFocus()
+    fireEvent.keyDown(chip(1), { key: 'ArrowLeft' })
+    fireEvent.keyDown(chip(1), { key: 'a' })
+    expect(chip(1)).toHaveFocus()
+    expect(props.onSelect).not.toHaveBeenCalled()
+  })
+
+  it('marks a claim with no reference to read, in its look and its description', () => {
+    renderNav({ noReference: (c) => c.claim_id === 'c2' })
+    const chip = screen.getByRole('button', { name: /^Claim 2,/ })
+    expect(chip).toHaveAccessibleName(/, no reference to read: /)
+    expect(screen.getByRole('button', { name: /^Claim 1,/ })).not.toHaveAccessibleName(/no reference to read/)
+  })
+
+  it('gives a chip with no reference an icon and a dotted outline, the usual fill, and a legend', () => {
+    renderNav({ noReference: () => true })
+    const current = screen.getByRole('button', { name: /^Claim 1,/ })
+    const other = screen.getByRole('button', { name: /^Claim 2,/ })
+    expect(current.querySelector('svg')).not.toBeNull()
+    expect(other.querySelector('svg')).not.toBeNull()
+    expect(other).toHaveClass('border-dotted', 'bg-surface', 'text-ink-muted')
+    expect(current).toHaveClass('border-dotted', 'bg-accent-soft')
+    expect(screen.getByText('= no reference to read')).toBeInTheDocument()
+  })
+
+  it('shows no legend when every claim has a reference', () => {
+    renderNav({ noReference: () => false })
+    expect(screen.queryByText('= no reference to read')).not.toBeInTheDocument()
+  })
+
   it('shows overflow scroll buttons when the claim strip overflows', () => {
     renderNav()
     const list = screen.getByRole('list')
@@ -260,14 +303,92 @@ describe('ClaimDecision', () => {
     )
     expect(screen.queryByText(/The paper says/)).not.toBeInTheDocument()
   })
+  it('says what comes after the claim is decided', () => {
+    render(<ClaimDecision claim={claim('c1', 'Original.')} position={1} count={1} draft={emptyDraft()} onChange={vi.fn()} />)
+    expect(screen.getByText(/Decide on the claim first\. Its passages, and a 1–4 level for each reference, come after Keep or Edit\./)).toBeInTheDocument()
+  })
+
+  it('shows the paper sentence with the numbers the paper prints', () => {
+    const row = claim('c1', 'Original.', { sentence: 'It builds on [b1] and [b2].' })
+    render(
+      <ClaimDecision
+        claim={row}
+        position={1}
+        count={1}
+        draft={emptyDraft()}
+        markers={[{ ref: 'b1', text: '7' }]}
+        onChange={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/The paper says/)).toHaveTextContent('It builds on [7] and [b2].')
+  })
+
+  it('offers Clear decision only when it is given a handler', () => {
+    const onClear = vi.fn()
+    const row = claim('c1', 'Original.')
+    const draft = { ...emptyDraft(), status: 'rejected' as const }
+    const { rerender } = render(<ClaimDecision claim={row} position={1} count={1} draft={draft} onChange={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Clear decision' })).not.toBeInTheDocument()
+    rerender(<ClaimDecision claim={row} position={1} count={1} draft={draft} onClear={onClear} onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Clear decision' }))
+    expect(onClear).toHaveBeenCalledOnce()
+  })
+
+  it('names the clear button after clearLabel', () => {
+    const draft = { ...emptyDraft(), status: 'rejected' as const }
+    render(<ClaimDecision claim={claim('c1', 'Original.')} position={1} count={1} draft={draft} onClear={vi.fn()} clearLabel="Discard change" onChange={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Discard change' })).toBeInTheDocument()
+  })
+
+  it('asks for a new wording while the edit is empty or the same as the claim', () => {
+    const row = claim('c1', 'Original.')
+    const edited = (text: string) => ({ ...emptyDraft(), status: 'edited' as const, edited: text })
+    const { rerender } = render(<ClaimDecision claim={row} position={1} count={1} draft={edited('Original.')} onChange={vi.fn()} />)
+    expect(screen.getByRole('textbox', { name: 'The claim, as it should read' })).toHaveAccessibleDescription('Reword the claim, or choose Keep')
+
+    rerender(<ClaimDecision claim={row} position={1} count={1} draft={edited('   ')} onChange={vi.fn()} />)
+    expect(screen.getByText('Reword the claim, or choose Keep')).toBeInTheDocument()
+
+    rerender(<ClaimDecision claim={row} position={1} count={1} draft={edited('Better.')} onChange={vi.fn()} />)
+    expect(screen.queryByText('Reword the claim, or choose Keep')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'The claim, as it should read' })).not.toHaveAttribute('aria-describedby')
+  })
+})
+
+describe('ClaimSticky', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('shows a short claim whole, with no button', () => {
+    render(<ClaimSticky text="Y is fast." />)
+    expect(screen.getByText('Y is fast.')).toHaveClass('line-clamp-4')
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('offers the full claim when the text is cut, and folds it again', () => {
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(200)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(80)
+    render(<ClaimSticky text="A very long claim." />)
+    const more = screen.getByRole('button', { name: 'Show the full claim' })
+    expect(more).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(more)
+    expect(screen.getByText('A very long claim.')).not.toHaveClass('line-clamp-4')
+    fireEvent.click(screen.getByRole('button', { name: 'Show less' }))
+    expect(screen.getByText('A very long claim.')).toHaveClass('line-clamp-4')
+  })
 })
 
 describe('LabelForm', () => {
-  it('shows who else labeled the pair, and sends each change', () => {
+  const form = (over: Partial<Parameters<typeof LabelForm>[0]> = {}) => {
     const onChange = vi.fn()
-    render(<LabelForm title="Ref B" active label={{ ...emptyLabel(), evidence: 3 }} others={['Somchai', 'Ann']} onChange={onChange} />)
-    expect(screen.getByText('Also labeled by Somchai, Ann. Label it yourself, without looking.')).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: '3 · Clear' })).toHaveAccessibleDescription('3 Clear — The passage backs the claim, with a gap in scope or detail.')
+    render(<LabelForm tag="[7]" title="Ref B" active label={{ ...emptyLabel(), evidence: 3 }} others={[]} onChange={onChange} {...over} />)
+    return onChange
+  }
+
+  it('shows who else labeled the pair, and sends each change', () => {
+    const onChange = form({ others: ['Somchai', 'Ann'] })
+    expect(screen.getByText('Also labeled by Somchai, Ann. Their levels are not shown here, so choose yours on your own.')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '3 · Clear' })).toHaveAccessibleDescription('The passage backs the claim, with a gap in scope or detail.')
+    expect(screen.getByText('How to judge')).toBeInTheDocument()
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'because' } })
     expect(onChange).toHaveBeenLastCalledWith({ ...emptyLabel(), evidence: 3, rationale: 'because' })
@@ -278,41 +399,195 @@ describe('LabelForm', () => {
   })
 
   it('shows descriptions for all four levels even when none is chosen', () => {
-    render(<LabelForm title="Ref B" active={false} label={undefined} others={[]} onChange={vi.fn()} />)
-    expect(screen.getByRole('radio', { name: /^1 ·/ })).toHaveAccessibleDescription(/^1 /)
-    expect(screen.getByRole('radio', { name: /^4 ·/ })).toHaveAccessibleDescription(/^4 /)
+    form({ active: false, label: undefined })
+    expect(screen.getByRole('radio', { name: /^1 ·/ })).toHaveAccessibleDescription(/\S/)
+    expect(screen.getByRole('radio', { name: /^4 ·/ })).toHaveAccessibleDescription(/\S/)
+    expect(screen.getByText('How to judge')).toBeInTheDocument()
+  })
+
+  it('asks about the reference by its tag and shows the full title under it', () => {
+    form()
+    expect(screen.getByRole('group', { name: 'How well does [7] support the claim?' })).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Support level for [7]' })).toBeInTheDocument()
+    expect(screen.getByTitle('Ref B')).toHaveTextContent('Ref B')
+  })
+
+  it('leaves the title out when it is the tag', () => {
+    form({ tag: 'Ref B' })
+    expect(screen.queryByTitle('Ref B')).not.toBeInTheDocument()
+  })
+
+  it('takes the chosen level back when it is clicked again', () => {
+    const onChange = form()
+    fireEvent.click(screen.getByRole('radio', { name: '3 · Clear' }))
+    expect(onChange).toHaveBeenLastCalledWith({ ...emptyLabel(), evidence: null })
+  })
+
+  it('takes the chosen confidence back when it is clicked again', () => {
+    const onChange = form({ label: { ...emptyLabel(), evidence: 3, confidence: 'high' } })
+    fireEvent.click(screen.getByRole('radio', { name: 'High' }))
+    expect(onChange).toHaveBeenLastCalledWith({ ...emptyLabel(), evidence: 3, confidence: null })
+  })
+})
+
+describe('LabelForm keys and level rules', () => {
+  const form = (over: Partial<Parameters<typeof LabelForm>[0]> = {}) =>
+    render(<LabelForm tag="[7]" title="Ref B" active label={emptyLabel()} others={[]} onChange={vi.fn()} {...over} />)
+
+  it('draws each level number as its key on the reference in view only, once', () => {
+    const { unmount } = form()
+    const clear = screen.getByRole('radio', { name: '3 · Clear' })
+    expect(clear).toHaveAttribute('aria-keyshortcuts', '3')
+    expect(within(clear).getByText('3')).toHaveClass('border')
+    expect(clear).toHaveTextContent(/^3Clear$/)
+    unmount()
+    form({ active: false })
+    expect(screen.getByRole('radio', { name: '3 · Clear' })).not.toHaveAttribute('aria-keyshortcuts')
+    expect(within(screen.getByRole('radio', { name: '3 · Clear' })).getByText('3')).not.toHaveClass('border')
+  })
+
+  it('shows the rule of the level pointed at or focused, else of the chosen one', () => {
+    form({ label: { ...emptyLabel(), evidence: 4 } })
+    expect(screen.getByText('4 Strong:').parentElement).toHaveTextContent('The passage states the claim directly and fully.')
+    const weak = screen.getByRole('radio', { name: '2 · Weak' })
+    fireEvent.mouseEnter(weak)
+    expect(screen.getByText('2 Weak:')).toBeInTheDocument()
+    fireEvent.mouseLeave(weak)
+    fireEvent.focus(screen.getByRole('radio', { name: '1 · No support' }))
+    expect(screen.getByText('1 No support:')).toBeInTheDocument()
+    fireEvent.blur(screen.getByRole('radio', { name: '1 · No support' }))
+    expect(screen.getByText('4 Strong:')).toBeInTheDocument()
+  })
+
+  it('invites pointing at a level when none is chosen', () => {
+    form()
+    expect(screen.getByText('Point at a level to read what it means.')).toBeInTheDocument()
+  })
+})
+
+describe('no control inside another', () => {
+  it('nests no interactive element inside a button in the decision, the level form or the save bar', () => {
+    const { container } = render(
+      <>
+        <ClaimDecision claim={claim('c1', 'Original.')} position={1} count={1} draft={emptyDraft()} onChange={vi.fn()} />
+        <LabelForm tag="[7]" title="Ref B" active label={emptyLabel()} others={[]} onChange={vi.fn()} />
+        <SaveBar left={['a', 'b']} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} />
+      </>,
+    )
+    const inner = 'button, a[href], input, select, textarea, [role="radio"], [role="radiogroup"], [tabindex]'
+    for (const button of container.querySelectorAll('button')) expect(button.querySelector(inner)).toBeNull()
   })
 })
 
 describe('SaveBar', () => {
   const bar = (over: Partial<Parameters<typeof SaveBar>[0]> = {}) => {
-    const props = { left: [], dirty: true, saving: false, error: null, savedRows: null, hasNext: true, onSave: vi.fn(), ...over }
+    const props = { left: [], dirty: true, saving: false, error: null, savedRows: null, hasNext: true, onSave: vi.fn(), claimNumber: 3, ...over }
     render(<SaveBar {...props} />)
     return props
   }
 
   it('lists what is left, shows the error, and saves with or without moving on', () => {
     const props = bar({ left: ['Give Ref B a level'], error: 'offline' })
-    expect(screen.getByText('· 1 left')).toHaveAttribute('title', 'Give Ref B a level')
+    expect(screen.getByText('Give Ref B a level')).toHaveAttribute('title', 'Give Ref B a level')
     expect(screen.getByRole('alert')).toHaveTextContent('Not saved: offline')
-    expect(screen.getByText('Unsaved · Ctrl/⌘+S')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Save labels' }))
+    expect(screen.getByText('Unsaved · saves as not finished, still to do:')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Save claim \d+$/ }))
     expect(props.onSave).toHaveBeenLastCalledWith(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Save and next claim' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save claim \d+ and next$/ }))
     expect(props.onSave).toHaveBeenLastCalledWith(true)
+  })
+
+  it('shows the shortcut when unsaved with nothing left', () => {
+    bar()
+    expect(screen.getByText('Unsaved · Ctrl/⌘+S')).toBeInTheDocument()
+    expect(screen.getByText('Every decision made, not saved yet')).toBeInTheDocument()
+  })
+
+  it('disables both save buttons and says why when saving is blocked', () => {
+    bar({ blocked: 'Reword the claim, or choose Keep', left: ['Give Ref B a level', 'Judge a passage'] })
+    expect(screen.getByText('Reword the claim, or choose Keep')).toBeInTheDocument()
+    expect(screen.queryByText('Give Ref B a level')).not.toBeInTheDocument()
+    expect(screen.queryByText('and 1 more')).not.toBeInTheDocument()
+    for (const name of ['Save claim 3', 'Save claim 3 and next']) {
+      const button = screen.getByRole('button', { name })
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('title', 'Reword the claim, or choose Keep')
+    }
   })
 
   it('says Saved when saved, and hides Save and next when there is no next claim', () => {
     bar({ dirty: false, savedRows: 1, hasNext: false })
-    expect(screen.getByText('Ready')).toBeInTheDocument()
+    expect(screen.getByText('Every decision made')).toBeInTheDocument()
     expect(screen.getByText('Saved')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Save and next claim' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Save claim \d+ and next$/ })).not.toBeInTheDocument()
+  })
+
+  it('says a save with work left is not finished, and names what is left', () => {
+    bar({ left: ['Give Ref B a level'], dirty: false, savedRows: 1 })
+    expect(screen.getByText('Saved, not finished · still to do:')).toBeInTheDocument()
+    expect(screen.getByText('Give Ref B a level')).toBeInTheDocument()
+  })
+
+  it('shows the first thing left and folds the rest under "and N more"', () => {
+    bar({ left: ['Give Ref B a level', 'Give Ref B a confidence', 'Judge a passage'] })
+    expect(screen.getByText('Give Ref B a level')).toBeInTheDocument()
+    const more = screen.getByRole('button', { name: 'and 2 more' })
+    expect(more).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('listitem')).not.toBeInTheDocument()
+    fireEvent.click(more)
+    expect(more).toHaveAttribute('aria-expanded', 'true')
+    const list = document.getElementById(more.getAttribute('aria-controls') ?? '')
+    // Expanded, every item is listed in full, the first included, and the cut one-line copy goes.
+    expect(within(list as HTMLElement).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Give Ref B a level',
+      'Give Ref B a confidence',
+      'Judge a passage',
+    ])
+    expect(screen.getAllByText('Give Ref B a level')).toHaveLength(1)
+    expect(more).toHaveTextContent('Show less')
+    fireEvent.click(more)
+    expect(screen.queryByRole('listitem')).not.toBeInTheDocument()
+  })
+
+  it('shows a blocked save as a hint until the labeler tries to save', () => {
+    const { rerender } = render(<SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={1} blocked="Can't save yet" />)
+    expect(screen.getByText("Can't save yet")).toHaveClass('text-ink-muted')
+    rerender(<SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={1} blocked="Can't save yet" warn />)
+    expect(screen.getByText("Can't save yet")).toHaveClass('text-refutes')
+  })
+
+  it('has no "and N more" when one thing is left', () => {
+    bar({ left: ['Give Ref B a level'] })
+    expect(screen.queryByText(/more$/)).not.toBeInTheDocument()
+  })
+
+  it('names the claim each button saves, and offers Save all from two unsaved claims', () => {
+    const onSaveAll = vi.fn()
+    const { rerender } = render(
+      <SaveBar left={[]} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={7} unsavedCount={1} onSaveAll={onSaveAll} />,
+    )
+    expect(screen.getByRole('button', { name: 'Save claim 7' })).toHaveAttribute('aria-keyshortcuts', 'Control+S Meta+S')
+    expect(screen.getByRole('button', { name: 'Save claim 7 and next' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Save all/ })).not.toBeInTheDocument()
+    rerender(
+      <SaveBar left={[]} dirty={false} saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={7} unsavedCount={4} onSaveAll={onSaveAll} />,
+    )
+    // Enabled on a claim with no changes of its own, since others have some.
+    const all = screen.getByRole('button', { name: 'Save all unsaved (4)' })
+    expect(all).toBeEnabled()
+    expect(all).toHaveAttribute('aria-keyshortcuts', 'Control+Shift+S Meta+Shift+S')
+    fireEvent.click(all)
+    expect(onSaveAll).toHaveBeenCalledOnce()
+    rerender(
+      <SaveBar left={[]} dirty={false} saving error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={7} unsavedCount={4} onSaveAll={onSaveAll} />,
+    )
+    expect(screen.getByRole('button', { name: 'Save all unsaved (4)' })).toBeDisabled()
   })
 
   it('says Nothing changed when clean and disables Save', () => {
-    render(<SaveBar left={[]} dirty={false} saving error={null} savedRows={null} hasNext onSave={vi.fn()} />)
+    render(<SaveBar left={[]} dirty={false} saving error={null} savedRows={null} hasNext onSave={vi.fn()} claimNumber={1} />)
     expect(screen.getByText('Nothing changed')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save labels' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Save claim \d+$/ })).toBeDisabled()
   })
 })
 

@@ -14,16 +14,20 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
 import { paperName } from '../lib/api'
 import type { Analysis, Claim } from '../lib/api'
-import { countsOf, opensByDefault, ranked, standingOf, verdictCountLabel } from '../lib/claims'
+import { countsOf, opensByDefault, ranked, runTime, STANDING_LABELS, standingOf } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { sectionName, sectionOfPage } from '../lib/outline'
+import { OpenParts } from '../lib/openParts'
 import { useAnalysis } from '../lib/useAnalysis'
+import { cn } from '../lib/utils'
 import { AnalysisHeader } from './AnalysisHeader'
 import { AnalysisProgress } from './AnalysisProgress'
 import { ClaimCard } from './ClaimCard'
+import { FailedRun } from './FailedRun'
 import type { Target } from './PageViewer'
 import { PageViewer } from './PageViewer'
 import { ResultsSummary } from './ResultsSummary'
+import { KEY_CAP } from './StandingKey'
 import { Card, Empty } from './ui'
 
 /** A section picked in the table of contents, to open at its page. `at` tells a newer pick
@@ -34,6 +38,9 @@ export type SectionJump = { n: string; title: string; page: number; at: number }
 function verdictOf(standing: Standing): Target['verdict'] {
   return standing === 'supports' || standing === 'refutes' || standing === 'insufficient' ? standing : undefined
 }
+
+/** "Show all claims", after a section or a standing narrowed the list. */
+const CLEAR_BUTTON = 'rounded-sm text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent'
 
 /** A claim the run has finished with: it has an answer, a failure, or nothing to check. */
 function settled(claim: Claim) {
@@ -46,10 +53,10 @@ function SkeletonRow({ fade }: { fade: string }) {
     <div aria-hidden="true" className={`flex items-center gap-3.5 border-t border-border-subtle px-5 py-4 ${fade}`}>
       <span className="size-2.5 shrink-0 rounded-sm bg-neutral-soft" />
       <span className="flex min-w-0 flex-1 flex-col gap-2">
-        <span className="h-2.5 w-3/4 rounded-md bg-neutral-soft" />
-        <span className="h-2 w-36 rounded bg-neutral-soft" />
+        <span className="h-3 w-3/4 rounded-md bg-neutral-soft" />
+        <span className="h-2 w-36 rounded-sm bg-neutral-soft" />
       </span>
-      <span className="h-5 w-[84px] shrink-0 rounded-[10px] bg-neutral-soft" />
+      <span className="h-5 w-20 shrink-0 rounded-lg bg-neutral-soft" />
     </div>
   )
 }
@@ -59,6 +66,8 @@ export function AnalysisView({
   onTargetChange,
   section = null,
   onClearSection,
+  filter: shownFilter,
+  onFilter,
   jump = null,
   onCurrentSection,
   presentation = 'researcher',
@@ -68,6 +77,7 @@ export function AnalysisView({
   renderClaimActions,
   teacherDecisions,
   actionsInToolbar = false,
+  onRetried,
 }: {
   id: string | null
   /** Fires when the page viewer opens or closes, so the screen can make room for it. */
@@ -75,6 +85,10 @@ export function AnalysisView({
   /** List only the claims from this section of the paper (#153). */
   section?: string | null
   onClearSection?: () => void
+  /** The standing the claims are narrowed to, when the screen keeps it (the table of contents
+   * counts by it); without it the view keeps its own. */
+  filter?: Standing | null
+  onFilter?: (standing: Standing | null) => void
   /** Open this section's page, unless the reader opened or closed a page after picking it. */
   jump?: SectionJump | null
   /** Which section of the analysed paper the page viewer now shows, for the table of contents. */
@@ -92,11 +106,19 @@ export function AnalysisView({
   teacherDecisions?: { supports: number; contradicts: number; inconclusive: number; notReviewed: number }
   /** Put "Open PDF" and "Export" in the shell's toolbar (the researcher shell has one). */
   actionsInToolbar?: boolean
+  /** Opens another run of the paper from a failed one: its retry, or a later run that finished. */
+  onRetried?: (id: string) => void
 }) {
   const [opened, setOpened] = useState<{ target: Target | null; at: number }>({ target: null, at: 0 })
-  const [filter, setFilter] = useState<Standing | null>(null)
+  const [ownFilter, setOwnFilter] = useState<Standing | null>(null)
+  const filter = shownFilter === undefined ? ownFilter : shownFilter
+  const keepFilter = onFilter ?? setOwnFilter
   const [paperDismissedFor, setPaperDismissedFor] = useState<string | null>(null)
+  // What a shortcut did instead, or could not do: shown on the claim's own card and read out.
+  const [keyNotice, setKeyNotice] = useState<{ claim: number; text: string } | null>(null)
   const paperNotifiedFor = useRef<string | null>(null)
+  // What the reader opened on the claim cards, kept here so a filter change does not fold it.
+  const [openParts] = useState(() => new Map<string, boolean>())
   const queryClient = useQueryClient()
   const analysis = useAnalysis(id)
   const running = analysis.data?.status === 'running'
@@ -114,17 +136,44 @@ export function AnalysisView({
   const settledFrom = shown.findIndex((entry) => !opensByDefault(entry.standing))
 
   // J and K move the keyboard to the next or previous claim's row, the way a reader works
-  // through a list of problems.
+  // through a list of problems. O shows the focused claim's evidence in the cited paper.
   useEffect(() => {
     if (presentation === 'teacher') return
     const onKey = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
-      if ((key !== 'j' && key !== 'k') || event.ctrlKey || event.metaKey || event.altKey) return
+      if (!['j', 'k', 'o'].includes(key) || event.ctrlKey || event.metaKey || event.altKey) return
       if (event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return
+      const focused = document.activeElement
+      setKeyNotice(null)
+      if (key === 'o') {
+        const card = focused?.closest<HTMLElement>('[data-claim-card]')
+        if (!card) return
+        event.preventDefault()
+        // Looked up again each time: opening a folded card renders it as a new element.
+        const inCard = (selector: string) => document.querySelector<HTMLElement>(`[data-claim="${card.dataset.claim}"] ${selector}`)
+        const claim = Number(card.dataset.claim)
+        const show = () => {
+          // The cited work's quote, else (the card marks it) the claim's place in this paper.
+          const action = inCard('[aria-keyshortcuts="O"]')
+          action?.click()
+          if (!action) setKeyNotice({ claim, text: `No quoted passage to show for claim ${claim + 1}` })
+          else if (action.dataset.inPaper !== undefined) {
+            setKeyNotice({ claim, text: `No quote from a cited work for claim ${claim + 1} · showing it in this paper` })
+          }
+        }
+        const toggle = inCard('[data-claim-toggle][aria-expanded="false"]')
+        if (!toggle) return show()
+        // A folded card has no evidence to show yet: open it, keep the keyboard on it, then show.
+        toggle.click()
+        setTimeout(() => {
+          inCard('[data-claim-toggle]')?.focus()
+          show()
+        })
+        return
+      }
       const rows = [...document.querySelectorAll<HTMLElement>('[data-claim-toggle]')]
       if (!rows.length) return
       event.preventDefault()
-      const focused = document.activeElement
       const at = rows.findIndex((row) => row.closest('[data-claim-card]')!.contains(focused))
       const to = key === 'j' ? Math.min(rows.length - 1, at + 1) : Math.max(0, at - 1)
       rows[to].focus()
@@ -152,7 +201,22 @@ export function AnalysisView({
     : null
   const target: Target | null = sectionTarget ?? opened.target ?? autoPaperTarget
 
+  // The page stays open when a filter hides its claim: closing it would lose the reader's place
+  // and move the list under the pointer. Its header says so instead.
+  const hiddenClaim = target?.claim !== undefined && !shown.some((entry) => entry.index === target.claim) ? target.claim : null
+  const showAllClaims = () => {
+    keepFilter(null)
+    onClearSection?.()
+  }
+  // Another claim opened or reached with J/K keeps the page; its label leads back to its claim.
+  const backToClaim = () => {
+    const card = document.querySelector<HTMLElement>(`[data-claim="${target?.claim}"]`)
+    card?.querySelector<HTMLElement>('[data-claim-toggle]')?.focus()
+    card?.scrollIntoView({ block: 'start' })
+  }
+
   const setTarget = (next: Target | null) => {
+    setKeyNotice(null)
     setOpened({ target: next, at: Date.now() })
     if (!next && id) setPaperDismissedFor(id)
     onTargetChange?.(next !== null)
@@ -214,13 +278,16 @@ export function AnalysisView({
   const content = (
     <>
       {!teacher && <AnalysisHeader analysis={analysis.data} />}
-      {(!teacher || running) && <AnalysisProgress stages={analysis.data.stages} claims={analysis.data.claims} status={analysis.data.status} />}
-
-      {analysis.data.status === 'error' && (
-        <p role="alert" className="rounded-2xl border border-refutes bg-refutes-soft px-5 py-4 text-sm text-refutes">
-          {analysis.data.message}
-        </p>
+      {(!teacher || running) && (
+        <AnalysisProgress
+          stages={analysis.data.stages}
+          claims={analysis.data.claims}
+          status={analysis.data.status}
+          when={analysis.data.status === 'error' ? runTime(analysis.data) : undefined}
+        />
       )}
+
+      {analysis.data.status === 'error' && <FailedRun analysis={analysis.data} onOpen={onRetried} />}
 
       {/* Wide screens put the page beside the claims and give it the larger part: a PDF page
           below about 600px wide stops being readable. The viewer can also fill the window. */}
@@ -248,7 +315,7 @@ export function AnalysisView({
             <>
               <div className="flex items-center gap-2 pt-1">
                 <h2 className="type-title flex-1">Results so far</h2>
-                <p className="text-[13px] text-ink-muted" aria-live="polite">
+                <p className="text-ui text-ink-muted" aria-live="polite">
                   {settledCount} of {analysis.data.claims.length} claims
                 </p>
               </div>
@@ -289,12 +356,13 @@ export function AnalysisView({
               standings={standings}
               counts={counts}
               filter={filter}
-              onFilter={setFilter}
+              onFilter={keepFilter}
               paper={file}
               paperLabel={presentation === 'teacher' ? paperLabel : undefined}
               teacherMode={presentation === 'teacher'}
               teacherDecisions={teacherDecisions}
               actionsInToolbar={actionsInToolbar}
+              narrow={target !== null}
               onTeacherFeedback={presentation === 'teacher' ? onTeacherFeedback : undefined}
               // The paper itself, from page 1, in the same viewer a claim opens: reading it
               // here keeps the claims in view, where a download or a new tab would not.
@@ -302,27 +370,36 @@ export function AnalysisView({
             />
           )}
           {!teacher && !running && standings.length > 0 && (
-            <div className="flex items-center gap-2 pt-1">
-              <h2 className="type-title flex-1">{attention ? 'Needs your attention' : 'All claims'}</h2>
-              <p className="text-[13px] text-ink-muted pointer-coarse:hidden">J and K move between claims</p>
+            // Beside the page viewer the column is narrow, so the hint and the count go under the heading.
+            <div className={cn('flex gap-2 pt-1', target ? 'flex-col items-start' : 'items-center')}>
+              {/* Filtered to one standing, the heading is that standing's badge words. */}
+              <h2 className="type-title flex-1">
+                {filter ? STANDING_LABELS[filter] : attention ? 'Needs your attention' : 'All claims'}
+              </h2>
+              <p className="text-ui text-ink-muted pointer-coarse:hidden">
+                <kbd className={KEY_CAP}>J</kbd> and <kbd className={KEY_CAP}>K</kbd> move between claims ·{' '}
+                <kbd className={KEY_CAP}>O</kbd> shows the evidence
+              </p>
               {filter && (
-                <p className="text-[13px] text-ink-muted" aria-live="polite">
-                  Showing {verdictCountLabel(filter, counts[filter])}
+                <p className="text-ui text-ink-muted" aria-live="polite">
+                  Showing {counts[filter]} of {standings.length}{' '}
+                  <button type="button" onClick={() => keepFilter(null)} className={CLEAR_BUTTON}>
+                    Show all claims
+                  </button>
                 </p>
               )}
             </div>
           )}
+          <p role="status" className="sr-only">
+            {keyNotice?.text}
+          </p>
           {section && (
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-sm text-ink-muted">
               <span>
                 Claims from <span className="font-medium text-ink">{sectionName(outline, section)}</span>
               </span>
               {onClearSection && (
-                <button
-                  type="button"
-                  onClick={onClearSection}
-                  className="rounded text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
-                >
+                <button type="button" onClick={onClearSection} className={CLEAR_BUTTON}>
                   Show all claims
                 </button>
               )}
@@ -351,6 +428,8 @@ export function AnalysisView({
                 ownsAnalysis={ownsAnalysis}
                 sourceUpload={sourceUpload}
                 actions={renderClaimActions?.(claim, index)}
+                stacked={target !== null && !teacher}
+                notice={keyNotice?.claim === index ? keyNotice.text : undefined}
                 onSelect={presentation === 'teacher' && file && claim.source
                   ? () => setTarget({
                       paper: file,
@@ -370,10 +449,22 @@ export function AnalysisView({
 
         {target && presentation !== 'teacher' && (
           // Sticky starts its own stacking context, so the viewer's z-50 only counts inside this
-          // box. z-20 lifts the box, full-window viewer included, above the sticky summary card (#160).
-          <div className="xl:sticky xl:top-6 xl:z-20 xl:self-start">
+          // box. Left at no z-index the box stays under the shell's toolbar and its Export menu;
+          // a full-window viewer (fixed) lifts it over them. Under the 52px toolbar (13 spacing
+          // steps) it starts below it, not on its buttons.
+          <div className={cn('xl:sticky xl:self-start xl:has-[.fixed]:z-30', actionsInToolbar ? 'xl:top-17' : 'xl:top-6')}>
             <PageViewer
               key={target.paper}
+              onLabel={target.claim === undefined ? undefined : backToClaim}
+              notice={hiddenClaim !== null && (
+                <p className="text-xs text-ink-muted">
+                  Claim {hiddenClaim + 1} is hidden by the current filter ·{' '}
+                  <button type="button" onClick={showAllClaims} className={CLEAR_BUTTON}>
+                    Show all claims
+                  </button>
+                </p>
+              )}
+              className={actionsInToolbar ? 'h-[calc(100vh-var(--spacing)*21)]' : undefined}
               target={target}
               onClose={() => setTarget(null)}
               // Markers belong to the analysed paper, not to a cited paper opened in the viewer.
@@ -393,11 +484,11 @@ export function AnalysisView({
     </>
   )
 
-  if (teacher) return content
+  if (teacher) return <OpenParts.Provider value={openParts}>{content}</OpenParts.Provider>
   // Open beside a page the column fills the shell; on its own it reads at the width of a paper.
   return (
-    <div className={`flex flex-col gap-7 ${target ? 'w-full' : 'mx-auto w-full max-w-[880px]'}`}>
-      {content}
-    </div>
+    <OpenParts.Provider value={openParts}>
+      <div className={`flex flex-col gap-7 ${target ? 'w-full' : 'mx-auto w-full max-w-4xl'}`}>{content}</div>
+    </OpenParts.Provider>
   )
 }

@@ -10,9 +10,58 @@ import type { Analysis, Citation, Claim, Unchecked, Verdict } from './api'
 import { reasonText } from './api'
 import { csvText } from './csv'
 
-/** The name a list shows for an analysis: the uploaded file's name, else the paper id. */
-export function analysisLabel(analysis: Analysis): string {
-  return analysis.file?.split(/[\\/]/).pop() ?? analysis.paper
+/** The name a list, a breadcrumb or a heading shows for an analysis: the paper's own title,
+ * else the title another of `runs` has for the same paper (a run stopped before the paper was
+ * read has none), else the uploaded file's name, else the paper id. */
+export function analysisLabel(analysis: Analysis, runs: Analysis[] = []): string {
+  const paper = normalise(analysis.paper)
+  return (
+    analysis.title ||
+    runs.find((run) => run.title && normalise(run.paper) === paper)?.title ||
+    analysis.file?.split(/[\\/]/).pop() ||
+    analysis.paper
+  )
+}
+
+/** A paper's runs: the one its row opens, and the others, newest first. */
+export type PaperRuns = { run: Analysis; earlier: Analysis[] }
+
+/** Lowercase words only, so "arXiv:2004.14974" and "2004.14974" compare equal. */
+function normalise(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/^(https?:\/\/)?(www\.)?(arxiv\.org\/abs\/|doi\.org\/)|^(arxiv|doi):/, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+/**
+ * Groups a newest-first list of runs into one entry per paper, in the order of each paper's
+ * newest run.
+ *
+ * The same paper can come back under another id (a DOI one time, an arXiv link the next), so
+ * runs are matched by title, and a run without a title (a stopped one) by its id, joined to the
+ * title another run of that id has. A row opens a running run, else the newest finished one,
+ * else the newest.
+ */
+export function groupRuns(analyses: Analysis[]): PaperRuns[] {
+  const titleOf = new Map<string, string>()
+  for (const analysis of analyses) {
+    if (analysis.title) titleOf.set(normalise(analysis.paper), normalise(analysis.title))
+  }
+  const papers = new Map<string, Analysis[]>()
+  for (const analysis of analyses) {
+    const id = normalise(analysis.paper)
+    const key = analysis.title ? normalise(analysis.title) : (titleOf.get(id) ?? id)
+    papers.set(key, [...(papers.get(key) ?? []), analysis])
+  }
+  return [...papers.values()].map((runs) => {
+    const run =
+      runs.find((analysis) => analysis.status === 'running') ??
+      runs.find((analysis) => analysis.status === 'done') ??
+      runs[0]
+    return { run, earlier: runs.filter((analysis) => analysis !== run) }
+  })
 }
 
 /** One claim's standing, worst first: that order is the reading order. */
@@ -20,13 +69,24 @@ export const STANDINGS = ['refutes', 'insufficient', 'unchecked', 'supports', 'n
 
 export type Standing = (typeof STANDINGS)[number]
 
+/** A standing's colour in bars, dots and keys. The three greys differ by shape as well as shade:
+ * a claim that only names a tool or dataset gets a hollow mark, so it never reads as not checked. */
+export const STANDING_COLORS: Record<Standing, string> = {
+  refutes: 'bg-refutes',
+  insufficient: 'bg-insufficient',
+  unchecked: 'bg-neutral',
+  supports: 'bg-supports',
+  named: 'border border-ink-muted',
+  uncited: 'bg-ink/30',
+}
+
 /** Plain language over jargon: a badge has to mean something to a first-time reader (#37). */
 export const STANDING_LABELS: Record<Standing, string> = {
   refutes: 'Source contradicts',
   insufficient: 'Source is silent',
   unchecked: 'Not checked',
   supports: 'Source backs it',
-  named: 'Names what it uses',
+  named: 'Names a tool or dataset',
   uncited: 'No citation',
 }
 
@@ -37,7 +97,7 @@ const COUNT_WORDS: Record<Standing, readonly [string, string]> = {
   insufficient: ['silent', 'silent'],
   supports: ['backs it', 'back it'],
   unchecked: ['not checked', 'not checked'],
-  named: ['names what it uses', 'name what they use'],
+  named: ['names a tool or dataset', 'name a tool or dataset'],
   uncited: ['no citation', 'no citation'],
 }
 
@@ -50,6 +110,16 @@ export function verdictCountWord(kind: Standing, n: number): string {
 /** Number and word together: "1 contradicts", "3 back it". */
 export function verdictCountLabel(kind: Standing, n: number): string {
   return `${n} ${verdictCountWord(kind, n)}`
+}
+
+/** The other cited works' verdicts beside a claim's chip, worst first: "3 back it, 1 silent".
+ * Empty when there are none. */
+export function verdictTally(verdicts: Verdict['verdict'][]): string {
+  return (['refutes', 'insufficient', 'supports'] as const)
+    .map((kind) => [kind, verdicts.filter((verdict) => verdict === kind).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([kind, n]) => verdictCountLabel(kind, n))
+    .join(', ')
 }
 
 /** What each badge does and does not mean. Shown as a legend and on hover. */
@@ -99,6 +169,54 @@ export function countsOf(standings: Standings): Record<Standing, number> {
   const counts = Object.fromEntries(STANDINGS.map((s) => [s, 0])) as Record<Standing, number>
   for (const { standing } of standings) counts[standing] += 1
   return counts
+}
+
+/** "20 claims, 3 contradicted by a source": a run's size and the finding a reader looks for first. */
+export function claimsLine(claims: Claim[]): string {
+  const contradicted = claims.filter((claim) => standingOf(claim) === 'refutes').length
+  const size = `${claims.length} ${claims.length === 1 ? 'claim' : 'claims'}`
+  return contradicted ? `${size}, ${contradicted} contradicted by a source` : size
+}
+
+/** One standing's count in words that do not change with the number: "Source contradicts: 3". */
+export function standingCount(kind: Standing, n: number): string {
+  return `${STANDING_LABELS[kind]}: ${n}`
+}
+
+/** "Source contradicts: 3 · Source is silent: 7 · No citation: 1": every standing with a claim,
+ * worst first, so the counts add up to the number of claims. */
+export function countsText(claims: Claim[]): string {
+  const counts = countsOf(ranked(claims))
+  return STANDINGS.filter((kind) => counts[kind] > 0)
+    .map((kind) => standingCount(kind, counts[kind]))
+    .join(' · ')
+}
+
+/** "Finished 8 Nov 2026, 18:35", "Started …" for a run that has not finished, or "Ran …" for a
+ * finished run from before finish times were kept: the one time every screen names a run by.
+ * Empty when the run has no readable time. */
+export function runTime(analysis: Analysis): string {
+  const time = runDate(analysis)
+  if (!time) return ''
+  const word = analysis.status !== 'done' ? 'Started' : analysis.completed ? 'Finished' : 'Ran'
+  return `${word} ${new Date(time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+}
+
+/** The time runTime names, in milliseconds, to sort runs by; 0 when the run has no readable time. */
+export function runDate(analysis: Analysis): number {
+  const finished = analysis.status === 'done' && analysis.completed
+  return new Date((finished ? analysis.completed : analysis.started) ?? '').getTime() || 0
+}
+
+/** Newest first by the time each row shows, so a list's order matches its dates. */
+export function byRunTime(a: Analysis, b: Analysis) {
+  return runDate(b) - runDate(a)
+}
+
+/** The standings a `?standing=` value names ("refutes,insufficient"), ignoring anything else. */
+export function standingsIn(param: string | null): Standing[] {
+  const named = new Set(param?.split(','))
+  return STANDINGS.filter((kind) => named.has(kind))
 }
 
 /** How a citation is named in a verdict or a failure: the identifier we looked it up by. */

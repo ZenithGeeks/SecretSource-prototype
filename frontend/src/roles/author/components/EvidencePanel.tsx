@@ -14,7 +14,7 @@ import { useRef, useState } from 'react'
 
 import type { Target } from '../../../components/PageViewer'
 import { Button, Card, Empty, Textarea } from '../../../components/ui'
-import { api } from '../../../lib/api'
+import { findQuote } from '../../../lib/findQuote'
 import { askTarget } from '../../../lib/askCursor'
 import { shortMessage } from '../../../lib/citations'
 import { referenceNote } from '../../../lib/referenceCheck'
@@ -83,13 +83,13 @@ export function EvidencePanel({
     const { pdf, passage, page } = citation.evidence
     setLocating(true)
     try {
-      const found = await api.findInPaper(pdf, passage, page ?? undefined).catch(() => null)
+      const found = await findQuote(pdf, passage, page ?? undefined)
       onShow({
         paper: pdf,
         label: `Deciding passage in ${pdf}`,
         quote: passage,
-        source: found && found.page ? (found as Target['source']) : null,
-        page: page ?? undefined,
+        source: found,
+        page: found?.page ?? page ?? undefined,
       })
     } finally {
       setLocating(false)
@@ -138,19 +138,19 @@ export function EvidencePanel({
           </p>
           <div className="grid grid-cols-[minmax(0,1fr)] gap-3 @xl:grid-cols-2 @xl:gap-4">
             <div className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-canvas p-3">
-              <p className="text-xs font-medium break-words text-ink-muted">
+              <p className="text-xs font-medium wrap-break-word text-ink-muted">
                 <span className="uppercase tracking-wide">Your sentence</span> · {citation.file} L{citation.line}
               </p>
-              <p className="font-mono text-xs leading-relaxed break-words text-ink">{citation.sentence}</p>
+              <p className="font-mono text-xs leading-relaxed wrap-break-word text-ink">{citation.sentence}</p>
             </div>
             <div className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-canvas p-3">
               {citation.evidence?.passage ? (
                 <>
-                  <p className="text-xs font-medium break-words text-ink-muted">
+                  <p className="text-xs font-medium wrap-break-word text-ink-muted">
                     <span className="uppercase tracking-wide">Source passage</span> · {citation.evidence.pdf}
                     {citation.evidence.page ? ` p.${citation.evidence.page}` : ''}
                   </p>
-                  <blockquote className="font-serif text-[13px] italic leading-relaxed break-words text-ink">
+                  <blockquote className="font-serif text-ui leading-relaxed italic wrap-break-word text-ink">
                     “{citation.evidence.passage}”
                   </blockquote>
                   {onShow && (
@@ -167,7 +167,7 @@ export function EvidencePanel({
               ) : (
                 <>
                   <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Source passage</p>
-                  <p className="text-[13px] break-words text-ink-muted">
+                  <p className="text-ui wrap-break-word text-ink-muted">
                     {citation.verdict === 'unavailable'
                       ? `The source could not be read: ${shortMessage(citation.message) || 'no PDF'}.`
                       : citation.verdict === 'unchecked'
@@ -181,16 +181,16 @@ export function EvidencePanel({
             </div>
           </div>
 
-          <AuditNote findings={citation.audit} className="text-[13px]" />
+          <AuditNote findings={citation.audit} className="text-ui" />
 
           {citation.explanation && (
-            <p className="text-[13px] text-ink-muted">
+            <p className="text-ui text-ink-muted">
               <span className="font-medium text-ink">Why:</span> {citation.explanation}
             </p>
           )}
 
           {referenceNote(citation) && (
-            <p role="note" className="text-[13px] text-ink-muted">
+            <p role="note" className="text-ui text-ink-muted">
               <span className="font-medium text-ink">Reference:</span> {referenceNote(citation)}
             </p>
           )}

@@ -3,7 +3,7 @@
  * the claim panel is the person's to change. */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { Home } from 'lucide-react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -63,6 +63,39 @@ describe('the labeler workspace layout', () => {
     expect(strip.closest('header')).not.toBeNull()
   })
 
+  it('folds the sidebar when the papers are shown side by side', async () => {
+    window.localStorage.setItem('labeler.paperView', 'side')
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AppShell nav={[{ key: 'home', label: 'Home', icon: Home }]} active="home" onNavigate={() => {}} role="Labeler" roleIcon={Home} foldable>
+          <Workspace analysisId="a1" />
+        </AppShell>
+      </QueryClientProvider>,
+    )
+    await screen.findByRole('navigation', { name: 'Claims of this paper' })
+    expect(screen.getByRole('complementary', { name: 'Sidebar' })).toHaveAttribute('data-folded')
+    expect(window.localStorage.getItem('shell.sidebarFolded')).toBe('1')
+  })
+
+  it('leaves the sidebar alone when the papers are stacked', async () => {
+    window.localStorage.setItem('labeler.paperView', 'both')
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AppShell nav={[{ key: 'home', label: 'Home', icon: Home }]} active="home" onNavigate={() => {}} role="Labeler" roleIcon={Home} foldable>
+          <Workspace analysisId="a1" />
+        </AppShell>
+      </QueryClientProvider>,
+    )
+    await screen.findByRole('navigation', { name: 'Claims of this paper' })
+    expect(screen.getByRole('complementary', { name: 'Sidebar' })).not.toHaveAttribute('data-folded')
+  })
+
+  it('shows the papers side by side outside a shell that can fold', async () => {
+    window.localStorage.setItem('labeler.paperView', 'side')
+    renderWorkspace()
+    expect(await screen.findByRole('button', { name: 'Side by side' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('keeps an unfinished claim when the header moves across 1280px', async () => {
     let width = 1100
     const listeners = new Set<() => void>()
@@ -83,31 +116,57 @@ describe('the labeler workspace layout', () => {
     const resize = (next: number) => act(() => { width = next; listeners.forEach((listener) => listener()) })
     resize(1300)
     expect(screen.getByRole('textbox', { name: 'A claim extraction missed' })).toHaveValue('A new claim')
-    expect(screen.getByRole('navigation', { name: 'Claims of this paper' }).closest('main')).toBeNull()
+    // From 1280px only the controls move to the top bar; the claim strip stays in the workspace.
+    expect(screen.getByRole('navigation', { name: 'Claims of this paper' }).closest('main')).not.toBeNull()
+    expect(screen.getByRole('progressbar', { name: 'Claims finished' }).closest('main')).toBeNull()
+    expect(screen.getByRole('button', { name: SHORTCUTS }).closest('main')).toBeNull()
     resize(1100)
     expect(screen.getByRole('textbox', { name: 'A claim extraction missed' })).toHaveValue('A new claim')
-    expect(screen.getByRole('navigation', { name: 'Claims of this paper' }).closest('main')).not.toBeNull()
+    expect(screen.getByRole('navigation', { name: 'Claims of this paper' }).closest('header')).toBe(
+      screen.getByRole('progressbar', { name: 'Claims finished' }).closest('header'),
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Add claim' }))
-    expect(screen.getByRole('button', { name: 'Claim 3, in progress, unsaved: A new claim' })).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByRole('button', { name: 'Claim 3, in progress, unsaved, no reference to read: A new claim' })).toHaveAttribute('aria-current', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Add a missed claim' }))
     expect(screen.getByRole('textbox', { name: 'A claim extraction missed' })).toHaveValue('')
   })
 
-  it('shows the shortcuts only when ? or the button is pressed', async () => {
+  it('shows the shortcuts only when ? or the button is pressed, and Escape hides them', async () => {
     renderWorkspace()
     const button = await screen.findByRole('button', { name: SHORTCUTS })
-    expect(screen.queryByRole('list', { name: SHORTCUTS })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: SHORTCUTS })).not.toBeInTheDocument()
     expect(button).toHaveAttribute('aria-expanded', 'false')
 
     fireEvent.keyDown(window, { key: '?' })
-    expect(screen.getByRole('list', { name: SHORTCUTS })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: SHORTCUTS })).toBeInTheDocument()
     expect(button).toHaveAttribute('aria-expanded', 'true')
 
     fireEvent.keyDown(window, { key: '?' })
-    expect(screen.queryByRole('list', { name: SHORTCUTS })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: SHORTCUTS })).not.toBeInTheDocument()
 
     fireEvent.click(button)
-    expect(screen.getByRole('list', { name: SHORTCUTS })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: SHORTCUTS })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('region', { name: SHORTCUTS })).not.toBeInTheDocument()
+  })
+
+  it('moves focus to the shortcut list when it opens', async () => {
+    renderWorkspace()
+    await screen.findByRole('button', { name: SHORTCUTS })
+    fireEvent.keyDown(window, { key: '?' })
+    expect(await screen.findByRole('region', { name: SHORTCUTS })).toHaveFocus()
+  })
+
+  it('groups the shortcuts by what they do', async () => {
+    renderWorkspace()
+    await screen.findByRole('button', { name: SHORTCUTS })
+    fireEvent.keyDown(window, { key: '?' })
+    const legend = await screen.findByRole('region', { name: SHORTCUTS })
+    for (const title of ['Decide', 'Judge passage', 'Navigate', 'Save']) {
+      expect(within(legend).getByRole('heading', { name: title })).toBeInTheDocument()
+    }
+    expect(within(legend).queryByText(/dashed claim number/)).not.toBeInTheDocument()
   })
 
   it('does not take a question mark typed in a text box for the shortcut', async () => {
@@ -117,7 +176,7 @@ describe('the labeler workspace layout', () => {
 
     fireEvent.keyDown(screen.getByRole('textbox'), { key: '?' })
 
-    expect(screen.queryByRole('list', { name: SHORTCUTS })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: SHORTCUTS })).not.toBeInTheDocument()
   })
 
   it('gives the keyboard back to the add button when the new-claim form closes', async () => {
@@ -150,21 +209,21 @@ describe('the labeler workspace layout', () => {
   it('resizes the stacked viewers with a vertical split and remembers it across reload', async () => {
     const { unmount } = renderWorkspace()
     fireEvent.click(await screen.findByRole('button', { name: 'Stacked' }))
-    const handle = screen.getByRole('separator', { name: 'Resize the reference and the paper under review' })
+    const handle = screen.getByRole('separator', { name: 'Resize the paper under review and the reference' })
     expect(handle).toHaveAttribute('aria-orientation', 'horizontal')
-    expect(handle).toHaveAttribute('aria-valuenow', '60')
+    expect(handle).toHaveAttribute('aria-valuenow', '40')
 
     fireEvent.keyDown(handle, { key: 'ArrowUp' })
-    expect(handle).toHaveAttribute('aria-valuenow', '55')
+    expect(handle).toHaveAttribute('aria-valuenow', '35')
     fireEvent.keyDown(handle, { key: 'ArrowDown' })
-    expect(handle).toHaveAttribute('aria-valuenow', '60')
+    expect(handle).toHaveAttribute('aria-valuenow', '40')
     fireEvent.keyDown(handle, { key: 'ArrowUp' })
-    expect(handle).toHaveAttribute('aria-valuenow', '55')
+    expect(handle).toHaveAttribute('aria-valuenow', '35')
 
     unmount()
     renderWorkspace()
-    const reloaded = await screen.findByRole('separator', { name: 'Resize the reference and the paper under review' })
-    expect(reloaded).toHaveAttribute('aria-valuenow', '55')
+    const reloaded = await screen.findByRole('separator', { name: 'Resize the paper under review and the reference' })
+    expect(reloaded).toHaveAttribute('aria-valuenow', '35')
 
     reloaded.setPointerCapture = vi.fn()
     fireEvent.pointerDown(reloaded, { pointerId: 1, clientY: 50 })

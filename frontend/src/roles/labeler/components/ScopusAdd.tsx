@@ -367,7 +367,7 @@ function ResultRow({
           />
           <span className={cn('min-w-0', unreachable && 'opacity-60')}>
             <span className="block text-sm font-medium text-ink group-hover:text-accent">{paper.title}</span>
-            <span className="mt-0.5 block text-xs text-ink-muted tabular-nums [overflow-wrap:anywhere]">{meta}</span>
+            <span className="mt-0.5 block text-xs text-ink-muted tabular-nums wrap-anywhere">{meta}</span>
           </span>
         </button>
         {unreachable ? (
@@ -415,7 +415,7 @@ function ResultRow({
             {paper.abstract ? (
               <Abstract text={paper.abstract} />
             ) : (
-              <p className="text-[13px] text-ink-muted">OpenAlex has no abstract for this paper.</p>
+              <p className="text-ui text-ink-muted">OpenAlex has no abstract for this paper.</p>
             )}
             <a
               href={`https://doi.org/${paper.doi}`}
@@ -440,7 +440,7 @@ function Abstract({ text }: { text: string }) {
   const long = text.length > 420
   return (
     <div className="flex flex-col items-start gap-1">
-      <p className={cn('font-paper text-[15px] leading-relaxed text-ink', long && !whole && 'line-clamp-4')}>{text}</p>
+      <p className={cn('font-paper text-reading leading-relaxed text-ink', long && !whole && 'line-clamp-4')}>{text}</p>
       {long && (
         <TextButton onClick={() => setWhole(!whole)} aria-expanded={whole} className="min-h-6 text-xs">
           {whole ? 'Show less' : 'Read the whole abstract'}
@@ -456,10 +456,10 @@ function ResultSkeleton() {
     <ul aria-hidden="true" className="flex flex-col divide-y divide-border-subtle">
       {[0, 1, 2].map((row) => (
         <li key={row} className="flex items-start gap-3 py-3">
-          <span className="mt-0.5 size-4 rounded bg-neutral-soft" />
+          <span className="mt-0.5 size-4 rounded-sm bg-neutral-soft" />
           <span className="flex flex-1 flex-col gap-2">
-            <span className="h-3.5 w-3/4 animate-pulse rounded bg-neutral-soft" />
-            <span className="h-3 w-1/2 animate-pulse rounded bg-neutral-soft" />
+            <span className="h-3.5 w-3/4 animate-pulse rounded-sm bg-neutral-soft" />
+            <span className="h-3 w-1/2 animate-pulse rounded-sm bg-neutral-soft" />
           </span>
         </li>
       ))}

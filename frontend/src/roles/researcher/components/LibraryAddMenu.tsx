@@ -30,7 +30,7 @@ export function LibraryAddMenu({ items }: { items: LibraryAddItem[] }) {
   if (items.length === 1) {
     const [only] = items
     return (
-      <Button type="button" title={only.hint} onClick={only.onSelect} className="rounded-[9px] px-3 py-[7px] text-[13px]">
+      <Button type="button" title={only.hint} onClick={only.onSelect} className="rounded-lg px-3 py-1.75 text-ui">
         {only.label}
       </Button>
     )
@@ -42,7 +42,7 @@ export function LibraryAddMenu({ items }: { items: LibraryAddItem[] }) {
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="gap-2 rounded-[9px] px-3 py-[7px] text-[13px]"
+        className="gap-2 rounded-lg px-3 py-1.75 text-ui"
       >
         Add papers
         <ChevronDown className="size-4" />
@@ -65,7 +65,7 @@ export function LibraryAddMenu({ items }: { items: LibraryAddItem[] }) {
               }}
               className="flex w-full flex-col rounded-lg px-3 py-2 text-left hover:bg-accent-soft focus-visible:bg-accent-soft focus-visible:outline-none pointer-coarse:min-h-11"
             >
-              <span className="text-[13px] font-medium text-ink">{item.label}</span>
+              <span className="text-ui font-medium text-ink">{item.label}</span>
               <span className="text-xs text-ink-muted">{item.hint}</span>
             </button>
           ))}

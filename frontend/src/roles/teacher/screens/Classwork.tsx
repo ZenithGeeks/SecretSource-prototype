@@ -27,30 +27,30 @@ export function Classwork({ workspace, onOpenAssignment }: {
   return (
     <div className="space-y-4">
       <Card className="overflow-x-auto p-0">
-        <table className="w-full min-w-[720px] border-collapse text-left">
-          <thead className="bg-surface text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">
-            <tr className="h-[42px] border-b border-border-subtle">
+        <table className="w-full min-w-180 border-collapse text-left">
+          <thead className="bg-surface text-micro font-semibold uppercase tracking-widest text-ink-muted">
+            <tr className="h-10.5 border-b border-border-subtle">
               <th className="w-12 px-4"><input aria-label="Select all assignments" type="checkbox" checked={allSelected} onChange={toggleAll} className="size-4 accent-accent" /></th>
               <th className="px-2">Assignment</th><th className="w-32 px-3">Due</th><th className="w-36 px-3">Submitted</th><th className="w-24 px-3">Missing</th><th className="w-24 px-3">Returned</th><th className="w-8" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-border-subtle text-[11px]">
+          <tbody className="divide-y divide-border-subtle text-caption">
             {assignments.map((assignment) => <AssignmentRow key={assignment.id} assignment={assignment} selected={selected.includes(assignment.id)} queued={preparedAssignments.includes(assignment.id)} onToggle={() => toggle(assignment.id)} onOpen={() => onOpenAssignment(assignment.id)} />)}
           </tbody>
         </table>
       </Card>
 
       {selected.length > 0 && <div className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3 text-surface shadow-xl">
-        <p className="text-[11px]">{selected.length} {selected.length === 1 ? 'assignment' : 'assignments'} selected · {selectedEssayCount} essays</p>
-        <div className="flex items-center gap-3"><button type="button" onClick={() => setSelected([])} className="text-[11px] text-surface/80 hover:text-white">Clear</button><Button type="button" onClick={checkEssays} disabled={preparation.isPending}>{preparation.isPending ? 'Checking…' : `Check ${selectedEssayCount} essays`}</Button></div>
+        <p className="text-caption">{selected.length} {selected.length === 1 ? 'assignment' : 'assignments'} selected · {selectedEssayCount} essays</p>
+        <div className="flex items-center gap-3"><button type="button" onClick={() => setSelected([])} className="text-caption text-surface/80 hover:text-white">Clear</button><Button type="button" onClick={checkEssays} disabled={preparation.isPending}>{preparation.isPending ? 'Checking…' : `Check ${selectedEssayCount} essays`}</Button></div>
       </div>}
 
-      <p className="text-[10px] text-ink-muted">Submission and grade status come from Classroom, read-only.</p>
-      {preparation.isError && <p role="alert" className="text-[11px] text-refutes">{preparation.error instanceof Error ? preparation.error.message : 'Selected classwork could not be prepared.'}</p>}
+      <p className="text-micro text-ink-muted">Submission and grade status come from Classroom, read-only.</p>
+      {preparation.isError && <p role="alert" className="text-caption text-refutes">{preparation.error instanceof Error ? preparation.error.message : 'Selected classwork could not be prepared.'}</p>}
       {preparation.data && <Card className="space-y-2 p-3">
-        {preparation.data.prepared.length > 0 && <p className="flex items-center gap-2 text-[11px] text-supports"><CheckCircle2 className="size-4" />{preparation.data.prepared.length} {preparation.data.prepared.length === 1 ? 'essay' : 'essays'} added to review.</p>}
-        {preparation.data.skipped.map((item, index) => <p key={`skip-${item.assignmentId}-${item.submissionId ?? index}`} className="text-[10px] text-insufficient">{item.studentName ? `${item.studentName}: ` : ''}{item.reason}</p>)}
-        {preparation.data.failed.map((item, index) => <p key={`failed-${item.assignmentId}-${item.submissionId ?? index}`} role="alert" className="text-[10px] text-refutes">{item.studentName ? `${item.studentName}: ` : ''}{item.reason}</p>)}
+        {preparation.data.prepared.length > 0 && <p className="flex items-center gap-2 text-caption text-supports"><CheckCircle2 className="size-4" />{preparation.data.prepared.length} {preparation.data.prepared.length === 1 ? 'essay' : 'essays'} added to review.</p>}
+        {preparation.data.skipped.map((item, index) => <p key={`skip-${item.assignmentId}-${item.submissionId ?? index}`} className="text-micro text-insufficient">{item.studentName ? `${item.studentName}: ` : ''}{item.reason}</p>)}
+        {preparation.data.failed.map((item, index) => <p key={`failed-${item.assignmentId}-${item.submissionId ?? index}`} role="alert" className="text-micro text-refutes">{item.studentName ? `${item.studentName}: ` : ''}{item.reason}</p>)}
       </Card>}
     </div>
   )
@@ -63,9 +63,9 @@ function AssignmentRow({ assignment, selected, queued, onToggle, onOpen }: {
   onToggle: () => void
   onOpen: () => void
 }) {
-  return <tr className={`h-[61px] transition-colors ${selected ? 'bg-accent-soft/60' : 'hover:bg-canvas'}`}>
+  return <tr className={`h-15.25 transition-colors ${selected ? 'bg-accent-soft/60' : 'hover:bg-canvas'}`}>
     <td className="px-4"><input aria-label={`Select ${assignment.title}`} type="checkbox" checked={selected} onChange={onToggle} className="size-4 accent-accent" /></td>
-    <td className="px-2"><button type="button" onClick={onOpen} className="text-left"><span className="block font-medium text-ink hover:text-accent">{assignment.title}</span><span className="mt-1 block text-[10px] text-ink-muted">Google Classroom assignment{queued ? ' · added to review' : ''}</span></button></td>
+    <td className="px-2"><button type="button" onClick={onOpen} className="text-left"><span className="block font-medium text-ink hover:text-accent">{assignment.title}</span><span className="mt-1 block text-micro text-ink-muted">Google Classroom assignment{queued ? ' · added to review' : ''}</span></button></td>
     <td className="px-3">{assignment.dueAt}</td><td className="px-3">{assignment.submittedCount} of {assignment.enrolledCount}</td><td className={`px-3 ${assignment.missingCount ? 'text-refutes' : ''}`}>{assignment.missingCount}</td><td className="px-3">{assignment.returnedCount}</td>
     <td className="px-2">{queued ? <StatusPill label="Queued" tone="accent" /> : <ChevronRight className="size-3.5 text-ink-muted" />}</td>
   </tr>

@@ -179,7 +179,7 @@ export function AccountSection() {
             const trimmed = e.target.value.trim()
             if (trimmed !== e.target.value) set('displayName', trimmed)
           }}
-          className="h-9 w-[180px] rounded-lg border border-border-subtle bg-canvas px-3 text-sm outline-none focus-visible:border-accent"
+          className="h-9 w-45 rounded-lg border border-border-subtle bg-canvas px-3 text-sm outline-none focus-visible:border-accent"
         />
       </Row>
       <Row label="Email" hint="Sign-in address and where the weekly digest is sent.">
@@ -622,7 +622,7 @@ export function ClassMarkingSection({ isPreview }: { isPreview: boolean }) {
           value={teacher.sendReportsAs}
           onChange={(e) => set('sendReportsAs', e.target.value)}
           disabled={isPreview}
-          className="h-9 w-[180px] rounded-lg border border-border-subtle bg-canvas px-3 text-sm outline-none focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-9 w-45 rounded-lg border border-border-subtle bg-canvas px-3 text-sm outline-none focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50"
         />
       </Row>
     </Section>

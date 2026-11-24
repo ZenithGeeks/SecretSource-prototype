@@ -37,7 +37,9 @@ describe('the analysis page after the critique', () => {
 
     render(<AnalysisProgress stages={stages} claims={[claim]} status="done" />)
 
-    expect(screen.getByText('2 citation checks: 1 backed, 1 silent')).toBeInTheDocument()
+    expect(screen.getByText('2 citations checked')).toBeInTheDocument()
+    // No per-verdict split here: it counts citations, and the tiles below count claims.
+    expect(screen.queryByText(/backed/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Details/ })).toHaveAttribute('aria-expanded', 'false')
   })
 

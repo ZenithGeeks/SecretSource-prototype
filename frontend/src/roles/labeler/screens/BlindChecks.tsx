@@ -65,7 +65,7 @@ function BlindRow({ paper, onOpen }: { paper: Paper; onOpen: (id: string) => voi
       </div>
       {finished && <Badge tone="supports">Done</Badge>}
       <Button variant={finished ? 'ghost' : 'solid'} disabled={!ready} onClick={() => onOpen(paper.analysis_id)} className="min-h-10">
-        {finished ? 'Review my labels' : paper.judged > 0 ? 'Continue' : 'Start'}
+        {finished ? 'Review' : paper.judged > 0 ? 'Continue' : 'Start'}
       </Button>
     </li>
   )

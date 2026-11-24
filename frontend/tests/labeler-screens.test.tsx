@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const gateway = vi.hoisted(() => ({
   pool: null as Record<string, unknown> | null,
+  poolHangs: false,
   status: { annotator: 'Chanya', configured: true, scopus: true } as Record<string, unknown> | Error,
   statusCalls: 0,
   put: 'ok' as 'ok' | 'fail' | 'hang',
@@ -21,6 +22,7 @@ vi.mock('../src/lib/api', async (original) => ({
       return gateway.status
     }
     if (path === '/labeling/pool') {
+      if (gateway.poolHangs) await new Promise(() => undefined)
       if (!gateway.pool) throw new Error('500: down')
       return gateway.pool
     }
@@ -76,6 +78,7 @@ const withQuery = (ui: React.ReactElement) =>
 
 beforeEach(() => {
   gateway.pool = null
+  gateway.poolHangs = false
   gateway.status = { annotator: 'Chanya', configured: true, scopus: true }
   gateway.statusCalls = 0
   gateway.put = 'ok'
@@ -94,9 +97,17 @@ describe('Queue', () => {
     await waitFor(() => expect(gateway.statusCalls).toBe(2))
   })
 
+  it('says the papers are loading, not that there are none, until the list arrives', async () => {
+    gateway.poolHangs = true
+    renderQueue()
+    expect(await screen.findByText('Loading papers…')).toHaveAttribute('role', 'status')
+    expect(screen.queryByText('No papers yet')).not.toBeInTheDocument()
+  })
+
   it('still shows the page when the paper list cannot be read', async () => {
     renderQueue()
     expect(await screen.findByText('No papers yet')).toBeInTheDocument()
+    expect(screen.getByText('Use Add papers to search Scopus. A paper appears here once its text has been read.')).toBeInTheDocument()
     expect(screen.queryByText('Who labels what')).not.toBeInTheDocument()
   })
 
@@ -122,10 +133,10 @@ describe('Queue', () => {
     const onOpen = vi.fn()
     const onOpenLabels = vi.fn()
     withQuery(<Queue onOpen={onOpen} onOpenLabels={onOpenLabels} onShowBlind={vi.fn()} />)
-    const unfinished = (await screen.findByRole('button', { name: 'Paper b1 (Label)' })).closest('tr')!
+    const unfinished = (await screen.findByRole('button', { name: 'Paper b1 (Start)' })).closest('tr')!
     expect(within(unfinished).getByText('Blind check')).toBeInTheDocument()
     expect(within(unfinished).getByText('Hidden until you finish')).toBeInTheDocument()
-    fireEvent.click(within(unfinished).getByRole('button', { name: 'Paper b1 (Label)' }))
+    fireEvent.click(within(unfinished).getByRole('button', { name: 'Paper b1 (Start)' }))
     expect(onOpen).toHaveBeenCalledWith('b1') // a lead's own blind check still opens to label
 
     const finished = screen.getByRole('button', { name: 'Paper b2 (View labels)' }).closest('tr')!
@@ -158,6 +169,18 @@ describe('Queue', () => {
     expect(titles).toEqual(['NLP one', 'CV open', 'NLP done', 'CV done'])
   })
 
+  it('keeps room for the menu on rows of papers the viewer did not add, so the rows line up', async () => {
+    gateway.pool = pool({ papers: [paper('p-theirs', { mine: false }), paper('p-mine', { mine: true })] })
+    renderQueue()
+    await screen.findByRole('button', { name: 'Paper p-theirs (Start)' })
+    const theirs = screen.getByRole('button', { name: 'Paper p-theirs (Start)' }).closest('tr')!
+    const mine = screen.getByRole('button', { name: 'Paper p-mine (Start)' }).closest('tr')!
+    expect(theirs.querySelector('span[aria-hidden="true"].size-10')).not.toBeNull()
+    expect(within(theirs).queryByRole('button', { name: /^More actions/ })).not.toBeInTheDocument()
+    expect(mine.querySelector('span[aria-hidden="true"].size-10')).toBeNull()
+    expect(within(mine).getByRole('button', { name: /^More actions/ })).toBeInTheDocument()
+  })
+
   it('offers Continue for the next unfinished paper and puts Add papers and Downloads behind disclosures', async () => {
     const onOpen = vi.fn()
     gateway.pool = pool({
@@ -165,6 +188,8 @@ describe('Queue', () => {
     })
     withQuery(<Queue onOpen={onOpen} onShowBlind={vi.fn()} />)
     const cont = await screen.findByRole('button', { name: 'Continue: Next unfinished' })
+    expect(cont).toHaveAttribute('title', 'Next unfinished')
+    expect(screen.getByRole('heading', { name: 'All papers' })).toBeInTheDocument()
     fireEvent.click(cont)
     expect(onOpen).toHaveBeenCalledWith('p-next')
 
@@ -207,7 +232,7 @@ describe('Blind checks', () => {
     const rowOf = (title: string) => within(list).getByText(title).closest('li') as HTMLElement
     expect(within(rowOf('Fresh')).getByRole('button', { name: 'Start' })).toBeEnabled()
     expect(within(rowOf('Midway')).getByRole('button', { name: 'Continue' })).toBeEnabled()
-    expect(within(rowOf('Finished')).getByRole('button', { name: 'Review my labels' })).toBeEnabled()
+    expect(within(rowOf('Finished')).getByRole('button', { name: 'Review' })).toBeEnabled()
     expect(within(rowOf('Finished')).getByText('Done')).toBeInTheDocument()
     expect(within(rowOf('Reading')).getByRole('button', { name: 'Start' })).toBeDisabled()
   })

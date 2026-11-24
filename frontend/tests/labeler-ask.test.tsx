@@ -195,7 +195,7 @@ describe('Ask AI in the labeler', () => {
 
     const modes = await screen.findByRole('group', { name: 'What Ask does' })
     expect(within(modes).getByRole('button', { name: 'This claim' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByText('#1 Ref B · p.5')).toBeInTheDocument()
+    expect(screen.getByText('Passage 1 · Ref B · p.5')).toBeInTheDocument()
     expect(screen.queryByLabelText('About')).not.toBeInTheDocument()
     const field = screen.getByLabelText('Question')
     expect(field).toHaveFocus()

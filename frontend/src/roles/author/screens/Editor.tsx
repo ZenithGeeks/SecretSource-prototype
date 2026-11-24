@@ -714,10 +714,10 @@ export function Editor({
             {files.some((f) => f.shared && conflicts.has(f.name)) ? 'another draft or tab?' : 'another tab?'}) since this editor last saved{' '}
             {conflicts.size === 1 ? 'it. Which version do you want to keep?' : 'them. Which versions do you want to keep?'}
           </span>
-          <button ref={keepMineButton} type="button" onClick={() => void settleConflicts('mine')} className="shrink-0 rounded font-medium underline">
+          <button ref={keepMineButton} type="button" onClick={() => void settleConflicts('mine')} className="shrink-0 rounded-sm font-medium underline">
             {conflicts.size === 1 ? 'Keep my version' : 'Keep my versions'}
           </button>
-          <button type="button" onClick={() => void settleConflicts('saved')} className="shrink-0 rounded font-medium underline">
+          <button type="button" onClick={() => void settleConflicts('saved')} className="shrink-0 rounded-sm font-medium underline">
             {conflicts.size === 1 ? 'Use the saved copy' : 'Use the saved copies'}
           </button>
         </div>
@@ -729,7 +729,7 @@ export function Editor({
               {writeError && ' Your text is kept on this device until it is saved.'}
             </span>
             {writeError && (
-              <button type="button" onClick={() => void flush()} className="shrink-0 rounded font-medium underline">
+              <button type="button" onClick={() => void flush()} className="shrink-0 rounded-sm font-medium underline">
                 Retry now
               </button>
             )}
@@ -747,7 +747,7 @@ export function Editor({
               for (const [name, content] of recoverable) onChange(name, content)
               setRecovery(null)
             }}
-            className="shrink-0 rounded font-medium underline"
+            className="shrink-0 rounded-sm font-medium underline"
           >
             Restore them
           </button>
@@ -757,7 +757,7 @@ export function Editor({
               dropBackup(draftId)
               setRecovery(null)
             }}
-            className="shrink-0 rounded font-medium underline"
+            className="shrink-0 rounded-sm font-medium underline"
           >
             Discard
           </button>
@@ -768,10 +768,10 @@ export function Editor({
           <span className="min-w-0 flex-1">
             This draft has its own copy of {draft.data.bibFork}, so changes to the project’s {draft.data.bibFork} do not reach it.
           </span>
-          <button type="button" disabled={settlingFork} onClick={() => void settleFork('project')} className="shrink-0 rounded font-medium underline disabled:opacity-60">
+          <button type="button" disabled={settlingFork} onClick={() => void settleFork('project')} className="shrink-0 rounded-sm font-medium underline disabled:opacity-60">
             Use the project’s .bib
           </button>
-          <button type="button" disabled={settlingFork} onClick={() => void settleFork('draft')} className="shrink-0 rounded font-medium underline disabled:opacity-60">
+          <button type="button" disabled={settlingFork} onClick={() => void settleFork('draft')} className="shrink-0 rounded-sm font-medium underline disabled:opacity-60">
             Keep this draft’s copy
           </button>
         </div>
@@ -784,11 +784,11 @@ export function Editor({
           <button
             type="button"
             onClick={() => void rename(offeredTitle).then((refused) => (refused ? toast.error(refused) : setTitleOfferDismissed(true)))}
-            className="shrink-0 rounded font-medium text-accent underline"
+            className="shrink-0 rounded-sm font-medium text-accent underline"
           >
             Use this title
           </button>
-          <button type="button" onClick={() => setTitleOfferDismissed(true)} className="shrink-0 rounded font-medium underline">
+          <button type="button" onClick={() => setTitleOfferDismissed(true)} className="shrink-0 rounded-sm font-medium underline">
             Not now
           </button>
         </div>

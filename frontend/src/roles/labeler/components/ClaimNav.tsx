@@ -1,10 +1,12 @@
 /** The paper's claims, with where each stands: untouched, in progress, or finished. */
 
-import { Check, ChevronLeft, ChevronRight, CircleDot, Plus } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, CircleDot, FileX, Plus } from 'lucide-react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 import { Button, Textarea } from '../../../components/ui'
+import { tidyClaim } from '../../../lib/claimText'
 import { emptyDraft, isDone, sameDraft, type Draft, type Reference, type WorkClaim } from '../../../lib/labeling'
+import { moveFocus } from '../../../lib/roving'
 import { cn } from '../../../lib/utils'
 
 /** Finished means decided everywhere and written down: an unsaved draft is not finished. */
@@ -31,6 +33,7 @@ export function ClaimNav({
   setAdding,
   text,
   setText,
+  noReference,
 }: {
   /** How the strip sits in its parent: the workspace puts it in the header row. */
   className?: string
@@ -46,12 +49,15 @@ export function ClaimNav({
   setAdding: (adding: boolean) => void
   text: string
   setText: (text: string) => void
+  /** True for a claim with no passage and no readable cited paper: its chip gets a marker. */
+  noReference?: (claim: WorkClaim) => boolean
 }) {
   const field = useId()
   const strip = useRef<HTMLOListElement>(null)
   const addButton = useRef<HTMLButtonElement>(null)
   const [moreLeft, setMoreLeft] = useState(false)
   const [moreRight, setMoreRight] = useState(false)
+  const anyUnreadable = noReference ? claims.some(noReference) : false
 
   const measureOverflow = useCallback(() => {
     const el = strip.current
@@ -99,36 +105,45 @@ export function ClaimNav({
           </button>
         )}
         {/* The scrollbar is hidden: it added a row of height, and the current chip scrolls into view. */}
+        {/* One Tab stop for the whole strip (the current claim); the arrow keys move along it. */}
         <ol
           ref={strip}
           onScroll={measureOverflow}
-          className="flex min-w-0 flex-1 gap-1 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          // Arrow keys, Home and End move along the chips without opening a claim; the ends stop.
+          onKeyDown={(event) => moveFocus(event, 'li > button', false)}
+          className="flex min-w-0 flex-1 gap-1 overflow-x-auto py-1 scrollbar-none [&::-webkit-scrollbar]:hidden"
         >
           {claims.map((claim, index) => {
             const draft = drafts[claim.claim_id] ?? emptyDraft()
-            const text = draft.status === 'edited' && draft.edited ? draft.edited : claim.claim
+            const text = tidyClaim(draft.status === 'edited' && draft.edited ? draft.edited : claim.claim)
             const here = claim.claim_id === current
             const unsaved = !sameDraft(draft, saved[claim.claim_id])
             const finished = isDone(claim, draft, references) && !unsaved
+            const unreadable = noReference?.(claim) ?? false
             return (
               <li key={claim.claim_id} className="shrink-0">
                 <button
                   type="button"
                   onClick={() => onSelect(claim.claim_id)}
                   aria-current={here ? 'true' : undefined}
-                  aria-label={`Claim ${index + 1}, ${stateWord(finished, draft)}${unsaved ? ', unsaved' : ''}: ${text}`}
-                  title={text}
+                  tabIndex={here ? 0 : -1}
+                  aria-label={`Claim ${index + 1}, ${stateWord(finished, draft)}${unsaved ? ', unsaved' : ''}${unreadable ? ', no reference to read' : ''}: ${text}`}
+                  title={unreadable ? `No reference to read. ${text}` : text}
                   className={cn(
                     // 32px with a mouse, 44px under a finger.
                     'flex h-8 min-w-7 items-center justify-center gap-0.5 rounded-lg border px-1 text-sm tabular-nums transition-colors pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-2',
                     'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-                    here
-                      ? 'border-accent bg-accent-soft font-semibold text-ink'
-                      : 'border-border-subtle bg-surface text-ink-muted hover:border-accent hover:text-ink',
+                    here && 'border-accent bg-accent-soft font-semibold text-ink',
+                    !here && 'border-border-subtle bg-surface text-ink-muted hover:border-accent hover:text-ink',
+                    // Fill is kept for progress. Nothing opens for this claim, so it gets an icon and a
+                    // dotted outline, with the usual text colour: a grey fill read as a disabled chip.
+                    unreadable && 'border-dotted',
+                    unreadable && !here && 'border-ink-muted',
                     draft.status === 'rejected' && 'line-through',
                   )}
                 >
                   {index + 1}
+                  {unreadable && <FileX aria-hidden className="size-3.5 shrink-0" />}
                   <Mark finished={finished} unsaved={unsaved} draft={draft} />
                 </button>
               </li>
@@ -156,6 +171,13 @@ export function ClaimNav({
         >
           <Plus className="size-4" aria-hidden="true" />
         </button>
+        {/* A key for the grey chips, after them and with no chip of its own, so it is not read as
+            news about the current claim. The chips carry the words for a screen reader. */}
+        {anyUnreadable && (
+          <span aria-hidden className="flex shrink-0 items-center gap-1 text-caption whitespace-nowrap text-ink-muted">
+            <FileX className="size-3.5" />= no reference to read
+          </span>
+        )}
       </div>
 
       {adding && (

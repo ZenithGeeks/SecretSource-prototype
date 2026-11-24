@@ -11,32 +11,35 @@
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { MotionConfig } from 'framer-motion'
 import { EyeOff, Keyboard } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { ToolbarActions } from '../../../components/AppShell'
 import { PageViewer, type Target } from '../../../components/PageViewer'
-import { Button, Empty, LoadingScreen, Segmented } from '../../../components/ui'
+import { Button, Empty, LoadingScreen, Segmented, TextButton } from '../../../components/ui'
 import { api, type Citation, type CitationMarker } from '../../../lib/api'
+import { askTarget, type Pointing } from '../../../lib/askCursor'
+import { printedRef } from '../../../lib/claimText'
+import { useFoldWhile } from '../../../lib/foldSidebar'
 import { cn } from '../../../lib/utils'
 import {
   type AddedPassage,
   bestCandidate,
+  changeCount,
   citedReferences,
   buildSave,
   byline,
   displayOrder,
   draftFromSaved,
+  editNotReworded,
   emptyDraft,
   emptyLabel,
-  firstUnfinishedIndex,
   LEVELS,
   labelingApi,
   nextPaperInTopic,
   nextUnfinishedIndex,
   progress,
   readUnsaved,
-  referencesOf,
   relevantPassages,
   remaining,
   sameDraft,
@@ -48,7 +51,10 @@ import {
   workClaims,
   writeUnsaved,
   type Candidate,
+  type ClaimStatus,
+  type Confidence,
   type Draft,
+  type LabelDraft,
   type Level,
   type Reference,
   type Session,
@@ -56,24 +62,35 @@ import {
   useLabelSession,
 } from '../../../lib/labeling'
 import { AiCursor } from '../../../components/AiCursor'
-import type { Pointing } from '../../../lib/askCursor'
 import { SplitPane } from '../../../components/SplitPane'
 import { AskPanel, type AskedPassage } from '../components/AskPanel'
-import { ClaimDecision, ClaimSticky, Kbd } from '../components/ClaimDecision'
+import { ClaimDecision, ClaimHeading, ClaimSticky, Kbd } from '../components/ClaimDecision'
 import { ClaimNav } from '../components/ClaimNav'
+import { GuideButton } from '../components/GuideButton'
 import { LabelForm } from '../components/LabelForm'
-import { PassageList, type Focus } from '../components/PassageList'
+import { PassageList, revealInPanel, type Focus } from '../components/PassageList'
 import { SaveBar } from '../components/SaveBar'
 import { SelectionBar, type Picked } from '../components/SelectionBar'
-import { UnresolvedReferences } from '../components/UnresolvedReferences'
+import { UnresolvedList, UnresolvedReferences } from '../components/UnresolvedReferences'
 
 const VIEWER_HEIGHT = 'h-[60vh]'
 
 const VIEW_KEY = 'labeler.paperView'
+const NOTICE_MS = 4000
+const HIGHLIGHT_MS = 1500 // how long what an undo put back stays outlined
+const UNDO_STEPS = 20 // per claim, so a long session does not keep every snapshot
 const SPLIT_KEY = 'labeler.panelRatio' // the paper's share of the width, kept by SplitPane
-const STACKED_SPLIT_KEY = 'labeler.stackedRatio' // the reference's share of the height in Stacked view
+// The paper's share of the height in Stacked view. A new key: the old one held the reference's share.
+const STACKED_SPLIT_KEY = 'labeler.stackedPaperRatio'
 // The claim panel never gets narrower than this: it was a fixed 27rem before it could be resized.
 const PANEL_MIN_PX = 432
+// Side by side, two PDFs share the rest, so the panel may be narrower and has a ratio of its own.
+const SIDE_SPLIT_KEY = 'labeler.sidePanelRatio'
+const SIDE_PANEL_MIN_PX = 384
+const SIDE_PAPERS_KEY = 'labeler.sidePaperRatio' // the paper under review's share beside the reference
+const SIDE_PDF_MIN_PX = 320
+// Below this a side-by-side pane shows a two-column page too small to read.
+const READABLE_PANE_PX = 520
 const GUTTER_PX = 12 // the space between the handle and the panel (ml-3), outside the panel's box
 type PaperView = 'both' | 'reference' | 'side'
 const VIEW_NAMES: Record<PaperView, string> = {
@@ -125,11 +142,72 @@ const firstFocus = (claim: WorkClaim, session: Session): Focus | null => {
   return ref ? { file: ref.file, passage: '', page: 1, key: `ref:${ref.reference_id}` } : null
 }
 
-/** "[b47]" matches the marker in the claim's sentence, so the two can be read together. */
-function referenceLabel(reference: Reference | null | undefined): string {
+/** "Reference [14]: title", with the number the paper prints, so it reads with the PDF. */
+function referenceLabel(reference: Reference | null | undefined, markers: CitationMarker[] = []): string {
   if (!reference) return 'Reference'
-  return reference.ref ? `Reference [${reference.ref}]: ${reference.label}` : `Reference: ${reference.label}`
+  const printed = printedRef(reference, markers)
+  return printed ? `Reference ${printed}: ${reference.label}` : `Reference: ${reference.label}`
 }
+
+/** A reference in a few words: the number the paper prints for it ("[7]"), else who wrote it,
+ * else its title. */
+function referenceTag(reference: Reference | undefined, markers: CitationMarker[] = []): string {
+  if (!reference) return 'this reference'
+  return printedRef(reference, markers) || byline(reference) || reference.label
+}
+
+/** A decision as its button names it, for the undo notice. */
+const DECISION_WORDS: Record<ClaimStatus, string> = { accepted: 'Keep', edited: 'Edit', rejected: 'Reject' }
+
+const levelWords = (tag: string, level: Level | null) => `${tag} level ${level ? `${level} ${LEVELS[level - 1].name}` : 'cleared'}`
+const confidenceWords = (tag: string, confidence: Confidence | null) =>
+  `${tag} confidence ${confidence ? confidence[0].toUpperCase() + confidence.slice(1) : 'cleared'}`
+
+/** What a change in the level form did, in the words of the key notices; empty for typing. */
+function labelChangeWords(tag: string, before: LabelDraft, after: LabelDraft): string {
+  if (after.evidence !== before.evidence) return levelWords(tag, after.evidence)
+  if (after.confidence !== before.confidence) return confidenceWords(tag, after.confidence)
+  return ''
+}
+
+/** The keyboard shortcuts, in the order the work is done. */
+const SHORTCUT_GROUPS: { title: string; keys: [string, string][] }[] = [
+  { title: 'Decide', keys: [['K', 'keep'], ['E', 'edit'], ['X', 'reject'], ['Z', 'undo']] },
+  { title: 'Judge passage', keys: [['R', 'relevant'], ['N', 'not relevant'], ['1–4', 'level'], ['L M H', 'how sure']] },
+  {
+    title: 'Navigate',
+    keys: [['J', 'next passage'], ['U', 'previous passage'], [']', 'next claim'], ['[', 'previous claim'], ['F', 'next unfinished']],
+  },
+  { title: 'Save', keys: [['Ctrl/⌘+S', 'save this claim'], ['Ctrl/⌘+Shift+S', 'save all unsaved'], ['?', 'show or hide this list']] },
+]
+
+/** True when `change` only edits text (the claim's wording, a level's reason), not a choice. */
+function isTyping(change: Partial<Draft>, before: Draft): boolean {
+  if (change.edited !== undefined) return change.status === undefined
+  if (!change.labels || Object.keys(change).length > 1) return false
+  return Object.entries(change.labels).every(([id, label]) => {
+    const old = before.labels[id] ?? emptyLabel()
+    return label.evidence === old.evidence && label.confidence === old.confidence
+  })
+}
+
+type UndoStep = { draft: Draft; focus: Focus | null; what: string; cleared?: true }
+
+/** Where on the page an undo put something back: the decision, a passage's verdict, or a level form. */
+function undoTarget(step: UndoStep, current: Draft): string | null {
+  const back = step.draft
+  if (step.cleared || back.status !== current.status || back.edited !== current.edited) return '#claim-decision'
+  const passage = Object.keys({ ...back.cands, ...current.cands }).find((id) => back.cands[id] !== current.cands[id])
+  if (passage) return `[data-ask-target="${askTarget({ kind: 'passage', id: passage })}"]`
+  const reference = Object.keys({ ...back.labels, ...current.labels }).find(
+    (id) => JSON.stringify(back.labels[id]) !== JSON.stringify(current.labels[id]),
+  )
+  if (reference) return `[data-ask-target="${askTarget({ kind: 'reference', id: reference })}"] [data-level-form]`
+  return null
+}
+
+/** "claim 3" or "claims 3, 5". */
+const claimNumbers = (numbers: number[]) => `${numbers.length === 1 ? 'claim' : 'claims'} ${numbers.join(', ')}`
 
 type WorkspaceProps = {
   analysisId: string
@@ -142,10 +220,17 @@ type WorkspaceProps = {
   onBack?: () => void
   /** Opens another paper, used when this one is finished. */
   onOpenPaper?: (id: string) => void
+  /** Whether the open paper is a blind check, so the shell can drop Ask from its toolbar. */
+  onBlindChange?: (blind: boolean) => void
 }
 
-export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk, onBack, onOpenPaper }: WorkspaceProps) {
+export function Workspace({ analysisId, onDirtyChange, askSlot = null, onOpenAsk, onBack, onOpenPaper, onBlindChange }: WorkspaceProps) {
   const query = useLabelSession(analysisId)
+  const blind = query.data?.blind ?? false
+  useEffect(() => {
+    onBlindChange?.(blind)
+    return () => onBlindChange?.(false)
+  }, [blind, onBlindChange])
   if (query.isLoading) return <LoadingScreen label="Opening the paper's claims…" />
   if (query.error || !query.data) {
     const fail = problem(query.error)
@@ -241,9 +326,31 @@ function Body({
   // The header moves between the workspace and toolbar, so keep its unfinished entry here.
   const [addingClaim, setAddingClaim] = useState(false)
   const [claimText, setClaimText] = useState('')
-  const [notice, setNotice] = useState<string | null>(null)
+  // `id` tells two notices with the same words apart: a second "Nothing to undo" restarts the
+  // timer and is read out again, where the same string would change nothing.
+  const [notice, setNoticeShown] = useState<{ text: string; id: number; keep: boolean } | null>(null)
+  const noticeCount = useRef(0)
+  const setNotice = (text: string | null, keep = false) =>
+    setNoticeShown(text ? { text, id: ++noticeCount.current, keep } : null)
+  // A notice is about the last action only, so it goes after a few seconds. One that says what an
+  // undo did, or what Save all left unsaved, stays until the next action: it takes longer to read.
+  useEffect(() => {
+    if (!notice || notice.keep) return
+    const timer = window.setTimeout(() => setNotice(null), NOTICE_MS)
+    return () => window.clearTimeout(timer)
+  }, [notice])
   const panelScrollRef = useRef<HTMLDivElement>(null)
-  const undos = useRef<Record<string, { draft: Draft; focus: Focus | null }>>({})
+  const undos = useRef<Record<string, UndoStep[]>>({})
+  // Counts the labeler's own picks of Edit; only those move the focus into the reword box.
+  const [editPicks, setEditPicks] = useState(0)
+  // Counts the times the decision takes the focus: after Clear or Discard and after undoing a decision.
+  const [decisionTurns, setDecisionTurns] = useState(0)
+  // What the last undo put back, to scroll to and outline for a moment.
+  const [undone, setUndone] = useState<{ selector: string; id: number } | null>(null)
+  // What Save all could not save, shown on the save bar's error line.
+  const [saveAllError, setSaveAllError] = useState<string | null>(null)
+  // An unchanged Edit is shown as a hint until the labeler tries to save it, then as a warning.
+  const [saveTried, setSaveTried] = useState(false)
   const pool = usePool()
   const { claims, search, searchAgain } = useAddedClaimSearch(session.analysis_id, listed, currentId)
   const claim = claims.find((c) => c.claim_id === currentId)
@@ -269,10 +376,14 @@ function Body({
   const [savedRows, setSavedRows] = useState<number | null>(null)
   const [picked, setPicked] = useState<Picked | null>(null) // text just selected in a PDF
   const [paperView, setPaperView] = useState<PaperView>(storedView)
-  const choosePaperView = (view: PaperView) => {
-    setPaperView(view)
+  const choosePaperView = (choice: PaperView) => {
+    // Picking the view already on screen keeps the stored choice: on a claim with no reference,
+    // Stacked is shown in place of Reference only, which stays the choice for the other claims.
+    if (choice === shownView) return
+    setPaperView(choice)
+    setNotice(null)
     try {
-      window.localStorage.setItem(VIEW_KEY, view)
+      window.localStorage.setItem(VIEW_KEY, choice)
     } catch {
       // the choice just is not remembered
     }
@@ -282,8 +393,15 @@ function Body({
   const inBar = useMinWidth(1280)
   const roomy = useMinWidth(SIDE_BY_SIDE_FROM)
   const view: PaperView = paperView === 'side' && !roomy ? 'both' : paperView
-  const both = view === 'both'
+  // With no reference to open, Reference only would hide the paper, the one thing left to judge
+  // from, so that claim gets the stacked view: the not-found card above the paper.
+  const noReference = view === 'reference' && !focus?.file
+  const shownView: PaperView = noReference ? 'both' : view
+  const both = shownView === 'both'
   const side = view === 'side'
+  // Two papers side by side need the sidebar's width too: with it open, body text came out about
+  // 6px. Leaving Side by side, or the paper, opens it again; the labeler can open it any time.
+  useFoldWhile(side)
   const save = useSaveLabels(session.analysis_id)
 
   const go = (id: string) => {
@@ -296,6 +414,8 @@ function Body({
     setPicked(null)
     setPaperDone(false)
     setNotice(null)
+    setSaveTried(false)
+    setSaveAllError(null)
     save.reset()
     /* v8 ignore next -- @preserve */
     if (panelScrollRef.current) panelScrollRef.current.scrollTop = 0
@@ -330,22 +450,35 @@ function Body({
       /* v8 ignore stop -- @preserve */
       return { ...all, [currentId]: { ...before, ...start, ...change } }
     })
-  // A click is not a shortcut, so it drops the one-step undo. Z only restores the last key.
-  const patch = (change: Partial<Draft>) => {
-    delete undos.current[currentId]
+  // Every choice, by key or by click, goes on the claim's undo stack, which Z walks back. Typing
+  // in a text box does not, or Z would take back one letter. A notice from an earlier action is cleared.
+  const remember = (what: string, cleared?: true) => {
+    const steps = undos.current[currentId] ?? []
+    undos.current[currentId] = [...steps, { draft: structuredClone(draft), focus, what, cleared }].slice(-UNDO_STEPS)
+  }
+  const patch = (change: Partial<Draft>, what: string) => {
+    if (!isTyping(change, draft)) {
+      remember(what)
+      setNotice(null)
+    }
+    if (change.status) setSaveTried(false)
     writeDraft(change)
   }
   const keyed = (change: Partial<Draft>, text: string) => {
-    undos.current[currentId] = { draft: structuredClone(draft), focus }
-    writeDraft(change)
+    patch(change, text)
     setNotice(`${text} · Z to undo`)
   }
 
   const dirty = !sameDraft(draft, saved[currentId])
+  // Edit with the wording left as extracted is no change of wording: Keep says that.
+  const saveBlocked = claim && editNotReworded(claim, draft) ? "Can't save yet: reword the claim, or choose Keep." : null
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const shortcutsButtonRef = useRef<HTMLButtonElement>(null)
   const toggleShortcuts = () => setShortcutsOpen((open) => !open)
+  // Focus moves to the list as it opens, so a screen reader announces it.
+  const showShortcuts = useCallback((list: HTMLElement | null) => list?.focus({ preventScroll: true }), [])
   // Kept with the claim it was for, so moving to another claim drops the cursor at once.
   const [pointing, setPointing] = useState<{ claimId: string; at: Pointing } | null>(null)
   const point = useCallback((at: Pointing | null) => setPointing(at && { claimId: currentId, at }), [currentId])
@@ -356,7 +489,7 @@ function Body({
   const position = claims.findIndex((c) => c.claim_id === currentId)
   // Cited works with no PDF can still get a passage and a level (#824); they never open in the viewer.
   const cited = [...session.references, ...(session.unread ?? [])]
-  const left = claim ? remaining(claim, draft, cited) : []
+  const left = claim ? remaining(claim, draft, cited, session.markers) : []
 
   const write = (next: boolean) => {
     // Save is offered, and Ctrl+S allowed, only with a claim on screen.
@@ -365,6 +498,7 @@ function Body({
     const index = claims.findIndex((c) => c.claim_id === claim.claim_id)
     const target = saveNextTarget(claims, drafts, saved, cited, index)
     const body = buildSave({ ...claim, source: claimSource }, draft, saved[claim.claim_id])
+    setSaveAllError(null)
     save.mutate(body, {
       onSuccess: (rows) => {
         setSaved((all) => ({ ...all, [claim.claim_id]: structuredClone(draft) }))
@@ -374,6 +508,41 @@ function Body({
         setPaperDone(target.kind === 'paper-done')
       },
     })
+  }
+
+  // Every claim with unsaved changes, one after another through the same save as one claim. It
+  // stops at the first failure, so the error line can say which claims were saved and which not.
+  // A claim that cannot be saved yet (an Edit not reworded) is skipped and named.
+  const saveAll = async () => {
+    const changed = claims.flatMap((c, index) => {
+      const d = drafts[c.claim_id]
+      return d && !sameDraft(d, saved[c.claim_id]) ? [{ claim: c, draft: d, number: index + 1 }] : []
+    })
+    if (changed.length === 0) {
+      setNotice('Nothing to save')
+      return
+    }
+    const ready = changed.filter((item) => !editNotReworded(item.claim, item.draft))
+    const skipped = changed.filter((item) => editNotReworded(item.claim, item.draft)).map((item) => item.number)
+    const reword = skipped.length ? `${claimNumbers(skipped)} not saved: reword the claim, or choose Keep` : ''
+    const done: number[] = []
+    setSaveAllError(null)
+    setSavedRows(null)
+    for (const [at, item] of ready.entries()) {
+      // The claim on screen may have been placed in the paper by a lookup; the others keep their own source.
+      const source = item.claim.claim_id === currentId ? claimSource : item.claim.source
+      try {
+        await save.mutateAsync(buildSave({ ...item.claim, source }, item.draft, saved[item.claim.claim_id]))
+      } catch (error) {
+        const fail = problem(error)
+        const failed = `${claimNumbers(ready.slice(at).map((rest) => rest.number))}: ${fail.title}. ${fail.hint}`
+        setSaveAllError([failed, reword, done.length ? `${claimNumbers(done)} saved` : ''].filter(Boolean).join(' · '))
+        return
+      }
+      done.push(item.number)
+      setSaved((all) => ({ ...all, [item.claim.claim_id]: structuredClone(item.draft) }))
+    }
+    setNotice([`${done.length} saved`, reword].filter(Boolean).join(' · '), Boolean(reword))
   }
 
   useEffect(() => {
@@ -401,10 +570,15 @@ function Body({
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault()
-        if (dirty && !save.isPending) write(false)
+        if (save.isPending) return
+        if (event.shiftKey) void saveAll()
+        else if (saveBlocked) setSaveTried(true)
+        else if (dirty) write(false)
         return
       }
-      const typing = event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)
+      const typing =
+        event.target instanceof HTMLElement &&
+        (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable)
       if (typing || event.ctrlKey || event.metaKey || event.altKey || !claim) return
       const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
       const stepPassage = (delta: 1 | -1) => {
@@ -424,29 +598,44 @@ function Body({
         toggleShortcuts()
         return
       }
+      if (key === 'Escape' && shortcutsOpen) {
+        // Focus was in the list; put it back on the button rather than lose it with the list.
+        setShortcutsOpen(false)
+        shortcutsButtonRef.current?.focus()
+        return
+      }
       if (key === 'z') {
-        const snap = undos.current[currentId]
-        if (!snap) return
+        const snap = undos.current[currentId]?.pop()
         event.preventDefault()
-        delete undos.current[currentId]
+        if (!snap) {
+          setNotice('Nothing to undo')
+          return
+        }
+        const target = undoTarget(snap, draft)
         setDrafts((all) => ({ ...all, [currentId]: snap.draft }))
         setFocus(snap.focus)
-        setNotice('Undone')
+        setNotice(`Undone: ${snap.what}`, true)
+        if (target) setUndone({ selector: target, id: noticeCount.current })
+        // The decision's buttons can change under the focus; put it on the decision, never the reword box.
+        if (target === '#claim-decision') setDecisionTurns((n) => n + 1)
         return
       }
       const ref = cited.find((r) => r.reference_id === refId)
-      const refTag = ref?.ref ? `[${ref.ref}]` : (ref?.label ?? refId ?? 'Reference')
+      const refTag = referenceTag(ref, session.markers)
       // A handled letter must not also be typed: E opens the edit box, which takes the focus.
       if (['k', 'e', 'x', 'r', 'n', 'l', 'm', 'h', '1', '2', '3', '4'].includes(key)) event.preventDefault()
-      if (key === 'k') keyed({ status: 'accepted' }, 'Claim → Keep')
-      else if (key === 'e') keyed({ status: 'edited' }, 'Claim → Edit')
-      else if (key === 'x') keyed({ status: 'rejected' }, 'Claim → Reject')
+      if (key === 'k') keyed({ status: 'accepted' }, DECISION_WORDS.accepted)
+      else if (key === 'e') {
+        keyed({ status: 'edited' }, DECISION_WORDS.edited)
+        setEditPicks((n) => n + 1)
+      }
+      else if (key === 'x') keyed({ status: 'rejected' }, DECISION_WORDS.rejected)
       else if (key === 'r' || key === 'n') {
         const current = ordered.find((c) => c.cand_id === focus?.key)
         if (!deciding || !current) return
         const status = key === 'r' ? ('relevant' as const) : ('rejected' as const)
         const cands = { ...draft.cands, [current.cand_id]: status }
-        keyed({ cands }, `#${current.rank} ${status === 'relevant' ? 'Relevant' : 'Not relevant'}`)
+        keyed({ cands }, `Passage ${current.rank} ${status === 'relevant' ? 'relevant' : 'not relevant'}`)
         const at = ordered.indexOf(current)
         const next = [...ordered.slice(at + 1), ...ordered.slice(0, at)].find((c) => !cands[c.cand_id])
         if (next) focusPassage(next)
@@ -462,12 +651,11 @@ function Body({
       else if (['1', '2', '3', '4'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
         const label = draft.labels[refId] ?? emptyLabel()
         const level = Number(key) as Level
-        keyed({ labels: { ...draft.labels, [refId]: { ...label, evidence: level } } }, `${refTag} → ${level} ${LEVELS[level - 1].name}`)
+        keyed({ labels: { ...draft.labels, [refId]: { ...label, evidence: level } } }, levelWords(refTag, level))
       } else if (['l', 'm', 'h'].includes(key) && deciding && refId && relevantPassages(claim, draft, refId).length > 0) {
         const label = draft.labels[refId] ?? emptyLabel()
         const confidence = key === 'l' ? 'low' : key === 'm' ? 'medium' : 'high'
-        const word = confidence[0].toUpperCase() + confidence.slice(1)
-        keyed({ labels: { ...draft.labels, [refId]: { ...label, confidence } } }, `${refTag} → ${word}`)
+        keyed({ labels: { ...draft.labels, [refId]: { ...label, confidence } } }, confidenceWords(refTag, confidence))
       }
     }
     window.addEventListener('keydown', onKey)
@@ -480,6 +668,38 @@ function Body({
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [anyDirty])
+
+  // Shows what an undo put back: scrolled into view and outlined for a moment. An inline style, not
+  // a class, so it never fights the classes React sets, and nothing moves for reduced motion.
+  useEffect(() => {
+    const element = undone && document.querySelector<HTMLElement>(undone.selector)
+    if (!element) return
+    revealInPanel(element)
+    element.style.outline = '2px solid var(--color-accent)'
+    element.style.outlineOffset = '2px'
+    const clear = () => {
+      element.style.outline = ''
+      element.style.outlineOffset = ''
+    }
+    const timer = window.setTimeout(clear, HIGHLIGHT_MS)
+    return () => {
+      window.clearTimeout(timer)
+      clear()
+    }
+  }, [undone])
+
+  // Side by side, each pane is measured: too narrow to read, the papers area offers Stacked.
+  const papersRef = useRef<HTMLDivElement>(null)
+  const [panesNarrow, setPanesNarrow] = useState(false)
+  useEffect(() => {
+    const box = papersRef.current
+    // jsdom, which the tests run in, has no ResizeObserver unless a test gives it one.
+    if (!side || !box || typeof ResizeObserver === 'undefined') return
+    const panes = [...box.querySelectorAll<HTMLElement>('section[aria-label="Paper under review"], section[aria-label="Cited reference"]')]
+    const observer = new ResizeObserver(() => setPanesNarrow(panes.some((pane) => pane.clientWidth < READABLE_PANE_PX)))
+    panes.forEach((pane) => observer.observe(pane))
+    return () => observer.disconnect()
+  }, [side, wide])
 
   const found = useQuery({
     queryKey: ['find', focus?.file, focus?.passage, focus?.page],
@@ -506,7 +726,7 @@ function Body({
     ? {
         paper: focus.file,
         paperRole: 'reference',
-        label: referenceLabel(shown),
+        label: referenceLabel(shown, session.markers),
         detail: shown ? byline(shown) : undefined,
         quote: focus.passage || undefined,
         source: found.data && found.data.page ? found.data : null,
@@ -532,6 +752,13 @@ function Body({
     ),
     onCitation: (marker: CitationMarker) => openReference(readRefs[marker.ref]),
   }
+  const ownReferences = citedReferences(claim, session.references)
+  const otherReferences = session.references.filter((r) => !ownReferences.includes(r))
+  const referenceOption = (r: Reference) => (
+    <option key={r.reference_id} value={r.reference_id}>
+      {[printedRef(r, session.markers), r.label].filter(Boolean).join(' ')}
+    </option>
+  )
   const referencePicker = session.references.length > 0 && (
     <select
       aria-label="Open reference"
@@ -543,29 +770,27 @@ function Body({
       className="h-8 w-full min-w-0 truncate rounded-lg border border-border-subtle bg-surface px-2 text-xs text-ink"
     >
       {!refId && <option value="">Open reference…</option>}
-      {session.references.map((r) => (
-        <option key={r.reference_id} value={r.reference_id}>
-          {r.ref ? `[${r.ref}] ` : ''}
-          {r.label}
-        </option>
-      ))}
+      {ownReferences.length > 0 && <optgroup label="Cited by this claim">{ownReferences.map(referenceOption)}</optgroup>}
+      {/* Labeled even when it is the only group, so a claim with no reference of its own does not
+          offer another claim's references as if they were its own. */}
+      {otherReferences.length > 0 && <optgroup label="Not cited by this claim">{otherReferences.map(referenceOption)}</optgroup>}
     </select>
   )
-  const { done, total } = progress(claims, drafts, cited, saved)
-  const refs = referencesOf(claim, draft)
-  const viewer = (target: Target, side: Picked['side'], onClose?: () => void, toolbarLead?: ReactNode) => (
+  const { done, unsaved, total } = progress(claims, drafts, cited, saved)
+  const nextUnfinished = nextUnfinishedIndex(claims, drafts, saved, cited, position)
+  const viewer = (target: Target, which: Picked['side'], onClose?: () => void) => (
     <PageViewer
       key={target.paper}
       target={target}
+      titleOnOwnLine={side}
       onClose={onClose}
       embedded={wide}
-      toolbarLead={toolbarLead}
-      {...(side === 'paper' && citing)}
+      {...(which === 'paper' && citing)}
       className={!wide ? VIEWER_HEIGHT : 'h-full min-h-0'}
       keyboard={false}
       compactQuote={wide}
-      zoomKey={`labeler.zoom.${side}`}
-      onSelectText={(s) => setPicked({ side, file: target.paper, ...s })}
+      zoomKey={`labeler.zoom.${which}`}
+      onSelectText={(s) => setPicked({ side: which, file: target.paper, ...s })}
     />
   )
 
@@ -592,7 +817,7 @@ function Body({
     if (!picked || !referenceId) return
     const p: AddedPassage = { reference_id: referenceId, page: picked.page, passage: picked.text.slice(0, 1500) }
     if (!draft.added.some((a) => a.reference_id === p.reference_id && a.passage === p.passage)) {
-      patch({ added: [...draft.added, p], ...(draft.status ? {} : { status: 'accepted' as const }) })
+      patch({ added: [...draft.added, p], ...(draft.status ? {} : { status: 'accepted' as const }) }, 'Passage added')
       setFocus({ file: picked.file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
     }
     setPicked(null)
@@ -604,48 +829,55 @@ function Body({
   // Everything done to one claim, in the order it is done. Wide screens keep it beside the
   // papers, scrolling by itself, so the papers never move while you work.
   // A reference with a passage you called relevant needs a level; the others are optional.
-  const grade = (id: string) =>
-    relevantPassages(claim, draft, id).length > 0 || draft.labels[id]?.evidence ? (
+  const grade = (id: string) => {
+    const tag = referenceTag(cited.find((r) => r.reference_id === id), session.markers)
+    return relevantPassages(claim, draft, id).length > 0 || draft.labels[id]?.evidence ? (
       <LabelForm
+        tag={tag}
         title={cited.find((r) => r.reference_id === id)?.label ?? id}
         active={id === refId}
         label={draft.labels[id]}
         others={session.others[`${claim.claim_id}|${id}`] ?? []}
-        onChange={(label) => patch({ labels: { ...draft.labels, [id]: label } })}
+        onChange={(label) =>
+          patch({ labels: { ...draft.labels, [id]: label } }, labelChangeWords(tag, draft.labels[id] ?? emptyLabel(), label))
+        }
       />
     ) : (
       <p className="text-sm text-ink-muted">Mark a passage relevant to grade this reference</p>
     )
+  }
 
+  // Side by side it opens in the top corner of the papers, beside the label panel, so it never
+  // covers the claim or the decision, and above the viewer's toolbar (z-30). Stacked, it opens
+  // under its button.
+  // Shortcuts need a keyboard, so a touch screen does not list them.
   const legend = shortcutsOpen && (
-    // Shortcuts need a keyboard, so a touch screen does not list them.
-    <ul
+    <section
+      ref={showShortcuts}
       id="labeler-shortcuts"
       aria-label="Keyboard shortcuts"
-      className="absolute right-0 top-full z-30 mt-2 flex w-80 max-w-[calc(100vw-2rem)] flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-border-subtle bg-surface p-3 text-xs text-ink-muted shadow-lg pointer-coarse:hidden"
+      tabIndex={-1}
+      className={cn(
+        'absolute right-0 z-40 flex w-80 flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-3 text-ui text-ink-muted shadow-lg focus:outline-none pointer-coarse:hidden',
+        wide ? 'top-0' : 'top-full mt-2',
+      )}
     >
-      {[
-        ['?', 'hide this list'],
-        ['K', 'keep'],
-        ['E', 'edit'],
-        ['X', 'reject'],
-        ['R', 'relevant'],
-        ['N', 'not relevant'],
-        ['J', 'next passage'],
-        ['U', 'previous passage'],
-        [']', 'next claim'],
-        ['[', 'previous claim'],
-        ['F', 'next unfinished'],
-        ['1–4', 'level'],
-        ['L M H', 'confidence'],
-        ['Z', 'undo'],
-        ['Ctrl/⌘+S', 'save'],
-      ].map(([keys, what]) => (
-        <li key={keys} className="flex items-center gap-1">
-          <Kbd hidden={false}>{keys}</Kbd> {what}
-        </li>
-      ))}
-    </ul>
+      <div className="grid grid-cols-2 gap-3">
+        {SHORTCUT_GROUPS.map(({ title, keys }) => (
+          <div key={title} className="flex flex-col gap-1">
+            <h4 className="font-medium text-ink">{title}</h4>
+            <ul className="flex flex-col gap-1">
+              {keys.map(([key, what]) => (
+                <li key={key} className="flex items-center gap-1.5">
+                  <Kbd hidden={false}>{key}</Kbd> {what}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <GuideButton className="border-t border-border-subtle pt-2" />
+    </section>
   )
 
   const nextPaper = pool.data ? nextPaperInTopic(pool.data, session.analysis_id) : null
@@ -654,7 +886,10 @@ function Body({
   // so the claim never sits on top of the passage being judged.
   const claimPin = (className?: string) =>
     draft.status ? (
-      <ClaimSticky key={claim.claim_id} text={claimWording} rejected={draft.status === 'rejected'} className={className} />
+      <ClaimSticky
+        key={claim.claim_id}
+        heading={<ClaimHeading claim={claim} position={position + 1} count={claims.length} />}
+        text={claimWording} rejected={draft.status === 'rejected'} className={className} />
     ) : null
   const paperDoneView = (
     <div role="status" className="flex flex-col items-start gap-3">
@@ -678,6 +913,29 @@ function Body({
     </div>
   )
 
+  const hasSavedDecision = Boolean(saved[currentId]?.status)
+  const changes = changeCount(draft, saved[currentId])
+  let clearLabel = 'Clear decision'
+  if (hasSavedDecision) clearLabel = changes > 1 ? `Discard ${changes} changes to this claim` : 'Discard changes to this claim'
+  // One undo step for the whole claim: Z puts back the decision, verdicts, levels and reasons at once.
+  const clearDecision = () => {
+    remember(hasSavedDecision ? 'Discard changes' : 'Clear decision', true)
+    setDrafts((all) => ({ ...all, [currentId]: saved[currentId] ?? emptyDraft() }))
+    setNotice(hasSavedDecision ? 'Changes discarded · Z to undo' : 'Decision cleared · Z to undo')
+    // The button goes away with the change, so the focus moves to the decision rather than the page.
+    setDecisionTurns((n) => n + 1)
+  }
+  const judgedCount = Object.keys(draft.cands).length
+  // It counts the works the analysis lists for the claim, which may be fewer than a printed range.
+  const unread = unresolvedCitations(claim, session)
+  const unreadCount = unread.length
+  let noPassagesLine: string | undefined
+  if (firstFocus(claim, session) === null) {
+    noPassagesLine = unreadCount
+      ? `No passages: no reference to read (${unreadCount} cited ${unreadCount === 1 ? 'work' : 'works'}).`
+      : 'No passages: this claim cites no paper.'
+  }
+
   const panel = (
     <>
       <ClaimDecision
@@ -686,25 +944,49 @@ function Body({
         position={position + 1}
         count={claims.length}
         pinned={Boolean(draft.status)}
-        onChange={patch}
+        markers={session.markers}
+        editPicks={editPicks}
+        decisionTurns={decisionTurns}
+        warnReword={saveTried}
+        onRewordBlur={() => setSaveTried(true)}
+        onChange={(change) => {
+          if (change.status === 'edited') setEditPicks((n) => n + 1)
+          patch(change, change.status ? DECISION_WORDS[change.status] : '')
+        }}
+        onClear={draft.status && dirty ? clearDecision : undefined}
+        clearLabel={clearLabel}
       />
+      {draft.status === 'rejected' && judgedCount > 0 && (
+        // Rejecting hides the passage cards; the verdicts stay in the draft and come back with Keep or Edit.
+        <p className="text-sm text-ink-muted">
+          {judgedCount} {judgedCount === 1 ? 'passage' : 'passages'} judged: hidden while the claim is rejected.
+        </p>
+      )}
       {deciding && (
         <PassageList
           claim={claim}
           draft={draft}
           references={cited}
+          markers={session.markers}
           focus={focus}
           onFocus={setFocus}
-          onJudge={(id, status) => patch({ cands: { ...draft.cands, [id]: status } })}
+          onJudge={(id, status) => {
+            // Choosing the same answer again takes it back: a passage may stay unjudged.
+            const { [id]: chosen, ...rest } = draft.cands
+            const rank = claim.candidates.find((c) => c.cand_id === id)?.rank
+            const what = chosen === status ? 'cleared' : status === 'relevant' ? 'relevant' : 'not relevant'
+            patch({ cands: chosen === status ? rest : { ...rest, [id]: status } }, `Passage ${rank} ${what}`)
+          }}
           onAdd={(p) => {
-            patch({ added: [...draft.added, p] })
+            patch({ added: [...draft.added, p] }, 'Passage added')
             const file = session.references.find((r) => r.reference_id === p.reference_id)?.file ?? ''
             setFocus({ file, passage: p.passage, page: p.page, key: `added:${p.reference_id}:${p.passage}` })
           }}
-          onRemove={(p) => patch({ added: draft.added.filter((a) => a !== p) })}
+          onRemove={(p) => patch({ added: draft.added.filter((a) => a !== p) }, 'Passage removed')}
           search={search}
           onSearchAgain={searchAgain}
           grade={grade}
+          empty={noPassagesLine}
           // A blind check keeps the judge out of the label, so no Ask on its passages either (#867).
           onAsk={
             onOpenAsk && !session.blind
@@ -716,25 +998,32 @@ function Body({
           }
         />
       )}
-      {deciding && refs.length === 0 && <p className="text-sm text-ink-muted">Nothing to label yet: judge a passage or add one.</p>}
     </>
   )
 
   const saveBar = (className?: string) => (
     <>
-    {notice && (
-      <p role="status" className="rounded-lg bg-accent-soft px-3 py-2 text-sm font-medium text-ink">
-        {notice}
-      </p>
-    )}
+    {/* The live region stays mounted, so a screen reader reads each notice as it appears. */}
+    <div role="status">
+      {notice && (
+        <p key={notice.id} className="rounded-lg bg-accent-soft px-3 py-2 text-sm font-medium text-ink">
+          {notice.text}
+        </p>
+      )}
+    </div>
     <SaveBar
       left={left}
       dirty={dirty}
       saving={save.isPending}
-      error={save.error ? `${problem(save.error).title}. ${problem(save.error).hint}` : null}
+      error={saveAllError ?? (save.error ? `${problem(save.error).title}. ${problem(save.error).hint}` : null)}
       savedRows={savedRows}
+      blocked={saveBlocked}
+      warn={saveTried}
       hasNext={claim != null && saveNextTarget(claims, drafts, saved, cited, position).kind !== 'stay'}
       onSave={write}
+      claimNumber={position + 1}
+      unsavedCount={unsaved}
+      onSaveAll={() => void saveAll()}
       className={className}
     />
     </>
@@ -767,7 +1056,7 @@ function Body({
       blocked={cannotAdd}
       onEvidence={addEvidence}
       onClaimWording={() => {
-        patch({ status: 'edited', edited: picked.text })
+        patch({ status: 'edited', edited: picked.text }, 'Claim wording from the selection')
         setPicked(null)
       }}
       onNewClaim={() => addClaim(picked.text, { sentence: picked.text, page: picked.page })}
@@ -781,6 +1070,7 @@ function Body({
   const shortcutsButton = (
     // A touch screen has no keyboard, so it gets no list and no button.
     <button
+      ref={shortcutsButtonRef}
       type="button"
       aria-expanded={shortcutsOpen}
       aria-controls="labeler-shortcuts"
@@ -800,44 +1090,70 @@ function Body({
       options={(roomy ? (['side', 'both', 'reference'] as const) : (['both', 'reference'] as const)).map((option) => ({
         value: option,
         label: VIEW_NAMES[option],
+        ...(option === 'reference' && !focus?.file && { disabled: true, title: 'This claim has no reference to read' }),
       }))}
-      value={view}
+      value={shownView}
       onChange={choosePaperView}
     />
   )
 
+  // With no reference open, the pane lists the unread works in full; with one open, the list
+  // folds under the picker, so a claim citing both kinds still says which works were not read.
+  const unreadList = unread.length > 0 && (
+    <details className="text-xs text-ink-muted">
+      <summary className="w-fit cursor-pointer font-medium">
+        {unread.length} cited {unread.length === 1 ? 'work' : 'works'} could not be read
+      </summary>
+      <div className="mt-2 max-h-64 overflow-y-auto">
+        <UnresolvedList citations={unread} markers={session.markers} />
+      </div>
+    </details>
+  )
+
   const referencePane = right ? (
-    viewer(right, 'reference', undefined, referencePicker)
+    <div className="flex min-h-0 flex-1 flex-col">{viewer(right, 'reference')}</div>
   ) : (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-      {referencePicker}
-      <UnresolvedReferences citations={unresolvedCitations(claim, session)} />
+      {noReference && (
+        <p role="note" className="text-xs text-ink-muted">
+          No reference opens for this claim, so the paper under review is shown above.
+        </p>
+      )}
+      <UnresolvedReferences citations={unread} markers={session.markers} />
     </div>
   )
 
   const papers = (
-    <div className="mr-3 flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+    <div ref={papersRef} className="relative mr-3 flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+      {legend}
       {selection}
-      {/* Side by side: the paper under review left, the reference right, as they are read.
-          Stacked: the reference on top, since it is the paper being judged. */}
-      {both ? (
-        <SplitPane
-          direction="vertical"
-          leftLabel="Cited reference"
-          rightLabel="Paper under review"
-          separatorLabel="Resize the reference and the paper under review"
-          initialRatio={0.6}
-          minRight={120}
-          storageKey={STACKED_SPLIT_KEY}
-          left={referencePane}
-          right={viewer(left_, 'paper')}
-        />
-      ) : (
-        <div className={cn('min-h-0 flex-1 gap-3', side ? 'grid grid-cols-2' : 'grid')}>
-          {side && viewer(left_, 'paper')}
-          {referencePane}
-        </div>
+      {/* Above the papers in every view, on its own row: in the toolbar of a half-width viewer it
+          shrank to one letter. Side by side, the papers' headers then line up. */}
+      {referencePicker}
+      {right && unreadList}
+      {side && panesNarrow && (
+        <p role="note" className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
+          Too narrow for side by side: Stacked shows larger pages.
+          <TextButton onClick={() => choosePaperView('both')} className="text-xs">
+            Show Stacked
+          </TextButton>
+        </p>
       )}
+      {/* The paper under review first and the reference second in every view, as they are read:
+          left and right side by side, top and bottom stacked. One SplitPane for all three, so
+          changing the view only changes the layout and neither PDF opens again. */}
+      <SplitPane
+        direction={side ? 'horizontal' : 'vertical'}
+        hideLeft={!both && !side}
+        leftLabel="Paper under review"
+        rightLabel="Cited reference"
+        separatorLabel="Resize the paper under review and the reference"
+        initialRatio={side ? 0.5 : 0.4}
+        minRight={side ? SIDE_PDF_MIN_PX : 120}
+        storageKey={side ? SIDE_PAPERS_KEY : STACKED_SPLIT_KEY}
+        left={viewer(left_, 'paper')}
+        right={referencePane}
+      />
     </div>
   )
 
@@ -848,8 +1164,10 @@ function Body({
       ) : (
         <>
           {claimPin()}
-          <div ref={panelScrollRef} data-label-panel className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-            {panel}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <div ref={panelScrollRef} data-label-panel className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 scrollbar-gutter-stable">
+              {panel}
+            </div>
           </div>
           <div className="border-t border-border-subtle">{saveBar('border-0')}</div>
         </>
@@ -857,9 +1175,57 @@ function Body({
     </div>
   )
 
-  // From 1280px the header row goes into the top bar: a row less above the papers and the panel.
+  const controls = (
+    <div className="relative ml-auto flex items-center gap-3 lg:ml-0">
+      {wide && viewToggle}
+      <div>
+        {/* Finished counts saved claims only, and drafts are counted beside it, so the save bar
+            never calls a claim done while this count does not. The unsaved count keeps its room
+            while hidden, so the controls beside it do not move when a draft starts. */}
+        <p className="mb-1 flex items-center gap-1 whitespace-nowrap text-xs text-ink-muted tabular-nums">
+          {done} of {total} claims finished
+          <span aria-hidden={unsaved === 0 || undefined} className={cn('text-accent', unsaved === 0 && 'invisible')}>
+            · {unsaved} unsaved
+          </span>
+        </p>
+        <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded-sm bg-border-subtle">
+          {/* The bar exists only when a claim does, so `total` is at least 1. */}
+          {/* v8 ignore start -- @preserve */}
+          <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
+          {/* v8 ignore stop -- @preserve */}
+        </div>
+      </div>
+      <button
+        type="button"
+        disabled={nextUnfinished == null}
+        aria-keyshortcuts="F"
+        onClick={() => {
+          /* v8 ignore next -- @preserve */
+          if (nextUnfinished == null) return
+          setPaperDone(false)
+          select(claims[nextUnfinished].claim_id)
+        }}
+        className="flex h-8 items-center gap-1.5 rounded-lg border border-border-subtle px-2 text-xs whitespace-nowrap text-ink-muted hover:border-accent hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50 pointer-coarse:h-11"
+      >
+        Next unfinished
+        <Kbd>F</Kbd>
+      </button>
+      {shortcutsButton}
+      {!wide && legend}
+    </div>
+  )
+
+  // From 1280px the controls go into the top bar and the claim strip has the row below to itself:
+  // sharing the bar with the breadcrumb and Ask AI, twenty chips did not fit.
   const header = (
-    <header className={cn('flex items-center gap-x-3 gap-y-2', inBar ? 'min-w-0 flex-1' : 'flex-wrap')}>
+    <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      {/* Past the claim strip and both papers, which hold about twenty Tab stops. */}
+      <a
+        href="#claim-decision"
+        className="sr-only rounded-lg bg-accent px-3 py-2 text-ui font-medium text-canvas focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+      >
+        Skip to the decision
+      </a>
       {/* In the top bar the breadcrumb already names the paper, so the title is for screen readers. */}
       <div className={cn('min-w-0 lg:w-52 lg:shrink-0', inBar && 'sr-only')}>
         <h1 title={session.title} className="line-clamp-2 font-serif text-xl font-semibold text-ink lg:line-clamp-1">
@@ -867,9 +1233,9 @@ function Body({
         </h1>
         <p className="text-xs text-ink-muted">Labeling as {session.annotator}</p>
       </div>
-      {/* On a wide screen the strip shares this row; below it, the strip gets a row of its own. */}
+      {/* From 1024px the strip shares this row with the title and controls; below, it gets a row of its own. */}
       <ClaimNav
-        className="order-last w-full lg:order-none lg:w-auto lg:min-w-0 lg:flex-1"
+        className="order-last w-full lg:order-0 lg:w-auto lg:min-w-0 lg:flex-1"
         claims={claims}
         drafts={drafts}
         saved={saved}
@@ -881,49 +1247,25 @@ function Body({
         setAdding={setAddingClaim}
         text={claimText}
         setText={setClaimText}
+        noReference={(item) => firstFocus(item, session) === null}
       />
-      <div className="relative ml-auto flex items-center gap-3 lg:ml-0">
-        {wide && viewToggle}
-        <div className="w-36">
-          <button
-            type="button"
-            disabled={firstUnfinishedIndex(claims, drafts, saved, cited) == null}
-            onClick={() => {
-              const index = firstUnfinishedIndex(claims, drafts, saved, cited)
-              /* v8 ignore next -- @preserve */
-              if (index == null) return
-              setPaperDone(false)
-              select(claims[index].claim_id)
-            }}
-            className="mb-1 w-full whitespace-nowrap text-left text-xs text-ink-muted tabular-nums enabled:hover:text-ink enabled:hover:underline"
-          >
-            {done} of {total} claims finished
-          </button>
-          <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Claims finished" className="h-2 overflow-hidden rounded bg-border-subtle">
-            {/* The bar exists only when a claim does, so `total` is at least 1. */}
-            {/* v8 ignore start -- @preserve */}
-            <div className="h-full bg-supports transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
-            {/* v8 ignore stop -- @preserve */}
-          </div>
-        </div>
-        {shortcutsButton}
-        {legend}
-      </div>
+      {!inBar && controls}
     </header>
   )
 
   return (
     // Fills the AppShell main box on wide screens so only the paper and label panes scroll.
     <div className={cn('flex flex-col gap-2', wide && 'min-h-0 flex-1')}>
-      {inBar ? <ToolbarActions orInline>{header}</ToolbarActions> : header}
+      {inBar && <ToolbarActions orInline>{controls}</ToolbarActions>}
+      {header}
       {session.blind && (
-        <div role="note" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-accent/40 bg-accent-soft px-4 py-2.5">
-          <EyeOff className="size-5 shrink-0 text-accent" aria-hidden />
-          <p className="text-sm font-semibold text-ink">Blind check</p>
-          <p className="min-w-0 flex-1 text-sm text-ink-muted">
-            Someone else labeled this paper. Their labels are hidden, and Review and Ask are off, so label it on your own.
-          </p>
-        </div>
+        <p role="note" className="flex items-center gap-2 text-xs text-ink-muted">
+          <EyeOff className="size-3.5 shrink-0 text-accent" aria-hidden />
+          <span>
+            <span className="font-semibold text-ink">Blind check:</span> someone else labeled this paper. Their labels
+            are hidden until you finish, and Review and Ask are off.
+          </span>
+        </p>
       )}
       {restored && anyDirty && (
         <p role="status" className="text-sm text-ink-muted">
@@ -936,9 +1278,9 @@ function Body({
           leftLabel="Paper and reference"
           rightLabel="Label this claim"
           separatorLabel="Resize the papers and the label panel"
-          initialRatio={0.7}
-          minRight={PANEL_MIN_PX + GUTTER_PX}
-          storageKey={SPLIT_KEY}
+          initialRatio={side ? 0.76 : 0.7}
+          minRight={(side ? SIDE_PANEL_MIN_PX : PANEL_MIN_PX) + GUTTER_PX}
+          storageKey={side ? SIDE_SPLIT_KEY : SPLIT_KEY}
           left={papers}
           right={labelPanel}
         />
@@ -953,6 +1295,7 @@ function Body({
             </button>
           </div>
           {referencePicker}
+          {unreadList}
           {overlay === 'paper' && viewer(left_, 'paper', () => setOverlay(null))}
           {overlay === 'reference' && right && viewer(right, 'reference', () => setOverlay(null))}
           {selection}

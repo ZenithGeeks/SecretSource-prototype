@@ -253,7 +253,7 @@ export function PreviewPane({
         <span className="text-[12px] font-medium text-ink">Live preview</span>
         <span className="hidden text-ink-muted sm:inline">rendered with LaTeX.js · updates as you type</span>
         {rendering && <Loader2 className="size-3.5 animate-spin text-ink-muted" aria-label="Rendering" />}
-        <button type="button" onClick={onToggleVerdictColors} aria-pressed={verdictColors} className={`ml-auto rounded px-1 text-accent ${HIGHLIGHT}`}>
+        <button type="button" onClick={onToggleVerdictColors} aria-pressed={verdictColors} className={`ml-auto rounded-sm px-1 text-accent ${HIGHLIGHT}`}>
           verdict colors {verdictColors ? 'on' : 'off'}
         </button>
       </div>
@@ -278,7 +278,7 @@ export function PreviewPane({
         )
       )}
       {notice && (
-        <p data-testid="preview-ignored" className="flex items-center gap-2 border-b border-border-subtle bg-canvas px-3.5 py-1 text-[11px] text-ink-muted">
+        <p data-testid="preview-ignored" className="flex items-center gap-2 border-b border-border-subtle bg-canvas px-3.5 py-1 text-caption text-ink-muted">
           <Info className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate" title={notice}>
             {notice}
@@ -290,7 +290,7 @@ export function PreviewPane({
         <div
           ref={host}
           data-testid="preview-page"
-          className={cn('mx-auto min-h-[24rem] max-w-[560px] rounded-sm bg-surface px-10 py-12 shadow-md sm:px-14', !state.root && 'hidden')}
+          className={cn('mx-auto min-h-96 max-w-150 rounded-sm bg-surface px-10 py-12 shadow-md sm:px-14', !state.root && 'hidden')}
         />
         {open && current && (
           <IssuePopover

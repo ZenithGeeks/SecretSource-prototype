@@ -114,7 +114,7 @@ export function NewProjectDialog({
       footer={
         onImport &&
         ((busy) => (
-          <TextButton onClick={onImport} disabled={busy} className={`flex items-center gap-1.5 text-[13px] ${LINK}`}>
+          <TextButton onClick={onImport} disabled={busy} className={`flex items-center gap-1.5 text-ui ${LINK}`}>
             <Upload className="size-3.5" aria-hidden="true" />
             Import a .bib or an Overleaf .zip
           </TextButton>

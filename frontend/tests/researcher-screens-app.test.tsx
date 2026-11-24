@@ -181,6 +181,15 @@ describe('Graph and Ask the field', () => {
     expect(within(breadcrumb()).getByText('Analyses')).toHaveAttribute('aria-current', 'page')
   })
 
+  it('the Analyses button in the Main nav leads back from an open analysis to the list', async () => {
+    renderApp('?role=researcher&screen=analyses&analysis=a1')
+    await within(breadcrumb()).findByRole('button', { name: 'Analyses' })
+    fireEvent.click(mainNav().getByRole('button', { name: 'Analyses' }))
+    await waitFor(() => expect(param('analysis')).toBeNull())
+    expect(param('screen')).toBe('analyses')
+    expect(within(breadcrumb()).getByText('Analyses')).toHaveAttribute('aria-current', 'page')
+  })
+
   it('opening a paper from the graph shows it on Analyses', async () => {
     renderApp('?role=researcher&screen=graph')
     fireEvent.click(screen.getByText('open from graph'))
@@ -246,5 +255,79 @@ describe('shell', () => {
     fireEvent.click(within(dialog).getByRole('tab', { name: 'Role and home' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Switch role' }))
     expect(onChangeRole).toHaveBeenCalled()
+  })
+})
+
+describe('history entries on Analyses', () => {
+  const listRow = async () => within(await screen.findByRole('region', { name: 'Your analyses' })).getByRole('button', { name: /p\.pdf/ })
+  const search = () => screen.getByRole('searchbox', { name: 'Search your analyses' })
+
+  it('opening an analysis from the list adds a history entry', async () => {
+    renderApp('?role=researcher&screen=analyses')
+    const push = vi.spyOn(window.history, 'pushState')
+    fireEvent.click(await listRow())
+    await waitFor(() => expect(param('analysis')).toBe('a1'))
+    expect(push).toHaveBeenCalledTimes(1)
+  })
+
+  it('syncing to a URL that already names the screen and analysis does not add an entry', async () => {
+    const push = vi.spyOn(window.history, 'pushState')
+    renderApp('?role=researcher&screen=analyses&analysis=a1')
+    await within(breadcrumb()).findByRole('button', { name: 'Analyses' })
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it('Back from an open analysis shows the list again, with the search typed before opening', async () => {
+    renderApp('?role=researcher&screen=analyses')
+    fireEvent.change(await screen.findByRole('searchbox', { name: 'Search your analyses' }), { target: { value: 'p.pdf' } })
+    fireEvent.click(await listRow())
+    await waitFor(() => expect(param('analysis')).toBe('a1'))
+    act(() => {
+      window.history.back()
+    })
+    await waitFor(() => expect(param('analysis')).toBeNull())
+    expect(param('screen')).toBe('analyses')
+    expect(search()).toHaveValue('p.pdf')
+  })
+
+  it('Forward reopens the analysis', async () => {
+    renderApp('?role=researcher&screen=analyses')
+    fireEvent.click(await listRow())
+    await waitFor(() => expect(param('analysis')).toBe('a1'))
+    act(() => {
+      window.history.back()
+    })
+    await waitFor(() => expect(param('analysis')).toBeNull())
+    act(() => {
+      window.history.forward()
+    })
+    await waitFor(() => expect(lastAsk().analysis).toBe('a1'))
+    expect(param('analysis')).toBe('a1')
+  })
+})
+
+describe('the tile filter in the address', () => {
+  const open = '?role=researcher&screen=analyses&analysis=a1&standing=refutes'
+
+  it('keeps ?standing= when an analysis is opened with it', () => {
+    renderApp(open)
+    expect(param('standing')).toBe('refutes')
+  })
+
+  it('drops ?standing= when another screen is picked from the nav', async () => {
+    renderApp(open)
+    fireEvent.click(mainNav().getByRole('button', { name: 'Home' }))
+    await waitFor(() => expect(param('screen')).toBe('home'))
+    expect(param('standing')).toBeNull()
+  })
+
+  it('brings the filter back when Back returns to an address that names it', async () => {
+    renderApp('?role=researcher&screen=graph')
+    window.history.pushState(null, '', open)
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await waitFor(() => expect(lastAsk().analysis).toBe('a1'))
+    expect(param('standing')).toBe('refutes')
   })
 })

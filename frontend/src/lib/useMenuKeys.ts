@@ -1,6 +1,6 @@
 /** Keyboard behavior for a dropdown menu (the WAI-ARIA menu button pattern): the first item takes
- * focus when the menu opens, the arrow keys, Home and End move between items, Escape closes the
- * menu and puts focus back on the button that opened it, and leaving the menu closes it.
+ * focus when the menu opens, the arrow keys, Home and End move between items, Escape closes only
+ * the menu and puts focus back on the button that opened it, and leaving the menu closes it.
  * `returnFocus` is for an item that opens something else: call it first, so what opens
  * remembers the button, not an item that is about to disappear. */
 
@@ -19,6 +19,8 @@ export function useMenuKeys(open: boolean, close: () => void, root: RefObject<HT
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (!open) return
     if (event.key === 'Escape') {
+      // Used up here: a page viewer behind the menu must not close on the same key.
+      event.preventDefault()
       close()
       event.currentTarget.querySelector<HTMLElement>(TRIGGER)?.focus()
       return

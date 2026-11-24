@@ -51,6 +51,8 @@ export type Source = {
   boxes: { x0: number; y0: number; x1: number; y1: number }[]
   page_width: number
   page_height: number
+  /** Share of the searched text's words the boxes cover, 0.8 to 1; only the find route sends it. */
+  coverage?: number
 }
 
 export type Claim = {
@@ -178,6 +180,10 @@ export type Analysis = {
   message?: string
   file?: string
   title?: string // the paper's own title, from GROBID; missing on older analyses
+  started?: string // ISO time the run was queued
+  completed?: string // ISO time the run ended; the list sends it, without the stages
+  authors?: string[] // from GROBID, with the title
+  year?: string
   claims: Claim[]
   figures?: PaperFigure[] // missing on analyses from before #85, and until the run has read them
   references?: Record<string, Citation> // the references the paper's markers point to (#47)

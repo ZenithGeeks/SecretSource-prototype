@@ -104,10 +104,10 @@ function DraftTitle({ title, onRename }: { title: string; onRename: (title: stri
           }
         }}
         onBlur={() => void commit(true)}
-        className="w-64 min-w-0 rounded border border-accent bg-canvas px-1.5 py-0.5 text-sm font-medium text-ink outline-none"
+        className="w-64 min-w-0 rounded-sm border border-accent bg-canvas px-1.5 py-0.5 text-sm font-medium text-ink outline-none"
       />
       {error && (
-        <span id="draft-title-error" role="alert" className="absolute top-full left-0 z-10 mt-1 whitespace-nowrap rounded bg-refutes-soft px-1.5 py-0.5 text-xs text-refutes">
+        <span id="draft-title-error" role="alert" className="absolute top-full left-0 z-10 mt-1 whitespace-nowrap rounded-sm bg-refutes-soft px-1.5 py-0.5 text-xs text-refutes">
           {error}
         </span>
       )}

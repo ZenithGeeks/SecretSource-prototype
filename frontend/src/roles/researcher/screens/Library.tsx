@@ -34,8 +34,9 @@ import {
 } from '../../../components/ui'
 import { paperName } from '../../../lib/api'
 import { errorMessage } from '../../../lib/author'
-import type { ClaimStanding, ClaimTally, LibraryPaper, Project } from '../../../lib/researcher'
-import { updatedText } from '../../../lib/researcher'
+import { STANDING_COLORS } from '../../../lib/claims'
+import type { ClaimTally, LibraryPaper, Project } from '../../../lib/researcher'
+import { tallyEntries, updatedText } from '../../../lib/researcher'
 import { useAnalyses } from '../../../lib/useAnalysis'
 import { useProjects, useResearcherActions, useResearcherLibrary } from '../../../lib/useResearcher'
 import { askTarget } from '../../../lib/askCursor'
@@ -44,27 +45,20 @@ import { cn } from '../../../lib/utils'
 import { LibraryAddMenu, type LibraryAddItem } from '../components/LibraryAddMenu'
 import { count } from '../components/LibraryCount'
 import { LibraryPaperTable } from '../components/LibraryPaperTable'
-import { StandingKey } from '../components/StandingKey'
-
-/** Display order + colour for a project's claim tally bar: worst first, as on Home and the Graph key. */
-const STANDINGS: { key: ClaimStanding; color: string }[] = [
-  { key: 'contradicted', color: 'bg-refutes' },
-  { key: 'silent', color: 'bg-insufficient' },
-  { key: 'backed', color: 'bg-supports' },
-  { key: 'unchecked', color: 'bg-neutral' },
-]
+import { StandingKey } from '../../../components/StandingKey'
 
 /** How long the Undo toast after deleting a project stays up. */
 const UNDO_MS = 10_000
 
 
 function TallyBar({ tally }: { tally: ClaimTally }) {
-  const total = STANDINGS.reduce((sum, s) => sum + tally[s.key], 0)
+  const entries = tallyEntries(tally)
+  const total = entries.reduce((sum, { count }) => sum + count, 0)
   if (!total) return null
   return (
-    <div className="flex h-2 w-full gap-0.5 overflow-hidden rounded">
-      {STANDINGS.map(({ key, color }) => (
-        <span key={key} className={cn('h-full rounded-sm', color)} style={{ flexGrow: tally[key] }} />
+    <div className="flex h-2 w-full gap-0.5 overflow-hidden rounded-sm">
+      {entries.map(({ key, kind, count }) => (
+        <span key={key} className={cn('h-full rounded-sm', STANDING_COLORS[kind])} style={{ flexGrow: count }} />
       ))}
     </div>
   )
@@ -255,7 +249,7 @@ function ProjectsLanding({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Filter projects (press /)"
             aria-label="Filter projects"
-            className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
+            className="max-w-xs rounded-lg bg-surface px-3 py-2 text-ui"
           />
           <Segmented
             label="Sort projects"
@@ -351,9 +345,9 @@ function AddPapersDialog({
 
   return (
     <Modal titleId={titleId} onClose={onClose}>
-      <DialogPanel className="flex max-h-[80vh] w-[520px] flex-col">
+      <DialogPanel className="flex max-h-[80vh] w-130 flex-col">
         <h2 id={titleId} className="type-title text-ink">Add papers</h2>
-        <p className="mt-1 text-[13px] text-ink-muted">Choose the papers you have analysed. Analyse a new one in Analyses first.</p>
+        <p className="mt-1 text-ui text-ink-muted">Choose the papers you have analysed. Analyse a new one in Analyses first.</p>
         <ul className="mt-4 min-h-0 flex-1 overflow-y-auto">
           {choices.length === 0 && (
             <li className="py-3 text-sm text-ink-muted">
@@ -503,7 +497,7 @@ function ProjectDetail({
           placeholder="Filter papers (press /)"
           aria-label="Filter papers"
           data-ask-target={askTarget({ kind: 'field', id: 'library-filter' })}
-          className="max-w-xs rounded-[10px] bg-surface px-3 py-2 text-[13px]"
+          className="max-w-xs rounded-lg bg-surface px-3 py-2 text-ui"
         />
         {/* Cluster names come from the papers, so there can be many: let the group wrap. */}
         <Segmented
@@ -560,7 +554,7 @@ function NewProjectDialog({
         return null
       }}
     >
-      <label htmlFor={descriptionId} className="mt-4 block text-[13px] font-medium text-ink">Description (optional)</label>
+      <label htmlFor={descriptionId} className="mt-4 block text-ui font-medium text-ink">Description (optional)</label>
       <Textarea
         id={descriptionId}
         value={description}

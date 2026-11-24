@@ -55,7 +55,7 @@ export function FeedbackDialog({ open, studentName, recipientEmail, senderEmail,
           <div className="flex gap-3"><span className="w-14 shrink-0 text-ink-muted">To</span><span className="break-all text-ink">{recipientEmail || 'Not available'}</span></div>
           <div className="flex items-center gap-3"><label className="w-14 shrink-0 text-ink-muted" htmlFor="feedback-email-subject">Subject</label><input id="feedback-email-subject" aria-label="Email subject" value={subject} maxLength={200} onChange={(event) => onSubjectChange ? onSubjectChange(event.target.value) : setLocalSubject(event.target.value)} className="min-w-0 flex-1 rounded-md border border-border-subtle bg-surface px-2 py-1.5 text-sm text-ink" /></div>
         </div>
-        <div className="min-h-28 px-4 py-4"><p className="sr-only">Email message to the student</p><p className="whitespace-pre-wrap text-sm leading-6 text-ink">{preview}</p></div>
+        <div className="min-h-28 p-4"><p className="sr-only">Email message to the student</p><p className="whitespace-pre-wrap text-sm leading-6 text-ink">{preview}</p></div>
         <div className="border-t border-border-subtle px-4 py-3"><div className="inline-flex items-center gap-2 rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-xs text-ink"><FileText className="size-4 text-accent" />essay-feedback.pdf</div></div>
       </div>
       {!deliveryReady && <div className="mt-4 flex gap-2 rounded-lg bg-accent-soft/45 p-3 text-xs leading-5 text-ink-muted"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-accent" /><span>{deliveryIssue} No email will be sent until this is resolved.</span></div>}

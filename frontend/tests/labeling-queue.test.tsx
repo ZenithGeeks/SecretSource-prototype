@@ -156,7 +156,7 @@ describe('the labeler queue', () => {
     await waitFor(() => expect(titlesIn(table)).toContain('NLP paper'))
   })
 
-  it('turns a paper being read into Ready without a reload', async () => {
+  it('turns a paper being read into a ready one without a reload', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const before = gateway.pool
     try {
@@ -168,7 +168,9 @@ describe('the labeler queue', () => {
         papers: before.papers.map((p) => (p.analysis_id === 'x3' ? { ...p, status: 'done', claims: 4 } : p)),
       }
       await vi.advanceTimersByTimeAsync(5_000)
-      await waitFor(() => expect(within(rowOf(table, '10.1/new')).getByText('Ready')).toBeInTheDocument())
+      // A ready paper shows its progress; only one still being read carries a status.
+      await waitFor(() => expect(within(rowOf(table, '10.1/new')).getByText(/of 4 claims/)).toBeInTheDocument())
+      expect(within(rowOf(table, '10.1/new')).queryByText('Reading…')).toBeNull()
       expect(screen.queryByText(/This list updates by itself/)).toBeNull()
     } finally {
       gateway.pool = before
@@ -235,26 +237,28 @@ describe('the labeler queue', () => {
     renderQueue()
     const table = await screen.findByRole('table')
     // Chanya decided 2 of the NLP paper's claims; with Somchai the team has decided 4.
-    expect(within(table).getByText('4 of 5 claims')).toBeInTheDocument()
-    expect(within(rowOf(table, 'NLP paper')).getByText('You: 2')).toBeInTheDocument()
-    expect(within(table).getByText('0 of 3 claims')).toBeInTheDocument()
-    const bar = within(table).getByRole('progressbar', { name: 'Claims the team decided in NLP paper' })
-    expect(bar).toHaveAttribute('aria-valuenow', '4')
+    expect(within(table).getByText('Team: 4 of 5')).toBeInTheDocument()
+    expect(within(rowOf(table, 'NLP paper')).getByText('You: 2 of 5 claims')).toBeInTheDocument()
+    expect(within(table).getByText('Team: 0 of 3')).toBeInTheDocument()
+    const bar = within(table).getByRole('progressbar', { name: 'Claims you decided in NLP paper' })
+    expect(bar).toHaveAttribute('aria-valuenow', '2')
     expect(bar).toHaveAttribute('aria-valuemax', '5')
     const labeledBy = within(rowOf(table, 'NLP paper')).getAllByRole('cell')[2]
     expect(labeledBy).toHaveTextContent('Somchai') // not Chanya: that is the viewer
     expect(labeledBy).not.toHaveTextContent('Chanya')
   })
 
-  it('says Label, Continue or Review depending on how much is judged', async () => {
+  it('says Start, Continue or Review depending on how much is judged', async () => {
     gateway.pool.papers.push({ analysis_id: 'x5', subject: '', keywords: [], title: 'Finished paper', topic: 'CV', claims: 4, judged: 4, team_judged: 4, labelers: ['Chanya'], status: 'done', reason: '', mine: false })
     try {
       renderQueue()
       const table = await screen.findByRole('table')
-      expect(within(table).getByRole('button', { name: 'HPC paper (Label)' })).toBeInTheDocument()
+      expect(within(table).getByRole('button', { name: 'HPC paper (Start)' })).toBeInTheDocument()
       expect(within(table).getByRole('button', { name: 'NLP paper (Continue)' })).toBeInTheDocument()
       expect(within(table).getByRole('button', { name: 'Finished paper (Review)' })).toBeInTheDocument()
-      expect(within(table).getByText('All 4 claims')).toBeInTheDocument()
+      const finished = rowOf(table, 'Finished paper')
+      expect(within(finished).getByText('You: all 4 claims')).toHaveClass('text-supports')
+      expect(within(finished).getByText('Team: all 4')).toBeInTheDocument()
     } finally {
       gateway.pool.papers.pop()
     }

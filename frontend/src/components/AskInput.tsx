@@ -18,7 +18,7 @@ export function AskInput({
   disabled,
   placeholder,
   label = 'Your question',
-  className = 'w-full bg-transparent py-2 text-[13px] text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed',
+  className = 'w-full bg-transparent py-2 text-ui text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed',
   menuClassName = 'absolute bottom-full left-[-0.75rem] z-20 mb-3 w-[calc(100%+1.25rem)]',
   autoFocus = false,
 }: {
@@ -109,7 +109,7 @@ export function AskInput({
                 event.preventDefault()
                 option.pick()
               }}
-              className={cn('flex cursor-pointer flex-col rounded-lg px-2.5 py-1.5 text-[13px]', index === current && 'bg-accent-soft')}
+              className={cn('flex cursor-pointer flex-col rounded-lg px-2.5 py-1.5 text-ui', index === current && 'bg-accent-soft')}
             >
               <span className="truncate font-medium text-ink">{option.name}</span>
               {option.detail && <span className="truncate text-xs text-ink-muted">{option.detail}</span>}

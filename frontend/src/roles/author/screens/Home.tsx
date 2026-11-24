@@ -51,8 +51,8 @@ function Greeting({ summary }: { summary: string }) {
   return (
     <header className="flex min-w-0 flex-col gap-2">
       <p className="type-label text-accent">{now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-      <h1 className="type-display font-serif break-words text-ink">{greeting(firstName, now.getHours())}</h1>
-      <p className="text-[15px] leading-6 break-words text-ink-muted">{summary}</p>
+      <h1 className="type-display font-serif wrap-break-word text-ink">{greeting(firstName, now.getHours())}</h1>
+      <p className="text-reading leading-6 wrap-break-word text-ink-muted">{summary}</p>
     </header>
   )
 }
@@ -158,7 +158,7 @@ export function Home({
       {drafts.isError ? (
         <ErrorState title="Could not load your drafts" message={errorMessage(drafts.error)} onRetry={() => void drafts.refetch()} />
       ) : drafts.data.length === 0 || !draftId ? (
-        <FadeIn className="mx-auto flex w-full max-w-[960px] min-w-0 flex-col gap-7 pt-4">
+        <FadeIn className="mx-auto flex w-full max-w-250 min-w-0 flex-col gap-7 pt-4">
           <Greeting summary="Upload a .tex file or write one, and every \cite gets checked against its source." />
           <NoDraftsCard onUpload={pickDraft} onWrite={write} writing={creating.busy} onAddBibliography={pickBibliography} />
         </FadeIn>
@@ -318,7 +318,7 @@ function HomeBody({
   const about = [current.files.map((f) => f.name).join(' · ') || 'no files yet', editedLabel(current.edited ?? current.updated), checkedLabel(current.lastCheckedAt)].join('  ·  ')
 
   return (
-    <FadeIn className="mx-auto flex w-full max-w-[1120px] min-w-0 flex-col gap-7 pt-4">
+    <FadeIn className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-7 pt-4">
       <Greeting summary={summaryOf(current, isChecking)} />
 
       <Card className="flex min-w-0 flex-col gap-4 rounded-2xl">
@@ -327,7 +327,7 @@ function HomeBody({
             <Pen className="size-5 text-accent" aria-hidden="true" />
           </span>
           <div className="flex min-w-0 flex-[1_1_12rem] flex-col gap-0.5">
-            <h2 title={heading} className="truncate text-[15px] leading-5 font-semibold tracking-tight text-ink">
+            <h2 title={heading} className="truncate text-reading leading-5 font-semibold tracking-tight text-ink">
               {heading}
             </h2>
             <p title={about} className="truncate font-mono text-xs leading-4 whitespace-pre text-ink-muted">
@@ -341,7 +341,7 @@ function HomeBody({
               disabled={isChecking}
               aria-busy={isChecking}
               data-ask-target={askTarget({ kind: 'action', id: 'check' })}
-              className="border border-border-subtle px-3 py-[7px] text-[13px]"
+              className="border border-border-subtle px-3 py-1.75 text-ui"
             >
               {isChecking ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Search className="size-4" aria-hidden="true" />}
               {isChecking ? 'Checking…' : current.checks ? 'Re-check' : 'Check'}
@@ -349,14 +349,14 @@ function HomeBody({
             <Button
               onClick={() => onOpenEditor({ draftId: current.id })}
               data-ask-target={askTarget({ kind: 'action', id: 'open-editor' })}
-              className="px-3 py-[7px] text-[13px]"
+              className="px-3 py-1.75 text-ui"
             >
               Open in editor
             </Button>
           </div>
         </div>
         <VerdictBar counts={current.status.counts} />
-        <VerdictLegend counts={current.status.counts} gap="gap-x-[18px] gap-y-1" className="text-[13px]" />
+        <VerdictLegend counts={current.status.counts} gap="gap-x-4.5 gap-y-1" className="text-ui" />
       </Card>
 
       {running.data?.status === 'running' && <CheckProgress check={running.data} />}

@@ -23,7 +23,7 @@ type Tile = { key: string; label: string; detail: string; state: StepState }
 
 /** The run's five steps, folded into the four the reader sees: the paper is read, then its claims
  * are found, planning and checking are one "match citations", figures and audit one "weigh". */
-function tilesOf(progress: Progress, stages: Stage[]): Tile[] {
+function tilesOf(progress: Progress, stages: Stage[], running: boolean): Tile[] {
   // summarise always returns all five steps.
   const step = Object.fromEntries(progress.steps.map((item) => [item.key, item])) as Record<string, Step>
   const fold = (...keys: string[]): StepState => {
@@ -43,7 +43,8 @@ function tilesOf(progress: Progress, stages: Stage[]): Tile[] {
   const found = progress.checksTotal !== null
     ? `${progress.checksDone} of ${progress.checksTotal} found`
     : progress.checksDone ? `${count(progress.checksDone, 'check')} done` : ''
-  const waiting = (state: StepState) => (state === 'todo' ? 'Waiting' : '')
+  // A step a stopped run never reached is not waiting for anything.
+  const waiting = (state: StepState) => (state !== 'todo' ? '' : running ? 'Waiting' : 'Not run')
   return [
     { key: 'read', label: 'Read the paper', detail: waiting(reading), state: reading },
     { key: 'claims', label: 'Find the claims', detail: read.detail || waiting(claims), state: claims },
@@ -63,15 +64,17 @@ function StageTile({ tile }: { tile: Tile }) {
       ) : current ? (
         <Loader2 className="size-4 shrink-0 animate-spin text-accent" aria-hidden="true" />
       ) : tile.state === 'failed' ? (
-        <AlertCircle className="size-4 shrink-0 text-refutes" aria-hidden="true" />
+        <AlertCircle className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
       ) : (
         <Circle className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
       )}
       <div className="min-w-0">
-        <p className={cn('truncate text-[13px] leading-[18px] font-medium', current ? 'text-accent' : tile.state === 'todo' ? 'text-ink-muted' : 'text-ink')}>
+        <p className={cn('truncate text-ui leading-4.5 font-medium', current ? 'text-accent' : tile.state === 'todo' ? 'text-ink-muted' : 'text-ink')}>
           {tile.label}
         </p>
-        <p className="truncate text-xs leading-4 text-ink-muted">{tile.detail}</p>
+        <p className="truncate text-xs leading-4 text-ink-muted">
+          {tile.state === 'failed' ? ['Stopped here', tile.detail].filter(Boolean).join(' · ') : tile.detail}
+        </p>
       </div>
     </li>
   )
@@ -87,7 +90,7 @@ function Failures({ progress }: { progress: Progress }) {
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex items-center gap-1.5 rounded text-sm font-medium text-ink focus-visible:outline-2 focus-visible:outline-accent"
+        className="flex items-center gap-1.5 rounded-sm text-sm font-medium text-ink focus-visible:outline-2 focus-visible:outline-accent"
       >
         {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
         {count(sources, 'source')} couldn&apos;t be checked
@@ -108,7 +111,18 @@ function Failures({ progress }: { progress: Progress }) {
   )
 }
 
-export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; claims: Claim[]; status: string }) {
+export function AnalysisProgress({
+  stages,
+  claims,
+  status,
+  when = '',
+}: {
+  stages: Stage[]
+  claims: Claim[]
+  status: string
+  /** "Started 8 Nov 2026, 17:40": which run this is, for a stopped one that has nothing else to tell it by. */
+  when?: string
+}) {
   const running = status === 'running'
   const [details, setDetails] = useState(false)
   const [allSteps, setAllSteps] = useState(false)
@@ -122,28 +136,24 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
 
   // A finished run is one quiet line; its details open on request.
   if (!running && !details) {
-    // These count checks (one per claim and cited work), not claims, unlike the tiles below.
-    const outcomes = [
-      progress.verdicts.supports ? `${progress.verdicts.supports} backed` : '',
-      progress.verdicts.refutes ? `${progress.verdicts.refutes} contradicted` : '',
-      progress.verdicts.insufficient ? `${progress.verdicts.insufficient} silent` : '',
-      progress.failed ? `${progress.failed} not checked` : '',
-    ].filter(Boolean)
-    const checks = count(progress.checksDone, 'citation check')
+    // Only the total: the per-verdict split counts citations, and next to the tiles below,
+    // which count claims, it read as two different answers. Details keep the split.
     const parts = [
+      when.replace(/^Started/, 'started'),
       count(progress.claims, 'claim'),
-      checked ? (outcomes.length ? `${checks}: ${outcomes.join(', ')}` : checks) : 'sources not checked',
+      checked ? `${count(progress.checksDone, 'citation')} checked` : 'sources not checked',
       elapsed,
     ].filter(Boolean)
     return (
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[13px] text-ink-muted">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-ui text-ink-muted">
         <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          {/* Grey, not red: a stopped run is not a finding, and red means a source contradicts. */}
           {progress.error ? (
-            <AlertCircle className="size-4 shrink-0 text-refutes" />
+            <AlertCircle className="size-4 shrink-0" />
           ) : (
             <CheckCircle2 className="size-4 shrink-0 text-supports" />
           )}
-          <span className={cn('font-medium', progress.error ? 'text-refutes' : 'text-ink')}>
+          <span className="font-medium text-ink">
             {progress.error ? 'Stopped' : 'Finished'}
           </span>
           {parts.map((part) => (
@@ -161,22 +171,24 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
     )
   }
 
-  const tiles = tilesOf(progress, stages)
+  const tiles = tilesOf(progress, stages, running)
   const current = tiles.findIndex((tile) => tile.state === 'current' || tile.state === 'failed')
   const done = tiles.filter((tile) => tile.state === 'done').length
   const matchShare = progress.checksTotal ? Math.min(1, progress.checksDone / progress.checksTotal) : 0
   const percent = Math.round(
     ((done + (tiles[2].state === 'current' ? matchShare : 0)) / tiles.length) * 100,
   )
+  // A stopped run fills only as far as it got.
+  const filled = running || progress.error ? percent : 100
 
   return (
-    <section className="flex flex-col gap-[18px] rounded-2xl border border-border-subtle bg-surface p-5 shadow-card">
+    <section className="flex flex-col gap-4.5 rounded-2xl border border-border-subtle bg-surface p-5 shadow-card">
       <header className="flex items-center gap-2">
-        <p className="flex-1 text-[15px] leading-5 font-semibold" aria-live="polite">
+        <p className="flex-1 text-reading leading-5 font-semibold" aria-live="polite">
           {running ? HEADLINE[Math.max(0, current)] : progress.error ? 'Stopped' : 'Finished'}
         </p>
         {running ? (
-          <p className="text-[13px] text-ink-muted tabular-nums">{percent}%</p>
+          <p className="text-ui text-ink-muted tabular-nums">{percent}%</p>
         ) : (
           <TextButton onClick={() => setDetails(false)} aria-expanded className="text-xs">
             Hide details
@@ -189,10 +201,10 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
         aria-label="Analysis progress"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={running ? percent : 100}
-        className="h-1.5 w-full overflow-hidden rounded bg-neutral-soft"
+        aria-valuenow={filled}
+        className="h-1.5 w-full overflow-hidden rounded-sm bg-neutral-soft"
       >
-        <div className="h-full rounded-sm bg-accent transition-[width] duration-500" style={{ width: `${running ? percent : 100}%` }} />
+        <div className="h-full rounded-sm bg-accent transition-[width] duration-500" style={{ width: `${filled}%` }} />
       </div>
 
       <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -202,7 +214,7 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
       </ol>
 
       {running && (
-        <p className="flex items-center gap-2 text-[13px] text-ink-muted">
+        <p className="flex items-center gap-2 text-ui text-ink-muted">
           <Clock className="size-4 shrink-0" aria-hidden="true" />
           You can leave this page. We’ll keep going and put the results under Recent analyses.
         </p>
@@ -227,7 +239,8 @@ export function AnalysisProgress({ stages, claims, status }: { stages: Stage[]; 
 
       <div className="flex justify-end">
         <TextButton onClick={() => setAllSteps(!allSteps)} aria-expanded={allSteps} className="text-xs">
-          {allSteps ? 'Hide the steps' : `Show all ${count(stages.length, 'step')}`}
+          {/* The log has a line per event, not per step above, so it is not counted in steps. */}
+          {allSteps ? 'Hide the run log' : 'Show the run log'}
         </TextButton>
       </div>
       {allSteps && (

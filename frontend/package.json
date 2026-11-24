@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "oxlint",
+    "lint": "oxlint --max-warnings 65",
     "test": "npm run test:legacy && npm run test:vitest",
     "test:legacy": "jiti tests/index.test.ts",
     "test:vitest": "vitest run",
@@ -51,6 +51,7 @@
     "@vitejs/plugin-react": "^6.0.4",
     "@vitest/coverage-v8": "^5.0.1",
     "cypress": "^16.2.1",
+    "eslint-plugin-better-tailwindcss": "4.11.0",
     "fflate": "^0.8.3",
     "jsdom": "^30.0.1",
     "oxlint": "^1.75.0",

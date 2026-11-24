@@ -20,7 +20,7 @@ vi.mock('react-pdf', () => ({
     useEffect(() => {
       const timer = setTimeout(() => {
         layer.current!.innerHTML =
-          '<a href="#page=9" title="Peters et al."></a><a href="https://cloud.google.com/tpu/"></a><a href="#"></a>'
+          '<section tabindex="1000"><a href="#page=9" title="Peters et al."></a></section><a href="https://cloud.google.com/tpu/"></a><a href="#"></a>'
       }, 10)
       return () => clearTimeout(timer)
     }, [])
@@ -57,7 +57,23 @@ test("names each of the PDF's links by its title, its address, or as a place in 
   expect(screen.getByRole('link', { name: 'Go to a place in this paper' })).toBeInTheDocument()
 })
 
+test("keeps the PDF's links and pdf.js's annotation boxes out of the Tab order", async () => {
+  const { container } = render(<PageViewer target={{ paper: 'paper.pdf', label: 'Reference', source: null, page: 1 }} />)
+  await waitFor(() => expect(screen.getByRole('link', { name: 'Peters et al.' })).toBeInTheDocument())
+  for (const stop of container.querySelectorAll<HTMLElement>('.annotationLayer a, .annotationLayer section')) {
+    expect(stop.tabIndex).toBe(-1)
+  }
+})
+
 test('the panel label is a heading, so the quoted passage heading sits under it', () => {
   render(<PageViewer target={{ paper: 'paper.pdf', label: 'Reference', quote: 'a quote', source: null, page: 1 }} />)
   expect(screen.getByRole('heading', { level: 2, name: 'Reference' })).toBeInTheDocument()
+})
+
+test('takes a PDF link back out of the Tab order when pdf.js puts it back in after drawing it', async () => {
+  const { container } = render(<PageViewer target={{ paper: 'paper.pdf', label: 'Reference', source: null, page: 1 }} />)
+  const link = await screen.findByRole('link', { name: 'Peters et al.' })
+  link.tabIndex = 0
+  await waitFor(() => expect(link.tabIndex).toBe(-1))
+  expect(container.querySelector<HTMLElement>('.annotationLayer section')?.tabIndex).toBe(-1)
 })

@@ -134,12 +134,15 @@ describe('the Labeler shell', () => {
     expect(window.location.search).toBe('')
   })
 
-  it('opens a paper the team finished on its labels, for a lead, and labels it from there', async () => {
+  it('lets a lead open the labels of a team-finished paper from a button beside the row, and label it from there', async () => {
     pool.lead = true
     pool.papers[0] = { ...paper('a1', 'Paper A'), team_judged: 1, labelers: ['Somchai'] }
     try {
       renderApp()
-      fireEvent.click(await screen.findByRole('button', { name: 'Paper A (View labels)' }, { timeout: 5000 }))
+      // The lead's own work is unfinished, so the row keeps its own action and the labels sit beside it.
+      expect(await screen.findByRole('button', { name: 'Paper A (Start)' }, { timeout: 5000 })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Paper A (View labels)' })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'View labels for Paper A' }))
       expect(await screen.findByRole('heading', { name: 'Labelers disagree (1)' })).toBeInTheDocument()
       expect(new URLSearchParams(window.location.search).get('labels')).toBe('a1')
 
@@ -147,7 +150,7 @@ describe('the Labeler shell', () => {
       expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
       expect(window.location.search).toBe('')
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Paper A (View labels)' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'View labels for Paper A' }))
       fireEvent.click(await screen.findByRole('button', { name: 'Label it yourself' }))
       expect(await screen.findByText('Method Y improves recall.')).toBeInTheDocument()
       const params = new URLSearchParams(window.location.search)
@@ -189,14 +192,14 @@ describe('the Labeler shell', () => {
     await screen.findByText('Method Y improves recall.')
 
     fireEvent.keyDown(window, { key: 'x' })
-    fireEvent.click(screen.getByRole('button', { name: 'Save and next claim' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save claim \d+ and next$/ }))
     expect(await screen.findByText('This paper is labeled')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next paper in your topic' }))
     expect(await screen.findByRole('heading', { name: 'Claim 1 of 1' })).toBeInTheDocument()
     expect(new URLSearchParams(window.location.search).get('analysis')).toBe('b1')
 
     fireEvent.keyDown(window, { key: 'x' })
-    fireEvent.click(screen.getByRole('button', { name: 'Save and next claim' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save claim \d+ and next$/ }))
     expect(await screen.findByText('This paper is labeled')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Back to papers' }))
     expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
@@ -271,5 +274,131 @@ describe('the Labeler shell', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: /Close/ }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /Settings/ })).not.toBeInTheDocument())
+  })
+  it('drops Ask AI from the toolbar while a blind check is open, and brings it back after', async () => {
+    const before = { ...session }
+    Object.assign(session, { blind: true })
+    try {
+      renderApp('?analysis=a1')
+      await screen.findByRole('heading', { name: 'Paper A' })
+      await waitFor(() => expect(screen.queryByRole('button', { name: /^Ask AI/ })).not.toBeInTheDocument())
+      fireEvent.click(within(sidebar()).getByRole('button', { name: 'Papers to label' }))
+      expect(await screen.findAllByRole('button', { name: /^Ask AI/ })).not.toHaveLength(0)
+    } finally {
+      Object.assign(session, before)
+      delete (session as { blind?: boolean }).blind
+    }
+  })
+
+  describe('the breadcrumb', () => {
+    const crumbs = () => within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
+
+    it('ends with the title of the open paper; the list is named as text, and the sidebar goes back to it', async () => {
+      renderApp('?analysis=a1')
+      await screen.findByText('Method Y improves recall.')
+      await waitFor(() => expect(crumbs().getByText('Paper A')).toBeInTheDocument())
+      // One Tab stop to the list, the sidebar's: the crumb would only repeat it.
+      expect(crumbs().getByText('Papers to label')).toBeInTheDocument()
+      expect(crumbs().queryByRole('button')).not.toBeInTheDocument()
+      fireEvent.click(within(sidebar()).getByRole('button', { name: 'Papers to label' }))
+      expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
+      expect(window.location.search).toBe('')
+      expect(crumbs().queryByText('Paper A')).not.toBeInTheDocument()
+    })
+
+    it('asks before leaving through the sidebar when labels are unsaved', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      renderApp('?analysis=a1')
+      await screen.findByText('Method Y improves recall.')
+      fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+      fireEvent.click(within(sidebar()).getByRole('button', { name: 'Papers to label' }))
+      expect(confirm).toHaveBeenCalledWith('You have unsaved labels. Leave without saving?')
+      expect(screen.getByText('Method Y improves recall.')).toBeInTheDocument()
+    })
+
+    it('names the Blind checks screen for an open blind check', async () => {
+      renderApp('?tab=blind&analysis=b1')
+      await waitFor(() => expect(crumbs().getByText('Blind paper')).toBeInTheDocument())
+      expect(crumbs().getByText('Blind checks')).toBeInTheDocument()
+    })
+
+    it('is only the screen name on the list', async () => {
+      renderApp()
+      await screen.findByRole('heading', { name: 'Label data' })
+      expect(crumbs().getByText('Papers to label')).toBeInTheDocument()
+      expect(crumbs().queryByRole('button')).not.toBeInTheDocument()
+    })
+  })
+})
+
+describe('Back and Forward in the Labeler', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    pool.blind = ['b1']
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.history.replaceState(null, '', '/')
+  })
+
+  /** What the browser does on Back or Forward: the address changes, then popstate fires. */
+  const goTo = (search: string, state: unknown = null) =>
+    act(() => {
+      window.history.replaceState(state, '', `/${search}`)
+      window.dispatchEvent(new PopStateEvent('popstate', { state }))
+    })
+
+  it('adds a history entry for another page, and replaces it on the first sync', async () => {
+    const push = vi.spyOn(window.history, 'pushState')
+    renderApp('?q=Paper')
+    await screen.findByRole('button', { name: 'Paper A (Start)' }, { timeout: 5000 })
+    expect(push).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Paper A (Start)' }))
+    await screen.findByText('Method Y improves recall.')
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(window.location.search).toBe('?q=Paper&analysis=a1')
+  })
+
+  it('keeps the list scroll in its entry and puts it back on Back', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((run) => {
+      run(0)
+      return 0
+    })
+    renderApp('?q=Paper')
+    window.scrollY = 300
+    fireEvent.click(await screen.findByRole('button', { name: 'Paper A (Start)' }, { timeout: 5000 }))
+    await screen.findByText('Method Y improves recall.')
+    await goTo('?q=Paper', { labelerScroll: 300 })
+    expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox')).toHaveValue('Paper')
+    expect(scrollTo).toHaveBeenCalledWith(0, 300)
+    window.scrollY = 0
+  })
+
+  it('shows the page the address names on Back and Forward', async () => {
+    renderApp()
+    await screen.findByRole('heading', { name: 'Label data' }, { timeout: 5000 })
+    await goTo('?tab=blind')
+    expect(await screen.findByRole('heading', { name: 'Your blind checks (1)' })).toBeInTheDocument()
+    await goTo('?analysis=a1')
+    expect(await screen.findByText('Method Y improves recall.')).toBeInTheDocument()
+    await goTo('')
+    expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
+  })
+
+  it('keeps a paper with unsaved labels open on Back, puts its entry back, and says why', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
+    renderApp('?analysis=a1')
+    await screen.findByText('Method Y improves recall.')
+    fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
+    const push = vi.spyOn(window.history, 'pushState')
+
+    await goTo('')
+    expect(screen.getByText('Method Y improves recall.')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('This paper has unsaved labels.')
+    expect(push).toHaveBeenCalledWith(null, '', '?analysis=a1')
+    expect(confirm).not.toHaveBeenCalled()
   })
 })

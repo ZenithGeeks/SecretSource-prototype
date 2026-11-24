@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { verdictCountLabel } from '../src/lib/claims'
+import { STANDING_LABELS } from '../src/lib/claims'
 
 const cite = (title: string) => ({ title, authors: ['Ioffe'], year: '2015', doi: `10/${title}`, arxiv: '', url: '' })
 const verdict = (kind: 'supports' | 'refutes' | 'insufficient', source: string) => ({
@@ -61,11 +61,11 @@ describe('researcher results', () => {
   it('shows a count tile per verdict and filters the claims when one is clicked', () => {
     renderView()
     const tile = (kind: 'refutes' | 'insufficient' | 'supports' | 'unchecked', n: number) =>
-      screen.getByRole('button', { name: verdictCountLabel(kind, n) })
+      screen.getByRole('button', { name: `${n} ${STANDING_LABELS[kind]}` })
 
     expect(tile('refutes', 1)).toHaveAttribute('aria-pressed', 'false')
     expect(tile('insufficient', 1)).toBeInTheDocument()
-    expect(tile('supports', 2)).toHaveTextContent('back it')
+    expect(tile('supports', 2)).toHaveTextContent('Source backs it')
     expect(tile('unchecked', 0)).toBeInTheDocument()
     // Nothing is selected to begin with, so every claim is listed.
     for (const text of ['Refuted claim.', 'Silent claim.', 'Backed claim one.', 'Backed claim two.']) {

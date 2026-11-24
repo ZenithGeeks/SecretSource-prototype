@@ -118,7 +118,7 @@ export function ExportMenu({
         title="Export"
         // Button's ghost look (components/ui): an icon while the top bar (an @container) is narrow.
         className={cn(
-          'inline-flex items-center justify-center gap-2 rounded-lg px-2 py-2 text-sm font-medium text-ink-muted transition-colors hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent @5xl:px-4',
+          'inline-flex items-center justify-center gap-2 rounded-lg p-2 text-sm font-medium text-ink-muted transition-colors hover:bg-accent-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent @5xl:px-4',
           open && 'bg-accent-soft text-ink',
         )}
       >
@@ -132,7 +132,7 @@ export function ExportMenu({
           role="menu"
           aria-labelledby={`${id}-button`}
           onKeyDown={onMenuKey}
-          className="absolute right-0 top-full z-30 mt-px flex w-[280px] flex-col rounded-lg border border-border-subtle bg-surface py-1.5 shadow-xl"
+          className="absolute right-0 top-full z-30 mt-px flex w-70 flex-col rounded-lg border border-border-subtle bg-surface py-1.5 shadow-xl"
         >
           {ITEMS.map((item, index) => (
             <button
@@ -151,13 +151,13 @@ export function ExportMenu({
                 {item.title}
                 {busy === item.kind && <Loader2 className="size-3.5 animate-spin text-ink-muted" aria-hidden="true" />}
               </span>
-              <span id={`${id}-${item.kind}-hint`} className="text-[11px] text-ink-muted">
+              <span id={`${id}-${item.kind}-hint`} className="text-caption text-ink-muted">
                 {item.hint}
               </span>
             </button>
           ))}
           {openIssues > 0 && (
-            <p className="mt-1 border-t border-border-subtle px-4 pt-2 pb-1 text-[11px] text-refutes">
+            <p className="mt-1 border-t border-border-subtle px-4 pt-2 pb-1 text-caption text-refutes">
               {openIssues} issue{openIssues === 1 ? '' : 's'} still open — the report will list {openIssues === 1 ? 'it' : 'them'}.
             </p>
           )}

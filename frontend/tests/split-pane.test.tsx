@@ -42,6 +42,22 @@ describe('SplitPane', () => {
     expect(screen.getByRole('separator')).toHaveAttribute('aria-valuenow', '65')
   })
 
+  it('reads the ratio of another key when the key changes, keeping the panes mounted', () => {
+    window.localStorage.setItem('other.split', '0.3')
+    const { rerender } = render(pane({ storageKey: KEY }))
+    const left = screen.getByText('left')
+    rerender(pane({ storageKey: 'other.split', direction: 'vertical' }))
+    expect(screen.getByRole('separator')).toHaveAttribute('aria-valuenow', '30')
+    expect(screen.getByText('left')).toBe(left)
+  })
+
+  it('hides the first pane and the handle but keeps the pane mounted', () => {
+    render(pane({ hideLeft: true }))
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Paper' })).not.toBeInTheDocument()
+    expect(screen.getByText('left')).toBeInTheDocument()
+  })
+
   it('starts from the default when the stored value is not a ratio', () => {
     window.localStorage.setItem(KEY, 'wide')
     render(pane({ storageKey: KEY }))

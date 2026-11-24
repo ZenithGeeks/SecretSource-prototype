@@ -29,9 +29,9 @@ const EMPTY_HOME = {
   library: { papers: 0, claims: 0, verified: 0, tally: { backed: 0, silent: 0, contradicted: 0, unchecked: 0 } },
 }
 
-type Options = { home?: unknown; features?: Record<string, boolean>; startFails?: boolean }
+type Options = { home?: unknown; analyses?: unknown[]; features?: Record<string, boolean>; startFails?: boolean }
 
-function gateway({ home = EMPTY_HOME, features, startFails }: Options = {}) {
+function gateway({ home = EMPTY_HOME, analyses = [], features, startFails }: Options = {}) {
   const calls: { path: string; init?: RequestInit }[] = []
   vi.stubGlobal(
     'fetch',
@@ -44,6 +44,7 @@ function gateway({ home = EMPTY_HOME, features, startFails }: Options = {}) {
       if (init?.method === 'POST') {
         return startFails ? new Response('queue is full', { status: 503 }) : Response.json({ id: 'new-1' })
       }
+      if (path === '/analyses') return Response.json(analyses)
       return Response.json([])
     }),
   )
@@ -93,9 +94,27 @@ describe('Home', () => {
   })
 
   it('says no claim is contradicted only once there are papers to check', async () => {
-    gateway({ home: { ...EMPTY_HOME, library: { ...EMPTY_HOME.library, papers: 3, claims: 12 } } })
+    gateway({ analyses: [{ id: 'a1', paper: '10.1/x', status: 'done', claims: [], stages: [] }] })
     renderHome()
     expect(await screen.findByText('No claim in your papers is contradicted by its sources.')).toBeInTheDocument()
+  })
+
+  it('says the library could not load when the analyses list fails, and tries the list again on Retry', async () => {
+    gateway()
+    const answer = vi.mocked(fetch).getMockImplementation()!
+    let failed = false
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/analyses') && init?.method === undefined && !failed) {
+        failed = true
+        throw new Error('the list is down')
+      }
+      return answer(url, init)
+    })
+    renderHome()
+    expect(await screen.findByText('Your library could not load')).toBeInTheDocument()
+    expect(screen.getByText('the list is down')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }))
+    expect(await screen.findByText(/Nothing new\.$/)).toBeInTheDocument()
   })
 
   it('shows the gateway error and retries on request', async () => {
@@ -113,7 +132,7 @@ describe('Home', () => {
     renderHome()
     expect(await screen.findByText('gateway is down')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /retry/i }))
-    expect(await screen.findByText('Nothing new.')).toBeInTheDocument()
+    expect(await screen.findByText(/Nothing new\.$/)).toBeInTheDocument()
   })
 
   it('says the server did not answer when a proxy error carries no message', async () => {
@@ -209,7 +228,7 @@ describe('Analyze card', () => {
     fireEvent.change(box, { target: { value: ' 10.1/x ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Analyze' }))
     await waitFor(() => expect(onOpenAnalysis).toHaveBeenCalledWith('new-1'))
-    const post = calls.find((c) => c.path === '/analyses')!
+    const post = calls.find((c) => c.path === '/analyses' && c.init?.method === 'POST')!
     expect(JSON.parse(String(post.init!.body))).toEqual({ paper: '10.1/x', verify: true })
     expect(box).toHaveValue('')
   })
@@ -229,8 +248,8 @@ describe('Analyze card', () => {
     fireEvent.click(screen.getByRole('switch'))
     fireEvent.change(screen.getByLabelText('Paper to analyze'), { target: { value: '10.1/y' } })
     fireEvent.click(screen.getByRole('button', { name: 'Analyze' }))
-    await waitFor(() => expect(calls.some((c) => c.path === '/analyses')).toBe(true))
-    expect(JSON.parse(String(calls.find((c) => c.path === '/analyses')!.init!.body)).verify).toBe(false)
+    await waitFor(() => expect(calls.some((c) => c.init?.method === 'POST')).toBe(true))
+    expect(JSON.parse(String(calls.find((c) => c.init?.method === 'POST')!.init!.body)).verify).toBe(false)
   })
 
   it('shows the gateway message when starting fails', async () => {

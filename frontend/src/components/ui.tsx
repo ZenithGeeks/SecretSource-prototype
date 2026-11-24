@@ -5,8 +5,9 @@ import { CircleAlert, Loader2 } from 'lucide-react'
 import { type ButtonHTMLAttributes, type ComponentProps, type ReactNode, useEffect, useState } from 'react'
 
 import type { Standing } from '../lib/claims'
-import { STANDING_LABELS } from '../lib/claims'
+import { STANDING_COLORS, STANDING_LABELS, STANDING_MEANINGS } from '../lib/claims'
 import { useSettings } from '../lib/settings'
+import { moveFocus, radioTabIndex } from '../lib/roving'
 import { cn } from '../lib/utils'
 
 /** A surface. Given `aria-labelledby` (its heading's id), it is a named region, so a screen
@@ -27,10 +28,13 @@ export function Button({ className, variant = 'solid', ...props }: ButtonProps) 
     <button
       className={cn(
         'inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium pointer-coarse:min-h-11',
-        'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+        // Not transition-colors: it also fades the focus ring in from the text colour, and a solid
+        // button's canvas text made the ring start out the same colour as the page.
+        'transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
         'disabled:cursor-not-allowed disabled:opacity-50',
         // Canvas, not white: the dark-mode accent is a light plum that white text fails on.
-        variant === 'solid' && 'bg-accent text-canvas hover:opacity-90',
+        // Disabled goes grey, not a faded accent that still reads as the button to press.
+        variant === 'solid' && 'bg-accent text-canvas hover:opacity-90 disabled:bg-border-subtle disabled:text-ink-muted',
         variant === 'ghost' && 'text-ink-muted hover:bg-accent-soft hover:text-ink',
         className,
       )}
@@ -54,13 +58,14 @@ export function IconButton({ className, type = 'button', ...props }: ComponentPr
   )
 }
 
-/** A button that reads as a link: accent text, underlined on hover. The text size comes from the caller. */
+/** A button that reads as a link: accent text, underlined on hover. The text size comes from the
+ * caller. At least 24px tall, the WCAG 2.2 minimum target, however small the text. */
 export function TextButton({ className, type = 'button', ...props }: ComponentProps<'button'>) {
   return (
     <button
       type={type}
       className={cn(
-        'rounded font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50',
+        'min-h-6 cursor-pointer rounded-sm font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default disabled:opacity-50',
         className,
       )}
       {...props}
@@ -74,7 +79,7 @@ export function MenuItem({ className, type = 'button', ...props }: ComponentProp
     <button
       type={type}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] font-medium text-ink pointer-coarse:min-h-11',
+        'flex w-full items-center gap-2.5 rounded-lg p-2 text-left text-ui font-medium text-ink pointer-coarse:min-h-11',
         'hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent',
         'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
         className,
@@ -94,22 +99,33 @@ export function Segmented<T extends string>({
   className,
 }: {
   label: string
-  options: readonly { value: T; label: ReactNode }[]
+  /** `disabled` with a `title` saying why, for an option that does not apply right now. */
+  options: readonly { value: T; label: ReactNode; disabled?: boolean; title?: string }[]
   value: T
   onChange: (value: T) => void
   className?: string
 }) {
   return (
-    <div role="group" aria-label={label} className={cn('flex rounded-xl border border-border-subtle p-0.5', className)}>
-      {options.map((option) => (
+    // One Tab stop: the arrow keys move along the options (lib/roving.ts), Enter or Space picks one.
+    <div
+      role="group"
+      aria-label={label}
+      onKeyDown={(event) => moveFocus(event, 'button', false)}
+      className={cn('flex rounded-xl border border-border-subtle p-0.5', className)}
+    >
+      {options.map((option, index) => (
         <button
           key={option.value}
           type="button"
           aria-pressed={value === option.value}
+          disabled={option.disabled}
+          title={option.title}
+          tabIndex={radioTabIndex(value === option.value, index, options.some((o) => o.value === value))}
           onClick={() => onChange(option.value)}
           className={cn(
-            'min-h-9 flex-1 whitespace-nowrap rounded-lg px-3 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:min-h-11',
-            value === option.value ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:text-ink',
+            'min-h-9 flex-1 whitespace-nowrap rounded-lg px-3 text-ui transition-colors focus-visible:outline-2 focus-visible:outline-accent pointer-coarse:min-h-11',
+            'disabled:cursor-not-allowed disabled:opacity-50',
+            value === option.value ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted enabled:hover:text-ink',
           )}
         >
           {option.label}
@@ -136,15 +152,16 @@ export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
  * The one verdict pill: a dot and words, never colour alone. Per-citation kinds are the
  * three verdicts plus the two absences, "not checked" (the source could not be read) and
  * "no citation" (nothing was cited). Only a real verdict gets a colour: colouring an absence
- * would make an empty result look like a finding (#37). Words come from STANDING_LABELS.
+ * would make an empty result look like a finding (#37). Words come from STANDING_LABELS, and
+ * the dot is the colour the summary bar uses (STANDING_COLORS).
  */
 const PILL = {
-  refutes: { pill: 'bg-refutes-soft text-refutes', dot: 'bg-refutes' },
-  insufficient: { pill: 'bg-insufficient-soft text-insufficient', dot: 'bg-insufficient' },
-  supports: { pill: 'bg-supports-soft text-supports', dot: 'bg-supports' },
-  unchecked: { pill: 'bg-neutral-soft text-ink-muted', dot: 'bg-neutral' },
-  named: { pill: 'bg-neutral-soft text-ink-muted', dot: 'bg-neutral' },
-  uncited: { pill: 'bg-neutral-soft text-ink-muted', dot: 'bg-neutral' },
+  refutes: 'bg-refutes-soft text-refutes',
+  insufficient: 'bg-insufficient-soft text-insufficient',
+  supports: 'bg-supports-soft text-supports',
+  unchecked: 'bg-neutral-soft text-ink-muted',
+  named: 'bg-neutral-soft text-ink-muted',
+  uncited: 'bg-neutral-soft text-ink-muted',
 } as const
 
 export function VerdictBadge({
@@ -162,17 +179,18 @@ export function VerdictBadge({
   const { colorBadges } = useSettings()
   return (
     <span
-      title={title}
+      // The standard words get their meaning on hover; a first-time reader may need it.
+      title={title ?? (text ? undefined : STANDING_MEANINGS[verdict])}
       data-verdict={verdict}
       className={cn(
         'inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap',
-        colorBadges ? PILL[verdict].pill : 'text-ink',
+        colorBadges ? PILL[verdict] : 'text-ink',
       )}
     >
       <span
         aria-hidden="true"
         data-testid="verdict-dot"
-        className={cn('size-1.5 shrink-0 rounded-full', colorBadges ? PILL[verdict].dot : 'bg-current')}
+        className={cn('size-1.5 shrink-0 rounded-full', colorBadges ? STANDING_COLORS[verdict] : 'bg-current')}
       />
       {/* A long work title is cut with an ellipsis inside its column instead of overflowing it. */}
       <span className="truncate">{text ?? STANDING_LABELS[verdict]}</span>

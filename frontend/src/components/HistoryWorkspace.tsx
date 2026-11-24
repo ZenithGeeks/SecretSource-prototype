@@ -11,7 +11,8 @@ import { useState, type ReactNode } from 'react'
 import type { SectionJump } from './AnalysisView'
 import { HistoryList } from './HistoryList'
 import { AnalysisContents } from './TableOfContents'
-import { analysisLabel } from '../lib/claims'
+import { analysisLabel, standingsIn } from '../lib/claims'
+import type { Standing } from '../lib/claims'
 import type { ContentsRow } from '../lib/outline'
 import { useAnalyses, useAnalysisNotices } from '../lib/useAnalysis'
 import { History } from '../roles/researcher/screens/History'
@@ -20,14 +21,23 @@ export function initialAnalysis(): string | null {
   return new URLSearchParams(window.location.search).get('analysis')
 }
 
+/** The tile filter a reload or a link names with `?standing=`, on an open analysis only. */
+function initialFilter(): Standing | null {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('analysis') ? (standingsIn(params.get('standing'))[0] ?? null) : null
+}
+
 export function useHistoryWorkspace({ onPicked }: { onPicked?: () => void } = {}): {
   selected: string | null
   /** File name of the open analysis, for a breadcrumb; null until its row has loaded. */
   selectedName: string | null
-  select: (id: string | null) => void
+  /** Open an analysis, or the list with null; `filter` narrows its claims, as Back restores it. */
+  select: (id: string | null, filter?: Standing | null) => void
+  /** The standing the open analysis's claims are narrowed to. */
+  filter: Standing | null
   /** Open one analysis, from anywhere a paper or claim is listed. */
   open: (id: string) => void
-  /** A page is open beside the claims: the shell should grow. */
+  /** A page is open beside the claims: the shell should widen. */
   wide: boolean
   closePage: () => void
   sidebar: ReactNode
@@ -36,16 +46,20 @@ export function useHistoryWorkspace({ onPicked }: { onPicked?: () => void } = {}
   const [selected, setSelected] = useState<string | null>(initialAnalysis)
   const [wide, setWide] = useState(false)
   const [section, setSection] = useState<string | null>(null) // claims narrowed to one section
+  const [filter, setFilter] = useState<Standing | null>(initialFilter) // claims narrowed to one standing
   const [current, setCurrent] = useState<string | null>(null) // section open in the page viewer
   const [jump, setJump] = useState<SectionJump | null>(null) // section page to open
+  const [formOpen, setFormOpen] = useState(false) // "+ New" asked for the form over the list
   const analyses = useAnalyses()
 
-  const select = (id: string | null) => {
+  const select = (id: string | null, standing: Standing | null = null) => {
     setSelected(id)
     setWide(false)
     setSection(null)
+    setFilter(standing)
     setCurrent(null)
     setJump(null)
+    setFormOpen(false)
   }
   // A clicked notice opens its analysis, as picking it in the sidebar list does.
   useAnalysisNotices(analyses.data, (id) => {
@@ -71,18 +85,26 @@ export function useHistoryWorkspace({ onPicked }: { onPicked?: () => void } = {}
       }}
       onNew={() => {
         select(null)
+        setFormOpen(true)
         onPicked?.()
       }}
-      contents={selected ? <AnalysisContents id={selected} current={current} onPick={pickSection} /> : undefined}
+      contents={selected ? <AnalysisContents id={selected} current={current} filter={filter} onPick={pickSection} /> : undefined}
     />
   )
   const main = (
     <History
       selected={selected}
+      formOpen={formOpen}
       onSelect={select}
       onTargetChange={setWide}
       section={section}
-      onClearSection={() => setSection(null)}
+      filter={filter}
+      onFilter={setFilter}
+      // The contents highlight goes with the filter, or it would point at a section no longer picked.
+      onClearSection={() => {
+        setSection(null)
+        setCurrent(null)
+      }}
       jump={jump}
       onCurrentSection={setCurrent}
     />
@@ -90,9 +112,10 @@ export function useHistoryWorkspace({ onPicked }: { onPicked?: () => void } = {}
 
   return {
     selected,
-    selectedName: selectedAnalysis ? analysisLabel(selectedAnalysis) : null,
+    selectedName: selectedAnalysis ? analysisLabel(selectedAnalysis, analyses.data) : null,
     select,
-    open: select,
+    filter,
+    open: (id) => select(id),
     wide,
     closePage: () => setWide(false),
     sidebar,

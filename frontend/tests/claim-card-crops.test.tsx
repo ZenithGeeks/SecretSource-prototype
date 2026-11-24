@@ -60,8 +60,8 @@ describe('the crops on the claim card', () => {
     claimCard(verdict({ verdict_from: 'figure', judged_figure: 'table-3.png' }))
 
     expect(cropButtons().map((button) => button.getAttribute('aria-label'))).toEqual([
-      'Show Table 3 on its page in colbert.pdf',
-      'Show Figure 3 on its page in colbert.pdf',
+      'Show Table 3 on its page in ColBERT',
+      'Show Figure 3 on its page in ColBERT',
     ])
     expect(screen.getByText('The verdict rests on this table')).toBeInTheDocument()
   })
@@ -69,7 +69,7 @@ describe('the crops on the claim card', () => {
   it('puts the figure the verdict was read off first and says so', () => {
     claimCard(verdict({ verdict_from: 'figure', judged_figure: 'figure-3.png' }))
 
-    expect(cropButtons()[0]).toHaveAccessibleName('Show Figure 3 on its page in colbert.pdf')
+    expect(cropButtons()[0]).toHaveAccessibleName('Show Figure 3 on its page in ColBERT')
     expect(screen.getByText('The verdict rests on this figure')).toBeInTheDocument()
   })
 
@@ -106,8 +106,9 @@ describe('the crops on the claim card', () => {
       }),
     )
 
-    expect(cropButtons()[0]).toHaveAccessibleName('Show Figure 3 on its page in colbert.pdf')
+    expect(cropButtons()[0]).toHaveAccessibleName('Show Figure 3 on its page in ColBERT')
     expect(screen.queryByText(/The verdict rests on this/)).not.toBeInTheDocument()
-    expect(screen.getByText(/BM25 \+ ColBERT reaches a MAP of 31\.3\./)).toBeInTheDocument()
+    // The quote, and the retrieved passage under More evidence.
+    expect(screen.getAllByText(/BM25 \+ ColBERT reaches a MAP of 31\.3\./)).toHaveLength(2)
   })
 })

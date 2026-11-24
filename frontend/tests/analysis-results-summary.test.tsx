@@ -12,7 +12,7 @@ vi.mock('../src/lib/useAuthorizedUrl', () => ({ useAuthorizedUrl: vi.fn(() => ga
 import { ResultsSummary } from '../src/components/ResultsSummary'
 import type { Claim, Verdict } from '../src/lib/api'
 import type { Standing } from '../src/lib/claims'
-import { countsOf, ranked } from '../src/lib/claims'
+import { countsOf, ranked, STANDING_MEANINGS, STANDINGS } from '../src/lib/claims'
 import { useAuthorizedUrl } from '../src/lib/useAuthorizedUrl'
 
 const verdict = (kind: Verdict['verdict']): Verdict => ({ verdict: kind, quote: '', reasoning: '', source: 's', evidence: [] })
@@ -61,10 +61,10 @@ afterEach(() => vi.useRealTimers())
 
 describe('the researcher summary', () => {
   it.each([
-    [['refutes'], '1 claim is contradicted by a work they cite'],
-    [['refutes', 'refutes', 'supports'], '2 claims are contradicted by a work they cite'],
-    [['insufficient'], '1 claim is not settled by the works they cite'],
-    [['insufficient', 'insufficient'], '2 claims are not settled by the works they cite'],
+    [['refutes'], '1 claim is contradicted by a work it cites'],
+    [['refutes', 'refutes', 'supports'], '2 claims are contradicted by works they cite'],
+    [['insufficient'], 'The works cited for 1 claim are silent on it'],
+    [['insufficient', 'insufficient'], 'The works cited for 2 claims are silent on them'],
     [['unchecked'], '1 claim could not be checked'],
     [['unchecked', 'unchecked'], '2 claims could not be checked'],
     [['named', 'uncited'], 'No claim cites a work that could be checked against it'],
@@ -76,29 +76,49 @@ describe('the researcher summary', () => {
 
   it('counts each kind the design shows, and names and uncited ones only when present', () => {
     summary(['refutes', 'supports', 'supports'])
-    expect(screen.getByRole('button', { name: '1 contradicts' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '2 back it' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '0 silent' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '1 Source contradicts' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '2 Source backs it' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '0 Source is silent' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: /no citation/ })).not.toBeInTheDocument()
     expect(screen.getByRole('img')).toHaveAccessibleName('1 contradicts, 2 back it')
   })
 
   it('adds tiles for named and uncited claims when the paper has them', () => {
     summary(['named', 'uncited', 'supports'])
-    expect(screen.getByRole('button', { name: '1 names what it uses' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '1 no citation' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '1 Names a tool or dataset' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '1 No citation' })).toBeInTheDocument()
+  })
+
+  it('puts the tiles in reading order, worst first', () => {
+    summary(['supports', 'uncited', 'unchecked', 'refutes', 'named', 'insufficient'])
+    const names = screen.getAllByRole('button', { pressed: false }).map((tile) => tile.getAttribute('aria-label'))
+    expect(names).toEqual(['1 Source contradicts', '1 Source is silent', '1 Not checked', '1 Source backs it', '1 Names a tool or dataset', '1 No citation'])
+  })
+
+  it('explains all six standings, each with its badge, even when the paper has one kind', () => {
+    summary(['refutes'])
+    for (const kind of STANDINGS) {
+      // Once in the key and once as the tile's own description.
+      expect(screen.getAllByText(STANDING_MEANINGS[kind]).length).toBeGreaterThan(0)
+    }
+    expect(screen.getByText('Source is silent', { selector: 'dt *' })).toBeInTheDocument()
+  })
+
+  it('describes each tile by what its standing means', () => {
+    summary(['refutes'])
+    expect(screen.getByRole('button', { name: '1 Source contradicts' })).toHaveAccessibleDescription(STANDING_MEANINGS.refutes)
   })
 
   it('filters by a tile, and clears the filter when the active tile is picked again', () => {
     const { onFilter, rerender } = summary(['refutes', 'supports'])
-    fireEvent.click(screen.getByRole('button', { name: '1 contradicts' }))
+    fireEvent.click(screen.getByRole('button', { name: '1 Source contradicts' }))
     expect(onFilter).toHaveBeenLastCalledWith('refutes')
     const claims = [claimWith('refutes')]
     const standings = ranked(claims)
     rerender(
       <ResultsSummary claims={claims} standings={standings} counts={countsOf(standings)} filter="refutes" onFilter={onFilter} paper="mine.pdf" />,
     )
-    const active = screen.getByRole('button', { name: '1 contradicts' })
+    const active = screen.getByRole('button', { name: '1 Source contradicts' })
     expect(active).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(active)
     expect(onFilter).toHaveBeenLastCalledWith(null)

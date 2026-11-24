@@ -56,9 +56,9 @@ export function TeacherHistoryList({ selected, onSelect }: {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{entry.studentName}</span>
               <span className="mt-0.5 block truncate text-xs">{entry.assignmentTitle} · {entry.courseName}</span>
-              <span className="mt-0.5 block truncate text-[11px]">{entry.fileName}</span>
-              <span className="mt-1 block truncate text-[11px]">{activityLabel(entry)}</span>
-              <span className="mt-0.5 block truncate text-[11px]">{formattedDate(entry.checkedAt)}</span>
+              <span className="mt-0.5 block truncate text-caption">{entry.fileName}</span>
+              <span className="mt-1 block truncate text-caption">{activityLabel(entry)}</span>
+              <span className="mt-0.5 block truncate text-caption">{formattedDate(entry.checkedAt)}</span>
             </span>
           </button>
         )

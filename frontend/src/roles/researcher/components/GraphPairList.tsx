@@ -19,7 +19,7 @@ export function GraphPairList({
 }) {
   return (
     <details className="rounded-xl border border-border-subtle bg-surface">
-      <summary className="cursor-pointer rounded-xl px-4 py-3 text-[13px] font-medium text-ink pointer-coarse:min-h-11">
+      <summary className="cursor-pointer rounded-xl px-4 py-3 text-ui font-medium text-ink pointer-coarse:min-h-11">
         Links as a list · {rows.length}
       </summary>
       <ul className="max-h-80 overflow-y-auto border-t border-border-subtle">
@@ -34,7 +34,7 @@ export function GraphPairList({
                 selectedId === row.id && 'bg-accent-soft',
               )}
             >
-              <span className="text-[13px] leading-5 text-ink">{row.label}</span>
+              <span className="text-ui leading-5 text-ink">{row.label}</span>
               <span className="text-xs text-ink-muted">{row.relation}</span>
             </button>
           </li>

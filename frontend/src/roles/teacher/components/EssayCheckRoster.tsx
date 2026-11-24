@@ -27,8 +27,8 @@ export function EssayCheckRoster({ courseId, assignmentId, selectedStudentId, on
               aria-current={submission.studentId === selectedStudentId ? 'page' : undefined}
               onClick={() => onSelect(submission.studentId)}
               className={submission.studentId === selectedStudentId
-                ? 'flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-left text-[11px] font-medium text-ink'
-                : 'flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[11px] text-ink-muted hover:bg-accent-soft hover:text-ink'}
+                ? 'flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-left text-caption font-medium text-ink'
+                : 'flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-caption text-ink-muted hover:bg-accent-soft hover:text-ink'}
             >
               <span className="min-w-0 flex-1 truncate">{submission.studentName} <span className="font-normal text-ink-muted">- {submission.fileName}</span></span>
               <FileText className="size-3.5 shrink-0 text-ink-muted" />

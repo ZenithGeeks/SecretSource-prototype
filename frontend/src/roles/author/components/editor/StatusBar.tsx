@@ -17,8 +17,8 @@ export function StatusBar({
   warningCount: number
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-3.5 gap-y-1 border-t border-border-subtle bg-canvas px-3.5 py-1.5 text-[11px]">
-      <VerdictLegend counts={counts} className="text-[11px]" />
+    <div className="flex flex-wrap items-center justify-between gap-x-3.5 gap-y-1 border-t border-border-subtle bg-canvas px-3.5 py-1.5 text-caption">
+      <VerdictLegend counts={counts} className="text-caption" />
       <p className="text-ink-muted" aria-live="polite">
         Ln {cursor.line}, Col {cursor.column} · {citeCount} \cite · {warningCount} warning{warningCount === 1 ? '' : 's'}
       </p>

@@ -314,7 +314,7 @@ export function Library({
                   >
                     <Icon className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-medium text-ink">{row.title}</p>
+                      <p className="truncate text-ui font-medium text-ink">{row.title}</p>
                       <p className="truncate text-xs text-ink-muted">{row.detail}</p>
                     </div>
                     <TextLink onClick={() => void attention(row)} aria-disabled={busy === row.key} className="shrink-0">
@@ -337,7 +337,7 @@ export function Library({
                 <li key={source.id} data-ask-target={askTarget({ kind: 'source', id: source.id })} className="flex items-center gap-3 border-b border-border-subtle py-2">
                   <Bookmark className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-medium text-ink">
+                    <p className="truncate text-ui font-medium text-ink">
                       {source.authors}
                       {source.year ? ` (${source.year})` : ''} · {source.title}
                     </p>
@@ -377,7 +377,7 @@ export function Library({
                     type="button"
                     aria-label={`Delete ${source.title}`}
                     onClick={() => setDeletingSource(source)}
-                    className={`shrink-0 rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
+                    className={`shrink-0 rounded-sm text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
                   >
                     <Trash2 className="size-4" aria-hidden="true" />
                   </button>

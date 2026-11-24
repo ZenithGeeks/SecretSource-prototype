@@ -8,14 +8,17 @@ import { citationLink, citationNumber, preprintNote, reference, shortMessage } f
 import {
   analysisLabel,
   answersFor,
+  claimsLine,
   countsOf,
   opensByDefault,
   ranked,
+  runDate,
   standingOf,
   toCsv,
   toMarkdown,
   unpaired,
   verdictCountLabel,
+  verdictTally,
   verdictCountWord,
 } from '../src/lib/claims'
 import { contentsRows, sectionName, sectionOfPage, shownRow } from '../src/lib/outline'
@@ -54,12 +57,21 @@ describe('outline', () => {
   it('keeps every top-level section and only the subsections a claim comes from', () => {
     const rows = contentsRows(outline, [claim({ section: '3.1' }), claim({ section: '3.1' })])
     expect(rows.map((row) => row.n)).toEqual(['1', '3', '3.1'])
-    expect(rows.find((row) => row.n === '3.1')).toMatchObject({ depth: 1, claims: 2, contradicted: false })
+    expect(rows.find((row) => row.n === '3.1')).toMatchObject({ depth: 1, claims: 2, contradicted: 0 })
   })
 
-  it('marks a section whose own claim is contradicted', () => {
+  it('counts the contradicted claims of a section', () => {
     const refuted = claim({ section: '1', verdicts: [verdict({ verdict: 'refutes' })] })
-    expect(contentsRows(outline, [refuted])[0]).toMatchObject({ claims: 1, contradicted: true })
+    expect(contentsRows(outline, [refuted, refuted])[0]).toMatchObject({ claims: 2, contradicted: 2 })
+  })
+
+  it('lists the same rows but counts only the claims it is given to count', () => {
+    const refuted = claim({ section: '1', verdicts: [verdict({ verdict: 'refutes' })] })
+    const backed = claim({ section: '3.1' })
+    const rows = contentsRows(outline, [refuted, backed], [refuted])
+    expect(rows.map((row) => row.n)).toEqual(['1', '3', '3.1'])
+    expect(rows.find((row) => row.n === '1')).toMatchObject({ claims: 1, contradicted: 1 })
+    expect(rows.find((row) => row.n === '3.1')).toMatchObject({ claims: 0, contradicted: 0 })
   })
 
   it('marks the nearest shown section for one that has no row of its own', () => {
@@ -187,6 +199,42 @@ describe('claims', () => {
     expect(md).toContain('  - > quoted')
     expect(md).toContain('- **not checked** — gone: withdrawn by its authors on arXiv')
     expect(toMarkdown([claim()])).toContain('# Claims in this paper')
+  })
+})
+
+describe('claim tallies and run dates', () => {
+  const refuted = claim({ verdicts: [verdict({ verdict: 'refutes' })] })
+
+  it('tallies verdicts worst first, in words that agree with the number', () => {
+    expect(verdictTally(['supports', 'supports', 'insufficient'])).toBe('1 silent, 2 back it')
+    expect(verdictTally(['supports', 'refutes', 'refutes', 'insufficient'])).toBe('2 contradict, 1 silent, 1 backs it')
+  })
+
+  it('tallies no verdicts as an empty string', () => {
+    expect(verdictTally([])).toBe('')
+  })
+
+  it('counts claims and the ones a source contradicts', () => {
+    expect(claimsLine([refuted, claim(), claim()])).toBe('3 claims, 1 contradicted by a source')
+  })
+
+  it('says one claim in the singular, and leaves out the contradicted part when there is none', () => {
+    expect(claimsLine([claim()])).toBe('1 claim')
+  })
+
+  const run = (extra: Partial<Analysis>) => ({ id: 'a', paper: 'p', status: 'done', claims: [], stages: [], ...extra }) as Analysis
+
+  it('dates a finished run by when it completed', () => {
+    expect(runDate(run({ completed: '2026-11-12T14:35:00', started: '2026-11-12T14:05:00' }))).toBe(new Date('2026-11-12T14:35:00').getTime())
+  })
+
+  it('dates a run that has not finished by when it started', () => {
+    expect(runDate(run({ status: 'running', started: '2026-11-12T14:05:00' }))).toBe(new Date('2026-11-12T14:05:00').getTime())
+  })
+
+  it('gives 0 for a run with no readable time', () => {
+    expect(runDate(run({}))).toBe(0)
+    expect(runDate(run({ started: 'not a date', status: 'error' }))).toBe(0)
   })
 })
 

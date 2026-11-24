@@ -188,11 +188,11 @@ function TeacherClassSearch({ onOpenClasses }: { onOpenClasses: () => void }) {
       type="button"
       onClick={onOpenClasses}
       aria-label="Search classes"
-      className="flex h-[36px] w-full items-center gap-2 rounded-lg border border-border-subtle bg-canvas px-2.5 text-left text-[11px] text-ink-muted hover:border-accent"
+      className="flex h-9 w-full items-center gap-2 rounded-lg border border-border-subtle bg-canvas px-2.5 text-left text-caption text-ink-muted hover:border-accent"
     >
       <Search className="size-3.5 shrink-0" />
       <span className="flex-1">Search classes</span>
-      <kbd className="text-[10px]">⌘K</kbd>
+      <kbd className="text-micro">⌘K</kbd>
     </button>
   )
 }
@@ -219,5 +219,5 @@ function breadcrumbFor(route: TeacherRoute): string[] {
 }
 
 function ButtonAddClass({ onClick }: { onClick: () => void }) {
-  return <button type="button" onClick={onClick} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3 text-[11px] font-medium text-white hover:opacity-90"><Plus className="size-3.5" />Add class</button>
+  return <button type="button" onClick={onClick} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3 text-caption font-medium text-white hover:opacity-90"><Plus className="size-3.5" />Add class</button>
 }
