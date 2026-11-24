@@ -3,8 +3,8 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { emptyDraft, type Candidate, type Draft, type Reference, type WorkClaim } from '../src/lib/labeling'
-import { PassageList } from '../src/roles/labeler/components/PassageList'
+import { emptyDraft, type Candidate, type Draft, type Reference, type UncheckedCitation, type WorkClaim } from '../src/lib/labeling'
+import { PassageList, revealInPanel } from '../src/roles/labeler/components/PassageList'
 
 const cand = (id: string, over: Partial<Candidate> = {}): Candidate => ({
   cand_id: id,
@@ -17,7 +17,7 @@ const cand = (id: string, over: Partial<Candidate> = {}): Candidate => ({
   ...over,
 })
 
-const claim = (candidates: Candidate[]): WorkClaim => ({
+const claim = (candidates: Candidate[], over: Partial<WorkClaim> = {}): WorkClaim => ({
   claim_id: 'p#0',
   claim: 'Y is fast.',
   sentence: '',
@@ -25,6 +25,7 @@ const claim = (candidates: Candidate[]): WorkClaim => ({
   source: null,
   candidates,
   origin: 'extracted',
+  ...over,
 })
 
 const refs: Reference[] = [
@@ -32,7 +33,7 @@ const refs: Reference[] = [
   { reference_id: 'refC', file: '', label: 'Ref C' },
 ]
 
-function setup(over: Partial<Parameters<typeof PassageList>[0]> = {}) {
+function setup(over: Partial<Parameters<typeof PassageList>[0]> = {}, reactStrictMode = false) {
   const props = {
     claim: claim([cand('c1'), cand('c2', { rank: 2, page: null, score: null })]),
     draft: emptyDraft() as Draft,
@@ -45,8 +46,8 @@ function setup(over: Partial<Parameters<typeof PassageList>[0]> = {}) {
     grade: (id: string) => <p>grade for {id}</p>,
     ...over,
   }
-  render(<PassageList {...props} />)
-  return props
+  const view = render(<PassageList {...props} />, { reactStrictMode })
+  return { ...props, rerender: (next: Partial<typeof props>) => view.rerender(<PassageList {...props} {...next} />) }
 }
 
 afterEach(() => {
@@ -63,23 +64,45 @@ describe('the passages of a claim', () => {
     expect(within(section).getByText('grade for refB')).toBeInTheDocument()
   })
 
-  it('lets a finished reference fold and reopen its passages', () => {
-    setup({
+  it('switches between reference tabs and shows the summary chip on a finished one', () => {
+    const second = { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C', ref: 'b2', authors: [], year: '2022' }
+    const bothClaims: WorkClaim = claim([
+      cand('c1'),
+      cand('c2', { rank: 2 }),
+      cand('c3', { reference_id: 'refC', reference_file: 'refC.pdf' }),
+    ])
+    const props = setup({
+      claim: bothClaims,
+      references: [refs[0], second],
       draft: {
         ...emptyDraft(),
         cands: { c1: 'relevant', c2: 'rejected' },
         labels: { refB: { evidence: 3, rationale: '', confidence: 'high' } },
       },
     })
-    const section = screen.getByRole('region', { name: 'Ref B' })
-    const summary = within(section).getByRole('button', { name: /1\/2 relevant/ })
-    expect(summary).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(summary)
-    expect(summary).toHaveAttribute('aria-expanded', 'true')
-    expect(within(section).getByRole('button', { name: /text of c1/ })).toBeInTheDocument()
-    fireEvent.click(summary)
-    expect(summary).toHaveAttribute('aria-expanded', 'false')
-    expect(within(section).queryByRole('button', { name: /text of c1/ })).not.toBeInTheDocument()
+    const tabs = screen.getByRole('tablist', { name: 'References for this claim' })
+    const refBTab = within(tabs).getByRole('tab', { name: /1\/2 relevant/ })
+    const refCTab = within(tabs).getByRole('tab', { name: /\[b2\] Ref C/ })
+    expect(refCTab).toHaveAttribute('aria-selected', 'true')
+    expect(refBTab).toHaveAttribute('aria-selected', 'false')
+    fireEvent.click(refBTab)
+    expect(props.onFocus).toHaveBeenCalledWith({ file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1' })
+  })
+
+  it('focuses an added passage or the reference file when switching to a tab with no candidates', () => {
+    const second = { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C', ref: 'b2', authors: [], year: '2022' }
+    const props = setup({
+      claim: claim([cand('c1')]),
+      references: [refs[0], second],
+      draft: { ...emptyDraft(), added: [{ reference_id: 'refC', page: 2, passage: 'added note' }] },
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /\[b2\] Ref C/ }))
+    expect(props.onFocus).toHaveBeenCalledWith({
+      file: 'refC.pdf',
+      passage: 'added note',
+      page: 2,
+      key: 'added:refC:added note',
+    })
   })
 
   it('focuses a passage and judges it', () => {
@@ -90,17 +113,66 @@ describe('the passages of a claim', () => {
     expect(props.onJudge).toHaveBeenCalledWith('c1', 'rejected')
   })
 
-  it('marks the focused passage, shows the shortcut keys, and scrolls it into view', () => {
+  it('keeps automatic focus from scrolling during StrictMode replay but reveals explicit focus', () => {
     const scroll = vi.fn()
     Element.prototype.scrollIntoView = scroll
-    setup({
-      focus: { file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1' },
+    const props = setup({
+      focus: { file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1', automatic: true },
       draft: { ...emptyDraft(), cands: { c1: 'relevant', c2: 'rejected' } },
-    })
-    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+    }, true)
+    // A new claim opens at its decision: the first focused passage is not scrolled to.
+    expect(scroll).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: /text of c1/ })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getAllByRole('radio', { name: /^Relevant/ })[0]).toHaveAttribute('aria-keyshortcuts', 'R')
     expect(screen.getAllByRole('radio', { name: /^Not relevant/ })[1]).toHaveAttribute('aria-checked', 'true')
+
+    props.rerender({ focus: { file: 'refB.pdf', passage: 'text of c2', page: null, key: 'c2' } })
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' })
+  })
+
+  it('reveals a newly added passage that mounts with explicit focus', () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    const props = setup({}, true)
+    props.rerender({
+      draft: { ...emptyDraft(), added: [{ reference_id: 'refB', page: 3, passage: 'new passage' }] },
+      focus: { file: 'refB.pdf', passage: 'new passage', page: 3, key: 'added:refB:new passage' },
+    })
+    expect(screen.getByRole('button', { name: /new passage/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' })
+  })
+
+  it('scrolls only the label panel to a newly focused passage, above or below the view', () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    const panel = document.createElement('div')
+    panel.setAttribute('data-label-panel', '')
+    document.body.appendChild(panel)
+    const card = document.createElement('li')
+    panel.appendChild(card)
+    Object.defineProperty(panel, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(card, 'offsetHeight', { configurable: true, value: 40 })
+    panel.getBoundingClientRect = () => ({ top: 0 }) as DOMRect
+
+    panel.scrollTop = 0
+    card.getBoundingClientRect = () => ({ top: 200 }) as DOMRect
+    revealInPanel(card)
+    expect(panel.scrollTop).toBe(140)
+
+    card.getBoundingClientRect = () => ({ top: -100 }) as DOMRect
+    revealInPanel(card)
+    expect(panel.scrollTop).toBe(40)
+
+    card.getBoundingClientRect = () => ({ top: 10 }) as DOMRect
+    revealInPanel(card)
+    expect(panel.scrollTop).toBe(40)
+    expect(scroll).not.toHaveBeenCalled()
+    panel.remove()
+  })
+
+  it('leaves a narrow page alone when the browser cannot scroll an element into view', () => {
+    const card = document.createElement('li')
+    expect(() => revealInPanel(card)).not.toThrow()
   })
 
   it('names a reference by its id when the reference list does not know it', () => {
@@ -108,15 +180,41 @@ describe('the passages of a claim', () => {
     expect(screen.getByRole('region', { name: 'refB' })).toBeInTheDocument()
   })
 
-  it('says retrieval found nothing', () => {
+  it('says no passages were stored, without claiming a search found nothing', () => {
     setup({ claim: claim([]) })
-    expect(screen.getByText(/Retrieval found nothing/)).toBeInTheDocument()
+    expect(screen.getByText(/No passages were stored for this claim/)).toBeInTheDocument()
+    expect(screen.queryByText(/Retrieval found nothing/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Citations that were not checked' })).not.toBeInTheDocument()
+  })
+
+  it('lists why each citation was not checked', () => {
+    const reasons: [string, string][] = [
+      ['named', 'not checked, the paper only names it'],
+      ['no-open-access', 'no open-access PDF'],
+      ['not-downloadable', 'the PDF could not be downloaded'],
+      ['unresolvable', 'no matching work was found'],
+      ['lookup-unavailable', 'the lookup service did not answer'],
+      ['web-source', 'a web page, not a paper'],
+      ['withdrawn', 'the paper was withdrawn'],
+      ['failed', 'the check failed'],
+      ['mystery', 'checking it failed'],
+    ]
+    const unchecked: UncheckedCitation[] = reasons.map(([reason], index) => ({
+      ref: `b${index}`,
+      label: `Work ${reason}`,
+      reason,
+    }))
+    setup({ claim: claim([], { unchecked }) })
+    const list = screen.getByRole('list', { name: 'Citations that were not checked' })
+    for (const [reason, words] of reasons) {
+      expect(within(list).getByText(`Work ${reason}: ${words}`)).toBeInTheDocument()
+    }
   })
 
   it('says a search is running', () => {
     setup({ claim: claim([]), search: 'searching' })
     expect(screen.getByRole('status')).toHaveTextContent('Searching the reference papers')
-    expect(screen.queryByText(/Retrieval found nothing/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/No passages were stored/)).not.toBeInTheDocument()
   })
 
   it('offers to search again after a failed search', () => {
@@ -124,6 +222,7 @@ describe('the passages of a claim', () => {
     setup({ claim: claim([]), search: 'failed', onSearchAgain })
     fireEvent.click(screen.getByRole('button', { name: 'Search again' }))
     expect(onSearchAgain).toHaveBeenCalled()
+    expect(screen.queryByText(/No passages were stored/)).not.toBeInTheDocument()
   })
 })
 
@@ -168,15 +267,16 @@ describe('passages the person added', () => {
     expect(props.onFocus).toHaveBeenCalledWith({ file: '', passage: 'lost', page: null, key: 'added:ghost:lost' })
   })
 
-  it('opens a passage added for a work with no PDF with no file, scrolling it into view when focused', () => {
+  it('opens a passage added for a work with no PDF with no file, scrolling it into view once focused', () => {
     const scroll = vi.fn()
     Element.prototype.scrollIntoView = scroll
     const props = setup({
       claim: claim([]),
       draft: { ...emptyDraft(), added: [{ reference_id: 'refC', page: null, passage: 'cited only' }] },
-      focus: { file: '', passage: 'cited only', page: null, key: 'added:refC:cited only' },
     })
-    expect(scroll).toHaveBeenCalled()
+    props.rerender({ focus: { file: '', passage: 'cited only', page: null, key: 'added:refC:cited only' } })
+    // No label panel around it here, so the page scrolls the browser's way.
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
     fireEvent.click(screen.getByRole('button', { name: 'cited only' }))
     expect(props.onFocus).toHaveBeenCalledWith({ file: '', passage: 'cited only', page: null, key: 'added:refC:cited only' })
   })

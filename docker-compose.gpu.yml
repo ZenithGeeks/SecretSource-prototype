@@ -1,5 +1,5 @@
 # Docling on your NVIDIA GPU, in the worker (which runs every analysis) and the gateway. Without
-# this file both use CPU-only torch, which is what Cloud Run and machines without a GPU need. Use
+# this file both use CPU-only torch, which is what machines without a GPU need. Use
 # it on top of docker-compose.yml:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build worker gateway

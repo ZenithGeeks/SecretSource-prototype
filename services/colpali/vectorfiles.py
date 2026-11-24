@@ -1,8 +1,8 @@
 # NOTE: this file is duplicated verbatim at services/colpali/vectorfiles.py (the two
 # services build from separate Docker contexts, so a shared import is not possible).
 # Keep both copies identical.
-"""One safetensors file per paper, stored in a GCS bucket (VECTOR_STORE=gs://bucket/prefix)
-or a local folder (VECTOR_STORE=/some/path, the default ./vectors). Replaces per-paper
+"""One safetensors file per paper, stored in a local folder (VECTOR_STORE=/some/path, the
+default ./vectors). Replaces per-paper
 Qdrant collections: a claim check only ever searches one cited paper's ~150 passages, which
 plain torch scores in milliseconds, so there is no need for a vector database at all.
 
@@ -79,93 +79,48 @@ def _parse_file(data: bytes) -> Paper:
 
 
 class PaperFiles:
-    """Per-paper safetensors files under `<root>/<kind>/`, one object per source paper.
-
-    `root` is either `gs://<bucket>/<prefix>` or a local directory path.
-    """
+    """Per-paper safetensors files under `<root>/<kind>/`, one file per source paper."""
 
     def __init__(self, root: str, kind: str):
         self.kind = kind
-        self.is_gcs = root.startswith("gs://")
         self._cache: OrderedDict[str, tuple[object, Paper]] = OrderedDict()
-        if self.is_gcs:
-            rest = root[len("gs://") :]
-            bucket_name, _, prefix = rest.partition("/")
-            self._bucket_name = bucket_name
-            self._prefix = prefix.strip("/")
-            self._bucket = None  # lazy: google-cloud-storage is only imported when needed
-        else:
-            self._local_root = Path(root) / kind
-            self._local_root.mkdir(parents=True, exist_ok=True)
-
-    # -- GCS plumbing, lazily imported so local mode needs no GCP libraries --
-
-    def _bucket_client(self):
-        if self._bucket is None:
-            from google.cloud import storage
-
-            self._bucket = storage.Client().bucket(self._bucket_name)
-        return self._bucket
-
-    def _object_name(self, source: str) -> str:
-        name = f"{self.kind}/{urllib.parse.quote(source, safe='')}.safetensors"
-        return f"{self._prefix}/{name}" if self._prefix else name
+        self._local_root = Path(root) / kind
+        self._local_root.mkdir(parents=True, exist_ok=True)
 
     def _local_path(self, source: str) -> Path:
         return self._local_root / f"{urllib.parse.quote(source, safe='')}.safetensors"
 
-    # -- public API --
-
     def write(self, source: str, rows: list[dict], vectors: list[torch.Tensor], content_hash: str) -> None:
         data = _build_file(rows, vectors, content_hash)
-        if self.is_gcs:
-            blob = self._bucket_client().blob(self._object_name(source))
-            blob.metadata = {"content_hash": content_hash, "count": str(len(rows))}
-            blob.upload_from_string(data, content_type="application/octet-stream")
-        else:
-            path = self._local_path(source)
-            tmp = path.parent / f"{path.name}.tmp-{uuid.uuid4().hex}"
-            tmp.write_bytes(data)
-            os.replace(tmp, path)  # atomic: a concurrent reader sees the old or the new file, never partial
-        self._cache.pop(source, None)  # next load() re-fetches under the new version token
+        path = self._local_path(source)
+        tmp = path.parent / f"{path.name}.tmp-{uuid.uuid4().hex}"
+        tmp.write_bytes(data)
+        os.replace(tmp, path)  # atomic: a concurrent reader sees the old or the new file, never partial
+        self._cache.pop(source, None)  # next load() re-reads under the new version token
 
     def stored_hash(self, source: str) -> tuple[str | None, int]:
-        """(content_hash, count) without downloading the vectors."""
-        if self.is_gcs:
-            blob = self._bucket_client().get_blob(self._object_name(source))
-            if blob is None:
-                return None, 0
-            metadata = blob.metadata or {}
-        else:
-            path = self._local_path(source)
-            if not path.exists():
-                return None, 0
-            with safe_open(str(path), framework="pt") as handle:
-                metadata = handle.metadata() or {}
+        """(content_hash, count) without reading the vectors."""
+        path = self._local_path(source)
+        if not path.exists():
+            return None, 0
+        with safe_open(str(path), framework="pt") as handle:
+            metadata = handle.metadata() or {}
         return metadata.get("content_hash"), int(metadata.get("count", 0))
 
     def load(self, source: str) -> Paper | None:
-        if self.is_gcs:
-            blob = self._bucket_client().get_blob(self._object_name(source))
-            if blob is None:
-                self._cache.pop(source, None)
-                return None
-            version = blob.generation
-        else:
-            path = self._local_path(source)
-            try:
-                version = os.stat(path).st_mtime_ns
-            except FileNotFoundError:
-                self._cache.pop(source, None)
-                return None
+        path = self._local_path(source)
+        try:
+            version = os.stat(path).st_mtime_ns
+        except FileNotFoundError:
+            self._cache.pop(source, None)
+            return None
 
         cached = self._cache.get(source)
         if cached is not None and cached[0] == version:
             self._cache.move_to_end(source)
             return cached[1]
 
-        data = blob.download_as_bytes() if self.is_gcs else path.read_bytes()
-        paper = _parse_file(data)
+        paper = _parse_file(path.read_bytes())
         self._cache[source] = (version, paper)
         self._cache.move_to_end(source)
         while len(self._cache) > VECTOR_CACHE_PAPERS:
@@ -173,22 +128,9 @@ class PaperFiles:
         return paper
 
     def sources(self) -> list[str]:
-        if self.is_gcs:
-            prefix = f"{self._prefix}/{self.kind}/" if self._prefix else f"{self.kind}/"
-            names = [blob.name for blob in self._bucket_client().list_blobs(prefix=prefix)]
-        else:
-            names = [path.name for path in self._local_root.glob("*.safetensors")]
-        result = []
-        for name in names:
-            stem = name.rsplit("/", 1)[-1]
-            if stem.endswith(".safetensors"):
-                stem = stem[: -len(".safetensors")]
-            result.append(urllib.parse.unquote(stem))
-        return result
+        files = self._local_root.glob("*.safetensors")
+        return [urllib.parse.unquote(path.name.removesuffix(".safetensors")) for path in files]
 
     def delete(self, source: str) -> None:
         self._cache.pop(source, None)
-        if self.is_gcs:
-            self._bucket_client().blob(self._object_name(source)).delete()
-        else:
-            self._local_path(source).unlink(missing_ok=True)
+        self._local_path(source).unlink(missing_ok=True)

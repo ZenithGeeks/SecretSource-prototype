@@ -645,6 +645,7 @@ export function ClaimCard({
   onSelect,
   actions,
   startCollapsed = false,
+  defaultOpen = !startCollapsed && opensByDefault(standing),
   analysisId,
   disputes = [],
   sourceUpload,
@@ -669,6 +670,8 @@ export function ClaimCard({
   actions?: ReactNode
   /** Stay a one-line row until opened, whatever the verdict (the list shown while a run is going). */
   startCollapsed?: boolean
+  /** Override the initial expansion for a finished result list. */
+  defaultOpen?: boolean
   /** With it, the owner can dispute a verdict; left out where nobody may (shared or teacher views). */
   analysisId?: string
   /** The owner's disputes in this analysis. */
@@ -682,7 +685,7 @@ export function ClaimCard({
   /** The viewer owns the analysis, so the upload note says "you". */
   ownsAnalysis?: boolean
 }) {
-  const [open, setOpen] = useState(!startCollapsed && opensByDefault(standing))
+  const [open, setOpen] = useState(defaultOpen)
   const [showEvidence, setShowEvidence] = useState(false)
   const [fullReason, setFullReason] = useState(false)
   const loose = unpaired(claim)
@@ -733,11 +736,12 @@ export function ClaimCard({
   if (!open) {
     const cited = claim.citations.map(shortRef).join(' · ')
     return (
-      <div className={surface}>
+      <div data-claim-card className={surface}>
         <button
           type="button"
           onClick={toggle}
           aria-expanded={false}
+          data-claim-toggle
           className="flex w-full items-center gap-3.5 rounded-2xl px-5 py-3.5 text-left hover:bg-accent-soft/40 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
         >
           {number}
@@ -758,11 +762,12 @@ export function ClaimCard({
   ].filter(Boolean).join(' · ')
 
   return (
-    <div className={cn(surface, 'flex flex-col gap-[18px] p-5')}>
+    <div data-claim-card className={cn(surface, 'flex flex-col gap-[18px] p-5')}>
       <button
         type="button"
         onClick={toggle}
         aria-expanded
+        data-claim-toggle
         className="flex w-full items-center gap-2.5 rounded text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
       >
         {number}
@@ -803,7 +808,7 @@ export function ClaimCard({
           {primary && !primary.quote && (
             <EvidencePanel bar={VERDICT_BAR[primary.verdict]} label={primaryName}>
               <span className="not-italic text-ink-muted">
-                No passage in the cited paper matched this claim.
+                No exact passage matched. The judge's reading of the paper is below.
               </span>
             </EvidencePanel>
           )}
@@ -879,6 +884,9 @@ export function ClaimCard({
       {primary && <FigureCrops verdict={primary} onShow={onShow} />}
       {primary && showEvidence && primary.evidence.length > 0 && <Passages verdict={primary} onShow={onShow} />}
 
+      {claim.citations.some((citation) => answersFor(claim, citation).verdict !== primary) && primary && (
+        <h3 className="type-label text-ink-muted">Other cited works</h3>
+      )}
       {claim.citations.length > 0 && (
         <ul className="space-y-4">
           {claim.citations.map((citation, i) => {

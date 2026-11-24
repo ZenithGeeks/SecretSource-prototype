@@ -25,40 +25,43 @@ export function SaveBar({
   className?: string
 }) {
   let status = 'Nothing changed'
-  if (dirty) status = 'Unsaved changes · Ctrl/⌘+S saves'
-  else if (savedRows != null) status = `Saved ${savedRows} row${savedRows === 1 ? '' : 's'}`
+  if (dirty) status = 'Unsaved · Ctrl/⌘+S'
+  else if (savedRows != null) status = 'Saved'
 
   return (
-    <div className={cn('sticky bottom-0 z-10 flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface p-3', className)}>
-      {left.length > 0 ? (
-        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-muted">
-          {left.map((item) => (
-            <li key={item}>• {item}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="flex items-center gap-1.5 text-sm text-supports">
-          <Check className="size-4" /> Every decision for this claim is made.
-        </p>
-      )}
+    <div className={cn('sticky bottom-0 z-10 flex flex-col gap-1.5 bg-surface px-3 py-2', className)}>
       {error && (
-        <p role="alert" className="rounded-lg bg-refutes-soft px-3 py-2 text-sm text-refutes">
+        <p role="alert" className="rounded-lg bg-refutes-soft px-3 py-1.5 text-sm text-refutes">
           Not saved: {error}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => onSave(false)} disabled={saving || !dirty}>
-          {saving && <Loader2 className="size-4 animate-spin" />}
-          Save labels
-        </Button>
-        {hasNext && (
-          <Button variant="ghost" onClick={() => onSave(true)} disabled={saving || !dirty}>
-            Save and next claim
-          </Button>
-        )}
-        <span aria-live="polite" className="text-xs text-ink-muted">
+        <span aria-live="polite" className="text-xs font-medium text-ink-muted">
           {status}
         </span>
+        <span
+          title={left.length > 0 ? left.join(' · ') : 'Every decision for this claim is made.'}
+          className={cn('text-xs tabular-nums', left.length > 0 ? 'text-ink-muted' : 'flex items-center gap-1 text-supports')}
+        >
+          {left.length > 0 ? (
+            `· ${left.length} left`
+          ) : (
+            <>
+              <Check className="size-3.5" aria-hidden="true" /> Ready
+            </>
+          )}
+        </span>
+        <div className="ml-auto flex items-center gap-1.5">
+          {hasNext && (
+            <Button variant="ghost" onClick={() => onSave(true)} disabled={saving || !dirty}>
+              Save and next claim
+            </Button>
+          )}
+          <Button onClick={() => onSave(false)} disabled={saving || !dirty}>
+            {saving && <Loader2 className="size-4 animate-spin" />}
+            Save labels
+          </Button>
+        </div>
       </div>
     </div>
   )

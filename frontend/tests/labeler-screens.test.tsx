@@ -106,21 +106,33 @@ describe('Queue', () => {
       papers: [paper('b1'), paper('b2'), paper('r1', { status: 'running' }), paper('r2', { status: 'running' }), paper('d1')],
     })
     renderQueue()
-    expect(await screen.findByText('You have 2 papers to check blind. They are kept apart from this list.')).toBeInTheDocument()
+    expect(await screen.findByText('You have 2 papers to check blind.')).toBeInTheDocument()
     expect(screen.getByText('Reading 2 papers. This list updates by itself.')).toBeInTheDocument()
   })
 
   it('counts one blind paper and one paper being read', async () => {
     gateway.pool = pool({ blind: ['b1'], papers: [paper('b1'), paper('r1', { status: 'running' })] })
     renderQueue()
-    expect(await screen.findByText('You have 1 paper to check blind. They are kept apart from this list.')).toBeInTheDocument()
+    expect(await screen.findByText('You have 1 paper to check blind.')).toBeInTheDocument()
     expect(screen.getByText('Reading 1 paper. This list updates by itself.')).toBeInTheDocument()
   })
 
-  it('says the list is empty when every paper is a blind check', async () => {
-    gateway.pool = pool({ blind: ['b1'], papers: [paper('b1')] })
-    renderQueue()
-    expect(await screen.findByText('No papers yet')).toBeInTheDocument()
+  it('lists blind checks, hiding who labeled one until it is finished, and opens their labels only then', async () => {
+    gateway.pool = pool({ lead: true, blind: ['b1', 'b2'], papers: [paper('b1'), paper('b2', { judged: 4 })] })
+    const onOpen = vi.fn()
+    const onOpenLabels = vi.fn()
+    withQuery(<Queue onOpen={onOpen} onOpenLabels={onOpenLabels} onShowBlind={vi.fn()} />)
+    const unfinished = (await screen.findByRole('button', { name: 'Paper b1 (Label)' })).closest('tr')!
+    expect(within(unfinished).getByText('Blind check')).toBeInTheDocument()
+    expect(within(unfinished).getByText('Hidden until you finish')).toBeInTheDocument()
+    fireEvent.click(within(unfinished).getByRole('button', { name: 'Paper b1 (Label)' }))
+    expect(onOpen).toHaveBeenCalledWith('b1') // a lead's own blind check still opens to label
+
+    const finished = screen.getByRole('button', { name: 'Paper b2 (View labels)' }).closest('tr')!
+    expect(within(finished).queryByText('Hidden until you finish')).not.toBeInTheDocument()
+    expect(within(finished).getByText('Somchai')).toBeInTheDocument()
+    fireEvent.click(within(finished).getByRole('button', { name: 'Paper b2 (View labels)' }))
+    expect(onOpenLabels).toHaveBeenCalledWith('b2')
   })
 
   it('warns when the database is not set up and when Scopus is missing', async () => {
@@ -131,7 +143,7 @@ describe('Queue', () => {
     expect(screen.getAllByText('Labels cannot be saved yet').length).toBeGreaterThan(0)
   })
 
-  it('puts papers of the reader’s own topic first, then by topic, unfinished before finished', async () => {
+  it('puts unfinished papers first, then the reader’s own topic, then by topic', async () => {
     gateway.pool = pool({
       papers: [
         paper('cv-done', { topic: 'CV', judged: 4, title: 'CV done' }),
@@ -141,9 +153,28 @@ describe('Queue', () => {
       ],
     })
     renderQueue()
-    await screen.findByText('NLP one')
+    await screen.findByRole('button', { name: 'Continue: NLP one' })
     const titles = screen.getAllByRole('row').slice(1).map((row) => row.querySelector('.line-clamp-2')?.textContent)
-    expect(titles).toEqual(['NLP one', 'NLP done', 'CV open', 'CV done'])
+    expect(titles).toEqual(['NLP one', 'CV open', 'NLP done', 'CV done'])
+  })
+
+  it('offers Continue for the next unfinished paper and puts Add papers and Downloads behind disclosures', async () => {
+    const onOpen = vi.fn()
+    gateway.pool = pool({
+      papers: [paper('p-done', { judged: 4, title: 'Finished' }), paper('p-next', { title: 'Next unfinished' })],
+    })
+    withQuery(<Queue onOpen={onOpen} onShowBlind={vi.fn()} />)
+    const cont = await screen.findByRole('button', { name: 'Continue: Next unfinished' })
+    fireEvent.click(cont)
+    expect(onOpen).toHaveBeenCalledWith('p-next')
+
+    expect(screen.queryByRole('button', { name: 'Download labels CSV' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Downloads' }))
+    expect(screen.getByRole('button', { name: 'Download labels CSV' })).toBeInTheDocument()
+
+    expect(screen.queryByRole('button', { name: 'Search Scopus' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add papers' }))
+    expect(screen.getByRole('button', { name: 'Search Scopus' })).toBeInTheDocument()
   })
 })
 

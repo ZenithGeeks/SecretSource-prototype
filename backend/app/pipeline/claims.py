@@ -383,8 +383,8 @@ def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ())
     """
     import requests
 
-    from app.clients.cloud_run import uploadable
     from app.clients.service_auth import auth_headers
+    from app.clients.upload_limit import uploadable
 
     with open(pdf_path, "rb") as pdf_file:
         pdf_bytes = pdf_file.read()
@@ -392,7 +392,7 @@ def _grobid_pdf(endpoint: str, pdf_path: str, coordinates: tuple[str, ...] = ())
     key = store.cache_key("grobid", endpoint, ",".join(coordinates), content)
     if (cached := store.recall_cache(key)) is not None:
         return ET.fromstring(cached["tei"])
-    # A PDF over Cloud Run's 32 MiB limit goes with its images at low resolution. The text, the
+    # A PDF over the 32 MiB upload limit goes with its images at low resolution. The text, the
     # layout and the figure areas stay, so the TEI and its coords are the same.
     with uploadable(Path(pdf_path), keep_images=True) as upload:
         upload_bytes = upload.read_bytes()
@@ -1485,14 +1485,16 @@ def _deduplicated(claims: list[dict]) -> list[dict]:
 
 
 def _most_checkable(claims: list[dict], limit: int) -> list[dict]:
-    """At most `limit` claims, ranked by source information, restored to the paper's order.
+    """The first `limit` claims in the paper's order; limit <= 0 keeps every one.
 
-    CLAIM_LIMIT=0 keeps everything (what the benchmark wants).
+    Paper order keeps the direct, single-citation claims ("X showed Y [12]") that ranking by
+    citation count dropped first, so their share among the kept claims stays close to their
+    share in the whole paper (SCRUM-551). CLAIM_LIMIT=0 keeps everything (what the benchmark
+    wants).
     """
-    if limit <= 0 or len(claims) <= limit:
+    if limit <= 0:
         return claims
-    ranked = sorted(range(len(claims)), key=lambda index: _provenance(claims[index]), reverse=True)
-    return [claims[index] for index in sorted(ranked[:limit])]
+    return claims[:limit]
 
 
 def extract_claims_with_citations(pdf_path: str) -> dict:

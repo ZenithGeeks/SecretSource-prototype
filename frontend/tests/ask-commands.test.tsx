@@ -136,7 +136,7 @@ describe('the result cards', () => {
     render(<CommandResult view={view!} command="/get_analysis" />)
 
     const tally = screen.getByRole('list', { name: 'Claims by standing' })
-    expect(within(tally).getByText('Not backed').parentElement).toHaveTextContent('16 Not backed')
+    expect(within(tally).getByText('Silent').parentElement).toHaveTextContent('16 Silent')
     expect(within(tally).queryByText('Contradicted')).not.toBeInTheDocument() // none: nothing to show
   })
 
@@ -153,7 +153,7 @@ describe('the result cards', () => {
 
     expect(screen.getByText('“6-10x smaller”')).toBeInTheDocument()
     expect(screen.getAllByText('Backed')).toHaveLength(2) // the claim's, and the cited paper's
-    expect(screen.getByText("Can't check")).toBeInTheDocument()
+    expect(screen.getByText('Not checked')).toBeInTheDocument()
     expect(screen.getByText('not found')).toBeInTheDocument()
   })
 
@@ -162,7 +162,7 @@ describe('the result cards', () => {
 
     const tiles = screen.getAllByRole('listitem')
     expect(tiles.map((tile) => tile.textContent)).toEqual([
-      expect.stringContaining('4Not backed'),
+      expect.stringContaining('4Silent'),
       expect.stringContaining('2Contradicted'),
       expect.stringContaining('7Not held'),
     ])

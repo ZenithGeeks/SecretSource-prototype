@@ -55,9 +55,11 @@ const ToolbarSlot = createContext<HTMLElement | null>(null)
 
 /** Screen actions for the shell toolbar's right side ("Open PDF", "Export"). Render it
  * anywhere inside the shell's children; it appears in the toolbar and unmounts with the screen. */
-export function ToolbarActions({ children }: { children: ReactNode }) {
+export function ToolbarActions({ children, orInline = false }: { children: ReactNode; orInline?: boolean }) {
   const slot = useContext(ToolbarSlot)
-  return slot ? createPortal(children, slot) : null
+  if (slot) return createPortal(children, slot)
+  // With no top bar (a bare shell, or a test with no shell), `orInline` draws them in place.
+  return orInline ? children : null
 }
 
 /** The profile footer: avatar, name, role and a settings gear. The row opens an upward menu
@@ -352,7 +354,10 @@ export function AppShell<K extends string>({
   )
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
+    // `relative` makes the locked shell the containing block for absolute descendants (the
+    // `sr-only` inputs deep in a scrolled panel); without it they anchor to the page, escape
+    // the overflow clip and make the window scroll the workspace away.
+    <div className={cn('flex min-h-screen flex-col lg:flex-row', wide === 'full' && !bare && 'lg:relative lg:h-dvh lg:min-h-0 lg:overflow-clip')}>
       {!bare && (
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-2 sm:px-6 lg:hidden">
           <Brand compact />
@@ -389,12 +394,13 @@ export function AppShell<K extends string>({
           data-folded={folded || undefined}
           className={cn(
             'hidden shrink-0 flex-col border-r border-border-subtle bg-surface pt-[18px] lg:sticky lg:top-0 lg:flex lg:h-screen',
-            folded ? 'w-14 items-center gap-2' : 'w-[248px] gap-[18px] overflow-y-auto px-3 pb-3.5',
+            wide === 'full' && 'lg:h-dvh',
+            folded ? 'w-14 items-center gap-2' : 'w-[248px] gap-[18px] overflow-x-hidden overflow-y-auto px-3 pb-3.5',
           )}
         >
           <div className={cn('flex items-center', folded ? 'flex-col gap-2' : 'gap-0.5 px-2')}>
             {!folded && (
-              <div className="mr-auto">
+              <div className="mr-auto min-w-0">
                 <Brand compact />
               </div>
             )}
@@ -438,26 +444,36 @@ export function AppShell<K extends string>({
         </aside>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className={cn('flex min-w-0 flex-1 flex-col', wide === 'full' && !bare && 'lg:min-h-0')}>
         {breadcrumb && !bare && (
           // Translucent so the content scrolls under it, blurred. Under the phone top bar it
           // sticks just below it (the bar is 3.75rem tall).
-          <div className="sticky top-[3.75rem] z-20 flex min-h-[52px] items-center justify-between gap-4 border-b border-border-subtle bg-canvas/70 px-4 backdrop-blur-md sm:px-6 lg:top-0 lg:px-8">
-            <Breadcrumb items={breadcrumb} />
-            <div className="flex shrink-0 items-center gap-1">
+          <div
+            className={cn(
+              'sticky top-[3.75rem] z-20 flex items-center justify-between gap-4 border-b border-border-subtle bg-canvas/70 px-4 backdrop-blur-md sm:px-6 lg:top-0 lg:px-8',
+              // A full-width screen keeps every pixel of height for its panes.
+              wide === 'full' ? 'min-h-11' : 'min-h-[52px]',
+            )}
+          >
+            {/* Full width: a screen may put a whole header row in the actions, so they get the
+                room and the breadcrumb is capped. */}
+            <div className={cn('min-w-0', wide === 'full' && 'max-w-xs lg:shrink-0')}>
+              <Breadcrumb items={breadcrumb} />
+            </div>
+            <div className={cn('flex items-center gap-1', wide === 'full' ? 'shrink-0 lg:min-w-0 lg:flex-1 lg:shrink lg:justify-end' : 'shrink-0')}>
               {toolbarLead}
-              <div ref={setActionsEl} className="flex items-center gap-1" />
+              <div ref={setActionsEl} className={cn('flex items-center gap-1', wide === 'full' && 'min-w-0 flex-1 justify-end')} />
             </div>
           </div>
         )}
         <ToolbarSlot.Provider value={breadcrumb && !bare ? actionsEl : null}>
-          <div className="flex min-w-0 flex-1">
+          <div className={cn('flex min-w-0 flex-1', wide === 'full' && !bare && 'lg:min-h-0')}>
             <main
               className={cn(
                 bare
                   ? 'flex h-screen w-full min-w-0 flex-1 flex-col overflow-hidden'
                   : 'mx-auto flex w-full min-w-0 flex-1 flex-col gap-5 px-4 py-6 transition-[max-width] duration-200 sm:px-6 lg:px-8',
-                !bare && (wide === 'full' ? 'max-w-none' : wide ? 'max-w-[110rem]' : 'max-w-6xl'),
+                !bare && (wide === 'full' ? 'max-w-none py-2 lg:min-h-0 lg:overflow-hidden' : wide ? 'max-w-[110rem]' : 'max-w-6xl'),
               )}
             >
               {children}
@@ -469,7 +485,7 @@ export function AppShell<K extends string>({
                 className={
                   bare
                     ? 'lg:sticky lg:top-0 lg:h-screen lg:w-[400px] lg:shrink-0'
-                    : 'lg:sticky lg:top-[52px] lg:h-[calc(100vh-52px)] lg:w-[400px] lg:shrink-0'
+                    : cn('lg:sticky lg:top-[52px] lg:h-[calc(100vh-52px)] lg:w-[400px] lg:shrink-0', wide === 'full' && 'lg:h-full')
                 }
               >
                 {panel}

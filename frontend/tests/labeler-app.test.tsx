@@ -19,6 +19,7 @@ vi.mock('../src/lib/api', async (original) => ({
     if (path === '/labeling/status') return { annotator: 'Chanya', configured: true, scopus: false }
     if (path === '/labeling/pool') return pool
     if (path.startsWith('/labeling/sessions/')) return session
+    if (path.startsWith('/labeling/compare/')) return comparison
     throw new Error(`unexpected ${path}`)
   }),
   fetchFile: vi.fn(),
@@ -78,6 +79,26 @@ const session = {
   others: {},
 }
 
+const comparison = {
+  paper_id: 'paperA',
+  title: 'Paper A',
+  labelers: ['Chanya', 'Somchai'],
+  pairs: [
+    {
+      claim_id: 'paperA#0',
+      reference_id: 'refB',
+      claim: 'Method Y improves recall.',
+      reference_title: 'Ref B',
+      agree: false,
+      verdicts: [
+        { labeler: 'Chanya', evidence: 3, confidence: 'high', rationale: '', claim_status: 'accepted' },
+        { labeler: 'Somchai', evidence: 4, confidence: 'low', rationale: '', claim_status: 'accepted' },
+      ],
+      notes: [],
+    },
+  ],
+}
+
 import { LabelerApp } from '../src/roles/labeler/LabelerApp'
 
 function renderApp(search = '', props: Parameters<typeof LabelerApp>[0] = {}) {
@@ -111,6 +132,38 @@ describe('the Labeler shell', () => {
     fireEvent.click(within(sidebar()).getByRole('button', { name: 'Papers to label' }))
     expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
     expect(window.location.search).toBe('')
+  })
+
+  it('opens a paper the team finished on its labels, for a lead, and labels it from there', async () => {
+    pool.lead = true
+    pool.papers[0] = { ...paper('a1', 'Paper A'), team_judged: 1, labelers: ['Somchai'] }
+    try {
+      renderApp()
+      fireEvent.click(await screen.findByRole('button', { name: 'Paper A (View labels)' }, { timeout: 5000 }))
+      expect(await screen.findByRole('heading', { name: 'Labelers disagree (1)' })).toBeInTheDocument()
+      expect(new URLSearchParams(window.location.search).get('labels')).toBe('a1')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Back to papers' }))
+      expect(await screen.findByRole('heading', { name: 'Label data' })).toBeInTheDocument()
+      expect(window.location.search).toBe('')
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Paper A (View labels)' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Label it yourself' }))
+      expect(await screen.findByText('Method Y improves recall.')).toBeInTheDocument()
+      const params = new URLSearchParams(window.location.search)
+      expect([params.get('analysis'), params.get('labels')]).toEqual(['a1', null])
+    } finally {
+      pool.lead = false
+      pool.papers[0] = paper('a1', 'Paper A')
+    }
+  })
+
+  it("leaves a paper's labels from the sidebar", async () => {
+    renderApp('?labels=a1')
+    expect(await screen.findByRole('heading', { name: 'Paper A' })).toBeInTheDocument()
+    fireEvent.click(within(sidebar()).getByRole('button', { name: 'Blind checks' }))
+    expect(await screen.findByRole('heading', { name: 'Your blind checks (1)' })).toBeInTheDocument()
+    expect(window.location.search).toBe('?tab=blind')
   })
 
   it('opens on the Blind checks tab when the address asks for it, and opens a paper from there', async () => {

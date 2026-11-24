@@ -2417,3 +2417,203 @@ def test_an_account_off_the_team_list_cannot_use_the_labeler(api, monkeypatch):
     response = TestClient(app).get("/labeling/status", headers={"authorization": "Bearer token"})
 
     assert response.status_code == 403
+
+
+def save_as(client, app, name, evidence=None, status="accepted", rationale=""):
+    """Save claim 0 as `name`: its status and, unless rejected, a level for Ref B."""
+    app.dependency_overrides[labeling.annotator] = lambda: name
+    body = {"claims": [{"claim_id": CLAIM_0, "origin": "extracted", "status": status, "claim": "x"}]}
+    if evidence is not None:
+        body["labels"] = [
+            {
+                "claim_id": CLAIM_0,
+                "reference_id": REF_B,
+                "evidence": evidence,
+                "rationale": rationale,
+                "confidence": "high",
+            }
+        ]
+    assert client.post("/labeling/sessions/a1/save", json=body).status_code == 200
+
+
+def view_as(client, app, name, lead=False):
+    app.dependency_overrides[labeling.annotator] = lambda: name
+    app.dependency_overrides[labeling.is_lead] = lambda: lead
+    return client.get("/labeling/compare/a1")
+
+
+def test_compare_puts_the_viewers_verdict_first_and_flags_a_disagreement(api):
+    client, _, app = api
+    save_as(client, app, "wittawat", 3, rationale="partly")
+    save_as(client, app, "aye", 4)
+    got = view_as(client, app, "aye").json()
+    assert (got["paper_id"], got["title"], got["labelers"]) == (
+        "paperA-0123456789ab",
+        "Paper A",
+        ["aye", "wittawat"],
+    )
+    [pair] = got["pairs"]
+    assert (pair["claim"], pair["reference_title"], pair["agree"], pair["notes"]) == (
+        "Method Y improves recall.",
+        "Ref B",
+        False,
+        [],
+    )
+    assert pair["verdicts"] == [
+        {"labeler": "aye", "evidence": 4, "confidence": "high", "rationale": "", "claim_status": "accepted"},
+        {
+            "labeler": "wittawat",
+            "evidence": 3,
+            "confidence": "high",
+            "rationale": "partly",
+            "claim_status": "accepted",
+        },
+    ]
+    assert "ai_reviewed" not in pair["verdicts"][0]
+
+
+def test_compare_is_refused_before_saving_and_open_to_a_lead(api):
+    client, _, app = api
+    save_as(client, app, "wittawat", 3)
+    assert view_as(client, app, "aye").status_code == 403
+    assert view_as(client, app, "lead", lead=True).json()["pairs"][0]["verdicts"][0]["labeler"] == "wittawat"
+
+
+def test_compare_hides_the_pairs_the_viewer_has_not_judged(api):
+    # A blind labeler who saved one pair must not see the others' levels on the rest.
+    client, db, app = api
+    save_as(client, app, "wittawat", 3)
+    db.append(
+        "labels",
+        [
+            {
+                "annotator": "wittawat",
+                "annotator_id": "wittawat",
+                "paper_id": "paperA-0123456789ab",
+                "claim_id": "paperA-0123456789ab#1",
+                "reference_id": REF_B,
+                "evidence": "2",
+                "claim": "Y is fast.",
+            }
+        ],
+    )
+    save_as(client, app, "aye", 3)
+    assert [p["claim_id"] for p in view_as(client, app, "aye").json()["pairs"]] == [CLAIM_0]
+    lead_pairs = view_as(client, app, "lead", lead=True).json()["pairs"]
+    # Agreement before a pair one person labeled; the lead labeled neither.
+    assert [(p["claim_id"], p["agree"]) for p in lead_pairs] == [
+        (CLAIM_0, True),
+        ("paperA-0123456789ab#1", False),
+    ]
+
+
+def test_a_rejected_claim_disagrees_with_a_level_and_drops_its_old_label(api):
+    client, _, app = api
+    save_as(client, app, "wittawat", 3)
+    save_as(client, app, "aye", 2)
+    save_as(client, app, "aye", status="rejected")  # her earlier level 2 no longer counts
+    [pair] = view_as(client, app, "aye").json()["pairs"]
+    assert pair["agree"] is False
+    assert pair["verdicts"][0] == {
+        "labeler": "aye",
+        "evidence": None,
+        "confidence": "",
+        "rationale": "",
+        "claim_status": "rejected",
+    }
+
+
+def test_compare_orders_disagreements_first_and_names_a_hand_added_claim(api):
+    client, db, app = api
+    added = "paperA-0123456789ab#h-abc123"
+    rows = [
+        {
+            "annotator": who,
+            "annotator_id": who,
+            "paper_id": "paperA-0123456789ab",
+            "claim_id": cid,
+            "reference_id": REF_B,
+            "evidence": level,
+            "claim": text,
+        }
+        for who, cid, level, text in [
+            ("aye", CLAIM_0, "3", ""),
+            ("wittawat", CLAIM_0, "3", ""),
+            ("aye", added, "1", "A claim typed by hand."),
+            ("wittawat", added, "2", ""),
+        ]
+    ]
+    db.append("labels", rows)
+    pairs = view_as(client, app, "aye").json()["pairs"]
+    assert [(p["claim_id"], p["agree"], p["claim"]) for p in pairs] == [
+        (added, False, "A claim typed by hand."),
+        (CLAIM_0, True, "Method Y improves recall."),
+    ]
+
+
+def test_a_note_is_kept_on_a_pair_and_comes_back_in_order(api):
+    client, db, app = api
+    save_as(client, app, "wittawat", 3)
+    save_as(client, app, "aye", 4)
+    note = {"claim_id": CLAIM_0, "reference_id": REF_B, "note": "The passage only says recall rose."}
+    first = client.post("/labeling/compare/a1/notes", json=note).json()
+    assert (first["author"], first["note"]) == ("aye", note["note"])
+    db.tabs["compare_notes"].insert(
+        0, {**db.tabs["compare_notes"][0], "ts": "2000-01-01T00:00:00+00:00", "note": "older"}
+    )
+    [pair] = view_as(client, app, "wittawat").json()["pairs"]
+    assert [n["note"] for n in pair["notes"]] == ["older", note["note"]]
+    assert db.tabs["labels"] and "compare_notes" not in labeling.TABS
+
+
+def test_a_note_needs_a_pair_the_caller_can_see(api):
+    client, db, app = api
+    save_as(client, app, "wittawat", 3)
+    db.append(
+        "labels",
+        [
+            {
+                "annotator": "wittawat",
+                "annotator_id": "wittawat",
+                "paper_id": "paperA-0123456789ab",
+                "claim_id": "paperA-0123456789ab#1",
+                "reference_id": REF_B,
+                "evidence": "2",
+            }
+        ],
+    )
+    save_as(client, app, "aye", 3)
+    app.dependency_overrides[labeling.is_lead] = lambda: False
+    hidden = {"claim_id": "paperA-0123456789ab#1", "reference_id": REF_B, "note": "x"}
+    assert client.post("/labeling/compare/a1/notes", json=hidden).status_code == 404
+    unknown = {"claim_id": CLAIM_0, "reference_id": "nope", "note": "x"}
+    assert client.post("/labeling/compare/a1/notes", json=unknown).status_code == 404
+    app.dependency_overrides[labeling.annotator] = lambda: "stranger"
+    app.dependency_overrides[labeling.is_lead] = lambda: False
+    assert client.post("/labeling/compare/a1/notes", json=hidden).status_code == 403
+    app.dependency_overrides[labeling.is_lead] = lambda: True
+    assert client.post("/labeling/compare/a1/notes", json=hidden).status_code == 200
+    assert db.tabs["compare_notes"][-1]["annotator_id"] == "stranger"
+
+
+def test_a_lead_on_their_own_blind_check_compares_like_anyone_else(api, monkeypatch):
+    client, db, app = _blind_round(api, monkeypatch)
+    db.append(
+        "labels",
+        [
+            {
+                "annotator": "chanya",
+                "annotator_id": "chanya",
+                "paper_id": "paperA-0123456789ab",
+                "claim_id": "paperA-0123456789ab#1",
+                "reference_id": REF_B,
+                "evidence": "2",
+            }
+        ],
+    )
+    assert view_as(client, app, "somchai", lead=True).status_code == 403
+    save_as(client, app, "somchai", 4)
+    assert [p["claim_id"] for p in view_as(client, app, "somchai", lead=True).json()["pairs"]] == [CLAIM_0]
+    hidden = {"claim_id": "paperA-0123456789ab#1", "reference_id": REF_B, "note": "x"}
+    assert client.post("/labeling/compare/a1/notes", json=hidden).status_code == 404
+    assert len(view_as(client, app, "chanya", lead=True).json()["pairs"]) == 2  # not blind for chanya

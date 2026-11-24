@@ -1,5 +1,5 @@
 """DOCLING_PARALLEL bounds concurrent Docling conversions: each one holds about 2 GB of
-models, and Cloud Run gateway instances were killed for using too much memory on uploaded
+models, and gateway instances could be OOM-killed from loading too much memory on uploaded
 papers. figures.convert() must never let more than DOCLING_PARALLEL calls run at once, and
 claims._pdf_to_text must ask for the same converter settings as figures.paper_media so only
 one Docling model set per OCR setting stays loaded.

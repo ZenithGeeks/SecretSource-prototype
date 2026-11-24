@@ -1,6 +1,6 @@
 apiVersion: 1
 
-# Operations alerts for the RQ worker, Redis Cloud and the Cloud Run services, sent to Discord.
+# Operations alerts for the RQ worker and Redis Cloud, sent to Discord.
 # The webhook comes from GRAFANA_DISCORD_WEBHOOK_URL in ss-core's .env (docker-compose.yml passes
 # it to Grafana). The disk alert in disk.yml goes through the same policy.
 contactPoints:
@@ -21,6 +21,17 @@ policies:
     group_wait: 30s
     group_interval: 5m
     repeat_interval: 4h
+
+# Remove previously provisioned rules from existing Grafana volumes.
+deleteRules:
+  - orgId: 1
+    uid: ops-gpu-billed
+  - orgId: 1
+    uid: ops-service-scaled-out
+  - orgId: 1
+    uid: ops-service-5xx
+  - orgId: 1
+    uid: ops-gateway-never-idle
 
 groups:
   - orgId: 1
@@ -177,175 +188,3 @@ groups:
               type: threshold
               expression: B
               conditions: [{evaluator: {type: gt, params: [0.5]}}]
-
-  - orgId: 1
-    name: cloud-run
-    folder: Operations
-    interval: 5m
-    rules:
-      - uid: ops-gpu-billed
-        title: ColPali GPU billed for most of the last hour
-        condition: C
-        for: 30m
-        # ColPali at zero instances reports no billed time, so no data.
-        noDataState: OK
-        execErrState: Error
-        labels: {severity: critical}
-        annotations:
-          summary: "ColPali averaged {{ humanize $values.D.Value }} instances over the last hour (~$1.71/h each)."
-          description: >-
-            Run PROJECT=gcp-edu-471706 ./deploy/gpu-guard.sh check. If it says PINNED, set it back:
-            gcloud run services update colpali --region asia-southeast1 --scaling=auto --min=0.
-            Otherwise something keeps calling it: group its request log by user agent and IP.
-        data:
-          - refId: A
-            relativeTimeRange: {from: 3600, to: 0}
-            datasourceUid: gcp-cloud-monitoring
-            model:
-              refId: A
-              queryType: timeSeriesList
-              timeSeriesList:
-                projectName: gcp-edu-471706
-                filters: [metric.type, "=", run.googleapis.com/container/billable_instance_time, AND, resource.label.service_name, "=", colpali]
-                perSeriesAligner: ALIGN_SUM
-                alignmentPeriod: "3600s"
-                crossSeriesReducer: REDUCE_SUM
-          - refId: B
-            datasourceUid: __expr__
-            model: {refId: B, type: reduce, expression: A, reducer: last}
-          # Billed seconds in the window over the window length: the average number of instances.
-          # billable_instance_time sums every revision's real seconds once; averaging instance_count
-          # per revision and adding the averages counted a deploy's two revisions twice.
-          - refId: D
-            datasourceUid: __expr__
-            model: {refId: D, type: math, expression: "$B / 3600"}
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              refId: C
-              type: threshold
-              expression: D
-              conditions: [{evaluator: {type: gt, params: [0.83]}}]
-
-      - uid: ops-service-scaled-out
-        title: A Cloud Run service runs more instances than usual
-        condition: C
-        for: 30m
-        noDataState: OK
-        execErrState: Error
-        labels: {severity: warning}
-        annotations:
-          summary: '{{ index $labels "resource.label.service_name" }} averaged {{ humanize $values.D.Value }} instances over the last hour.'
-          description: >-
-            colbert and grobid normally run 1 instance each. The gateway is capped at 1 and has its own rule (ops-gateway-never-idle).
-            More instances cost more for every hour they run. Check the Operations dashboard's
-            Cost row and the service's request rate.
-        data:
-          - refId: A
-            relativeTimeRange: {from: 3600, to: 0}
-            datasourceUid: gcp-cloud-monitoring
-            model:
-              refId: A
-              queryType: timeSeriesList
-              timeSeriesList:
-                projectName: gcp-edu-471706
-                filters: [metric.type, "=", run.googleapis.com/container/billable_instance_time, AND, resource.label.service_name, "=~", "colbert|grobid"]
-                perSeriesAligner: ALIGN_SUM
-                alignmentPeriod: "3600s"
-                crossSeriesReducer: REDUCE_SUM
-                groupBys: [resource.label.service_name]
-          - refId: B
-            datasourceUid: __expr__
-            model: {refId: B, type: reduce, expression: A, reducer: last}
-          # Billed seconds in the window over the window length: the average number of instances.
-          # billable_instance_time sums every revision's real seconds once; averaging instance_count
-          # per revision and adding the averages counted a deploy's two revisions twice.
-          - refId: D
-            datasourceUid: __expr__
-            model: {refId: D, type: math, expression: "$B / 3600"}
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              refId: C
-              type: threshold
-              expression: D
-              conditions: [{evaluator: {type: gt, params: [1.5]}}]
-
-      - uid: ops-service-5xx
-        title: A Cloud Run service is returning 5xx errors
-        condition: C
-        for: 0m
-        noDataState: OK
-        execErrState: Error
-        labels: {severity: warning}
-        annotations:
-          summary: '{{ index $labels "resource.label.service_name" }} returned {{ humanize $values.B.Value }} 5xx responses in 15 minutes.'
-          description: >-
-            Read the service's Cloud Run logs for the failing requests:
-            gcloud logging read 'resource.labels.service_name="<service>" AND httpRequest.status>=500' --limit 20.
-        data:
-          - refId: A
-            relativeTimeRange: {from: 900, to: 0}
-            datasourceUid: gcp-cloud-monitoring
-            model:
-              refId: A
-              queryType: timeSeriesList
-              timeSeriesList:
-                projectName: gcp-edu-471706
-                filters: [metric.type, "=", run.googleapis.com/request_count, AND, metric.label.response_code_class, "=", 5xx]
-                perSeriesAligner: ALIGN_DELTA
-                alignmentPeriod: "900s"
-                crossSeriesReducer: REDUCE_SUM
-                groupBys: [resource.label.service_name]
-          - refId: B
-            datasourceUid: __expr__
-            model: {refId: B, type: reduce, expression: A, reducer: sum}
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              refId: C
-              type: threshold
-              expression: B
-              conditions: [{evaluator: {type: gt, params: [5]}}]
-      - uid: ops-gateway-never-idle
-        title: The gateway has not scaled to zero in 6 hours
-        condition: C
-        for: 0m
-        noDataState: OK
-        execErrState: Error
-        labels: {severity: warning}
-        annotations:
-          summary: 'The gateway averaged {{ humanize $values.D.Value }} instances over the last 6 hours.'
-          description: >-
-            The gateway scales to zero when idle (#345); an always-on instance costs about $9 a day.
-            Something keeps it awake: group its request log by user agent and path, or check whether
-            its scaling was pinned again (PROJECT=gcp-edu-471706 ./deploy/gpu-guard.sh check).
-        data:
-          - refId: A
-            relativeTimeRange: {from: 21600, to: 0}
-            datasourceUid: gcp-cloud-monitoring
-            model:
-              refId: A
-              queryType: timeSeriesList
-              timeSeriesList:
-                projectName: gcp-edu-471706
-                filters: [metric.type, "=", run.googleapis.com/container/billable_instance_time, AND, resource.label.service_name, "=", gateway]
-                perSeriesAligner: ALIGN_SUM
-                alignmentPeriod: "21600s"
-                crossSeriesReducer: REDUCE_SUM
-          - refId: B
-            datasourceUid: __expr__
-            model: {refId: B, type: reduce, expression: A, reducer: last}
-          # Billed seconds in the window over the window length: the average number of instances.
-          # billable_instance_time sums every revision's real seconds once; averaging instance_count
-          # per revision and adding the averages counted a deploy's two revisions twice.
-          - refId: D
-            datasourceUid: __expr__
-            model: {refId: D, type: math, expression: "$B / 21600"}
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              refId: C
-              type: threshold
-              expression: D
-              conditions: [{evaluator: {type: gt, params: [0.9]}}]

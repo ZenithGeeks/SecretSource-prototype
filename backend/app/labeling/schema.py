@@ -74,7 +74,10 @@ ASSIGNMENTS = ["ts", "annotator", "kind", "key", "topic", "owner", "doi", "venue
 # One row per AI review of a saved claim, with what it said (JSON). Not in TABS: the page never
 # shows it again; it is there so an eval can see which labels the AI may have swayed.
 REVIEWS = ["ts", "annotator", "annotator_id", "paper_id", "claim_id", "findings"]
-ALL_TABS = {**TABS, "assignments": ASSIGNMENTS, "reviews": REVIEWS}
+# One row per note on a (claim, reference paper) on the Compare screen. Not in TABS: notes are a
+# discussion between labelers, not labels, so the session and the export leave them out.
+COMPARE_NOTES = ["ts", "annotator", "annotator_id", "paper_id", "claim_id", "reference_id", "note"]
+ALL_TABS = {**TABS, "assignments": ASSIGNMENTS, "reviews": REVIEWS, "compare_notes": COMPARE_NOTES}
 
 # What makes two rows "the same" for the purpose of replacing one with a later one.
 KEYS: dict[str, tuple[str, ...]] = {
@@ -168,6 +171,12 @@ class LabelIn(BaseModel):
     # "" is a level the labeler saved before choosing how sure they were. Leaving the field out
     # still stores "medium", which is what a client from before unset confidence sent.
     confidence: Literal["low", "medium", "high", ""] = "medium"
+
+
+class CompareNoteIn(BaseModel):
+    claim_id: str = Field(pattern=CLAIM_ID)
+    reference_id: str = Field(max_length=200)
+    note: str = Field(min_length=1, max_length=2000)
 
 
 class ReviewIn(BaseModel):

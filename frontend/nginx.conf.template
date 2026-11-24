@@ -1,5 +1,5 @@
 # ${GATEWAY_URL} and ${NGINX_RESOLVER} are substituted at container start (nginx does this
-# for /etc/nginx/templates/*.template), so one image runs in compose and on Cloud Run.
+# for /etc/nginx/templates/*.template), so one image runs in any environment.
 # nginx's own $uri / $host survive: envsubst only replaces names that exist in the environment.
 
 # Log the path without its query string. The web app sends tokens only in headers, but a query

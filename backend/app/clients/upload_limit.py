@@ -1,12 +1,13 @@
-"""Limits of the services that run on Cloud Run, and how a request stays under them."""
+"""HTTP upload size limits for upstream PDF services, and how a request stays under them."""
 
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-# Cloud Run refuses a request body over 32 MiB with HTTP 413. Images make up most of a large
-# PDF: DiffiT's 43.4 MiB arXiv PDF is 0.7 MiB without them, with the same text on all 31 pages.
+# Keep multipart uploads under 32 MiB so upstream HTTP proxies/services do not reject large PDFs.
+# Images make up most of a large PDF: DiffiT's 43.4 MiB arXiv PDF is 0.7 MiB without them, with
+# the same text on all 31 pages.
 UPLOAD_LIMIT_BYTES = 32 * 2**20
 # GROBID treats an image area as a figure. With the images deleted it reads the text drawn over
 # them as body text and references, so it gets the images resampled to about this resolution.

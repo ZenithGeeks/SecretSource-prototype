@@ -38,10 +38,10 @@ type Verdict = {
 // The same words and colours as the researcher's Ask stamps, with an icon so colour is not the only cue.
 const VERDICTS: Record<StatementVerdict | 'checking', Verdict> = {
   supports: { label: 'Backed', tone: 'supports', icon: Check },
-  insufficient: { label: 'Not backed', tone: 'insufficient', icon: CircleAlert },
+  insufficient: { label: 'Silent', tone: 'insufficient', icon: CircleAlert },
   refutes: { label: 'Contradicted', tone: 'refutes', icon: X },
-  unchecked: { label: "Can't check", tone: 'neutral', icon: CircleHelp },
-  error: { label: "Can't check", tone: 'neutral', icon: CircleHelp },
+  unchecked: { label: 'Not checked', tone: 'neutral', icon: CircleHelp },
+  error: { label: 'Not checked', tone: 'neutral', icon: CircleHelp },
   checking: { label: 'Checking…', tone: 'neutral', icon: Loader2 },
 }
 

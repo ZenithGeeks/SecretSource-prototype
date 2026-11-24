@@ -227,7 +227,7 @@ describe('a question', () => {
     expect(screen.getByText('Page 3')).toBeInTheDocument()
     expect(screen.getByText('Backed')).toBeInTheDocument()
     expect(screen.getByText('Contradicted')).toBeInTheDocument()
-    expect(screen.getByText("Can't check")).toBeInTheDocument() // the third never got a verdict
+    expect(screen.getByText('Not checked')).toBeInTheDocument() // the third never got a verdict
     expect(screen.getByText('“very fast”')).toBeInTheDocument()
     expect(screen.getByText('It costs a lot.')).toBeInTheDocument()
   })

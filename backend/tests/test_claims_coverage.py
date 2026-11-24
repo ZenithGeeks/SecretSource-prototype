@@ -588,12 +588,25 @@ def test_claims_within_the_limit_or_with_no_limit_are_all_kept(limit):
     assert claims._most_checkable(found, limit) == found
 
 
-def test_the_most_traceable_claims_are_kept_in_the_papers_order():
+def test_the_first_claims_in_paper_order_are_kept():
     found = [_claim("zero"), _claim("one", [{}, {}]), _claim("two", [{}]), _claim("three")]
 
     kept = claims._most_checkable(found, 2)
 
-    assert [claim["claim"] for claim in kept] == ["one", "two"]
+    # Paper order, not citation count: the uncited "zero" is kept and the two-citation "one"
+    # no longer jumps the queue.
+    assert [claim["claim"] for claim in kept] == ["zero", "one"]
+
+
+def test_single_citation_claims_keep_their_share_under_the_cap():
+    # Two of every three claims cite a single work, as in the uncapped papers (SCRUM-551).
+    found = [_claim(f"claim {n}", [{}] if n % 3 else [{}, {}]) for n in range(30)]
+    share = sum(len(claim["citations"]) == 1 for claim in found) / len(found)
+
+    kept = claims._most_checkable(found, 20)
+    kept_share = sum(len(claim["citations"]) == 1 for claim in kept) / len(kept)
+
+    assert abs(kept_share - share) <= 0.1
 
 
 # --- extract_claims_with_citations ---------------------------------------------------

@@ -166,7 +166,7 @@ def test_a_reference_the_paper_does_not_have_is_404(api):
 
 def test_an_oversized_file_is_refused_and_not_saved(api, monkeypatch, tmp_path):
     client, analysis, _ = api
-    monkeypatch.setattr(main.uploads, "MAX_UPLOAD_BYTES", 10)
+    monkeypatch.setattr(main, "MAX_UPLOAD_BYTES", 10)
     assert upload(client, content=b"%PDF-1.4 " + b"x" * 10).status_code == 413
     assert "pdfs" not in analysis
     assert [p for p in tmp_path.iterdir() if p.suffix == ".pdf"] == []

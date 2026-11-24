@@ -20,9 +20,7 @@ A PR job can therefore at most redeploy main. It cannot deploy its own code.
 ## What a deploy does
 
 1. Unpacks the commit into the worker directory and builds the image. The code is copied
-   into the image at build time, so the running worker is not affected yet. If
-   `services/status-bot/` changed since the last deploy, it also rebuilds and restarts the
-   Discord status bot here. A bot that fails to deploy is reported, and the worker deploy goes on.
+   into the image at build time, so the running worker is not affected yet.
 2. Waits up to 45 minutes for the worker to have no job.
 3. Copies `secretsource-worker-worker:deployed`, the image the worker last started on, to
    `:pre-<sha>`, then restarts the worker on the new image. The first deploy has no
@@ -36,6 +34,19 @@ the host run `sudo /usr/local/bin/deploy-worker <sha>`.
 To roll back:
 `sudo docker tag secretsource-worker-worker:pre-<sha> secretsource-worker-worker:latest`, then
 `sudo sh -c "cd /var/lib/docker/secretsource-worker && docker compose up -d --no-deps --no-build worker"`.
+
+### One-time cleanup after removing `status-bot`
+
+`deploy-worker.sh` only recreates `worker` without `--remove-orphans`, so an existing
+`status-bot` container from before its removal stays running with `restart: unless-stopped`.
+After rolling out this change, verify the container identity and remove only that container:
+
+```bash
+sudo docker ps -a \
+  --filter "label=com.docker.compose.project=secretsource-worker" \
+  --filter "label=com.docker.compose.service=status-bot"
+sudo docker rm -f secretsource-worker-status-bot-1
+```
 
 ## Install
 

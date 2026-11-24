@@ -1,0 +1,55 @@
+# Enforces Conventional Commit PR titles and the standard PR body sections from
+# .github/PULL_REQUEST_TEMPLATE.md on every pull request.
+name: pr-lint
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check PR title and template sections
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 - << 'EOF'
+          import os
+          import re
+          import sys
+
+          title = os.environ.get("PR_TITLE", "").strip()
+          body = os.environ.get("PR_BODY", "")
+
+          title_re = re.compile(
+              r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([A-Za-z0-9._-]+\))?!?: .{3,}$"
+          )
+          errors = []
+          if not title_re.match(title):
+              errors.append(
+                  f"PR title {title!r} must use Conventional Commits: "
+                  "<type>(<scope>): <description> or <type>: <description> "
+                  "(e.g. 'feat(SCRUM-123): add feature' or 'fix: resolve bug')."
+              )
+
+          has_summary = bool(re.search(r"^##\s+(Summary|What changed)\b", body, re.MULTILINE))
+          has_verify = bool(re.search(r"^##\s+(Verification|Verified)\b", body, re.MULTILINE))
+          if not (has_summary and has_verify):
+              errors.append(
+                  "PR description must include '## Summary' and '## Verification' sections "
+                  "(see .github/PULL_REQUEST_TEMPLATE.md)."
+              )
+
+          if errors:
+              for err in errors:
+                  print(f"::error::{err}")
+              sys.exit(1)
+
+          print(f"PR title and template OK: {title}")
+          EOF
