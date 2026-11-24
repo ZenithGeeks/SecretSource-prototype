@@ -257,7 +257,7 @@ export function PassageList({
     const reference = references.find((r) => r.reference_id === id)
     return (reference && byline(reference)) || labelOf(id)
   }
-  const refIds = referencesOf(claim, draft)
+  const refIds = referencesOf(claim, draft, references)
   const [pickedRef, setPickedRef] = useState<string | null>(null)
   const focusedRefId = focus
     ? refIds.find(
@@ -284,14 +284,16 @@ export function PassageList({
     /* v8 ignore next -- @preserve */
     if (firstAdded) {
       onFocus({ file: fileOf(id), passage: firstAdded.passage, page: firstAdded.page, key: `added:${firstAdded.reference_id}:${firstAdded.passage}` })
+      return
     }
+    onFocus({ file: fileOf(id), passage: '', page: 1, key: `ref:${id}` })
   }
 
   return (
     <section aria-labelledby={refIds.length > 0 ? 'passages-title' : undefined} aria-label={refIds.length > 0 ? undefined : 'Passages'} className="flex flex-col gap-3">
       {refIds.length > 0 && (
         <h3 id="passages-title" className="font-serif text-base font-semibold text-ink">
-          {refIds.length === 1 ? `Passages found in ${shortNameOf(refIds[0])}` : 'Passages found in the cited papers'}
+          {refIds.length === 1 ? `Evidence for ${shortNameOf(refIds[0])}` : 'Evidence from the cited papers'}
         </h3>
       )}
       {search === 'searching' && (

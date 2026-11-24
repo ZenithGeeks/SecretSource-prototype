@@ -190,7 +190,10 @@ describe('the Analyses list', () => {
 
   it('keeps only the papers with a contradicted claim when Source contradicts is picked', () => {
     wrap(<AnalysisList analyses={list} onOpen={vi.fn()} />)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '10.' } })
+    expect(screen.getByText('4 of 4 papers')).toBeInTheDocument()
     pickStanding('Source contradicts')
+    expect(screen.getByText('1 of 4 papers')).toBeInTheDocument()
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
     expect(screen.getByRole('button', { name: /Dense retrieval/ })).toBeInTheDocument()
     pickStanding('Source contradicts')

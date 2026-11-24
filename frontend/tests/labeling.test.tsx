@@ -182,7 +182,7 @@ describe('what is left to decide', () => {
       labels: { refB: { evidence: 3, rationale: '', confidence: null } },
     })
     expect(remaining(claim, leveled, refs)).toEqual(['Give Silva, Lee · 2021 a confidence'])
-    expect(buildSave(claim, leveled).labels[0].confidence).toBe('')
+    expect(buildSave(claim, leveled, refs).labels[0].confidence).toBe('')
     expect(readConfidence('')).toBeNull()
     expect(readConfidence(undefined)).toBe('medium')
     expect(readConfidence('high')).toBe('high')
@@ -217,12 +217,12 @@ describe('what is left to decide', () => {
     for (const incomplete of [rejected, withLabel(1, '  '), withLabel(2, 'Checked the results')]) {
       expect(referenceFinished(claim, incomplete, 'refB')).toBe(false)
       expect(isDone(claim, incomplete, refs)).toBe(false)
-      expect(buildSave(claim, incomplete).labels).toEqual([])
+      expect(buildSave(claim, incomplete, refs).labels).toEqual([])
     }
     const finished = withLabel(1, '  Looked for recall in the results and tables. ')
     expect(referenceFinished(claim, finished, 'refB')).toBe(true)
     expect(isDone(claim, finished, refs)).toBe(true)
-    expect(buildSave(claim, finished).labels).toEqual([
+    expect(buildSave(claim, finished, refs).labels).toEqual([
       { claim_id: claim.claim_id, reference_id: 'refB', evidence: 1,
         rationale: 'Looked for recall in the results and tables.', spans: [], confidence: 'medium' },
     ])
@@ -305,7 +305,7 @@ describe('what is saved', () => {
   })
 
   it('sends judged passages by id only, plus the label with the relevant passages as its quotes', () => {
-    const save = buildSave(claim, d)
+    const save = buildSave(claim, d, refs)
     expect(save.claims[0]).toMatchObject({ status: 'edited', claim_edited: 'Y raises recall.', origin: 'extracted' })
     expect(save.candidates.filter((c) => c.origin === 'retrieved')).toEqual([
       expect.objectContaining({ cand_id: 'c1', status: 'relevant', passage: '' }),
@@ -319,14 +319,14 @@ describe('what is saved', () => {
   })
 
   it('saves only the claim when it is rejected', () => {
-    const save = buildSave(claim, { ...d, status: 'rejected' })
+    const save = buildSave(claim, { ...d, status: 'rejected' }, refs)
     expect([save.claims.length, save.candidates.length, save.labels.length]).toEqual([1, 0, 0])
   })
 
   it('retracts a passage that was added, saved, then removed', () => {
     const before = d
     const after = { ...d, added: [] }
-    expect(buildSave(claim, after, before).candidates.at(-1)).toMatchObject({
+    expect(buildSave(claim, after, refs, before).candidates.at(-1)).toMatchObject({
       origin: 'human_added', status: 'rejected', passage: 'table 2 shows it',
     })
   })
@@ -1128,7 +1128,7 @@ describe('claims added by hand earlier', () => {
       },
     }).filter((c) => c.origin === 'human_added')
     expect(added).toMatchObject({ claim: 'X beats Y', sentence: 'X beats Y on Z.', page: 6, source: null })
-    expect(buildSave(added, judged({ status: 'accepted' })).claims[0]).toMatchObject({ sentence: 'X beats Y on Z.', page: 6 })
+    expect(buildSave(added, judged({ status: 'accepted' }), refs).claims[0]).toMatchObject({ sentence: 'X beats Y on Z.', page: 6 })
   })
 
   it('keep the passages the search found for them that were judged, with the judgment', () => {

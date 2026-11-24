@@ -694,9 +694,13 @@ export function referenceSummary(
   return parts.join(' · ')
 }
 
-/** The references this claim is read against: where retrieval looked, plus ones the person added. */
-export function referencesOf(claim: WorkClaim, draft: Draft): string[] {
-  return [...new Set([...claim.candidates.map((c) => c.reference_id), ...draft.added.map((a) => a.reference_id)])]
+/** Include readable citations even when retrieval found nothing, as well as references with passages. */
+export function referencesOf(claim: WorkClaim, draft: Draft, references: Reference[]): string[] {
+  return [...new Set([
+    ...claim.candidates.map((c) => c.reference_id),
+    ...draft.added.map((a) => a.reference_id),
+    ...citedReferences(claim, references).filter((r) => r.file).map((r) => r.reference_id),
+  ])]
 }
 
 /** The passages a person called relevant for one reference: the quotes behind its label. */
@@ -881,7 +885,7 @@ export function remaining(claim: WorkClaim, draft: Draft, references: Reference[
   if (editNotReworded(claim, draft)) left.push(REWORD)
   const unjudged = claim.candidates.filter((c) => !draft.cands[c.cand_id]).length
   if (unjudged) left.push(`${unjudged} passage${unjudged === 1 ? '' : 's'} not judged`)
-  for (const id of referencesOf(claim, draft)) {
+  for (const id of referencesOf(claim, draft, references)) {
     const ref = references.find((r) => r.reference_id === id)
     const title = ref ? printedRef(ref, markers) || byline(ref) || ref.label : id
     const label = draft.labels[id]
@@ -972,7 +976,7 @@ const sameAdded = (a: AddedPassage, b: AddedPassage) => a.reference_id === b.ref
  * `saved` is the draft as last saved, so a passage added then removed is retracted in the table
  * (rows are never deleted there, a later row replaces the earlier one).
  */
-export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
+export function buildSave(claim: WorkClaim, draft: Draft, references: Reference[], saved?: Draft): Save {
   const save: Save = { claims: [], candidates: [], labels: [] }
   if (!draft.status) return save
   save.claims.push({
@@ -1038,7 +1042,7 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
       passage: gone.passage,
     })
   }
-  for (const id of referencesOf(claim, draft)) {
+  for (const id of referencesOf(claim, draft, references)) {
     const label = draft.labels[id]
     if (!label?.evidence) continue
     const spans = relevantPassages(claim, draft, id).slice(0, 10)

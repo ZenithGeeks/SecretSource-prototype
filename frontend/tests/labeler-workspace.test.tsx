@@ -982,6 +982,42 @@ describe('a claim with no passages', () => {
     expect(screen.queryByRole('region', { name: /^No reference to read/ })).toBeNull()
   })
 
+  it('grades readable citations with no retrieved passages and saves both levels and reasons', async () => {
+    const session = makeSession({
+      claims: [bare({ cited: ['b8', 'b4', 'b23'], unchecked: [TOP500] })],
+      unread: [{ reference_id: 'unread-b23', ref: 'b23', label: 'Top500', file: '' }],
+    })
+    gateway.session = session
+    await open()
+    key('k')
+
+    const tabs = within(screen.getByRole('tablist', { name: 'References for this claim' }))
+    expect(tabs.getAllByRole('tab')).toHaveLength(2)
+    expect(screen.getByText('Give Ref D level 1 and a search reason')).toBeInTheDocument()
+    const grade = (reason: string) => {
+      key('4')
+      expect(screen.queryByRole('radio', { name: /^4 ·/ })).not.toBeInTheDocument()
+      key('1')
+      key('h')
+      fireEvent.change(screen.getByRole('textbox', { name: /what did you look for and where/ }), {
+        target: { value: reason },
+      })
+    }
+    grade('Searched for rankings in the results.')
+    fireEvent.click(tabs.getByRole('tab', { name: /Ref B/ }))
+    expect(reference()).toBe('refB.pdf|')
+    grade('Checked the tables for GPU counts.')
+
+    key('s', { ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(gateway.posts).toHaveLength(1))
+    expect(gateway.posts[0].candidates).toEqual([])
+    expect(gateway.posts[0].labels).toEqual([
+      { claim_id: 'paperA#0', reference_id: 'refD', evidence: 1, rationale: 'Searched for rankings in the results.', spans: [], confidence: 'high' },
+      { claim_id: 'paperA#0', reference_id: 'refB', evidence: 1, rationale: 'Checked the tables for GPU counts.', spans: [], confidence: 'high' },
+    ])
+    expect(screen.getByText('1 of 1 claims finished')).toBeInTheDocument()
+  })
+
   it('goes by the markers in its sentence when the gateway is older than the list of what it cites', async () => {
     gateway.session = makeSession({ claims: [bare({ sentence: 'Six of the ten fastest are GPU systems [b8].' })] })
     await open()

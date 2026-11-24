@@ -354,11 +354,11 @@ describe('remaining', () => {
 
 describe('buildSave', () => {
   it('saves nothing for a claim not judged yet', () => {
-    expect(buildSave(claim(), emptyDraft())).toEqual({ claims: [], candidates: [], labels: [] })
+    expect(buildSave(claim(), emptyDraft(), [])).toEqual({ claims: [], candidates: [], labels: [] })
   })
 
   it('saves only the claim when it is rejected', () => {
-    const save = buildSave(claim({ source: { page: 6 } as WorkClaim['source'] }), { ...emptyDraft(), status: 'rejected', edited: 'ignored' })
+    const save = buildSave(claim({ source: { page: 6 } as WorkClaim['source'] }), { ...emptyDraft(), status: 'rejected', edited: 'ignored' }, [])
     expect(save.claims).toHaveLength(1)
     expect(save.claims[0]).toMatchObject({ claim_edited: '', page: 6 })
     expect(save.candidates).toEqual([])
@@ -366,12 +366,12 @@ describe('buildSave', () => {
 
   it('sends only ids for an extracted claim and everything shown for one added by hand', () => {
     const draft: Draft = { ...emptyDraft(), status: 'edited', edited: ' better ', cands: { c1: 'relevant' } }
-    const extracted = buildSave(claim({ candidates: [cand('c1'), cand('c2')] }), draft)
+    const extracted = buildSave(claim({ candidates: [cand('c1'), cand('c2')] }), draft, [])
     expect(extracted.claims[0]).toMatchObject({ claim_edited: 'better', page: null })
     expect(extracted.candidates).toEqual([
       { claim_id: 'p#0', reference_id: 'refB', cand_id: 'c1', origin: 'retrieved', status: 'relevant', page: null, passage: '' },
     ])
-    const byHand = buildSave(claim({ origin: 'human_added', page: 2, candidates: [cand('c1', { rank: 4, score: 7 })] }), draft)
+    const byHand = buildSave(claim({ origin: 'human_added', page: 2, candidates: [cand('c1', { rank: 4, score: 7 })] }), draft, [])
     expect(byHand.claims[0].page).toBe(2)
     expect(byHand.candidates[0]).toMatchObject({ origin: 'retrieved_added', rank: 4, score: 7, page: 1, passage: 'passage c1' })
   })
@@ -383,6 +383,7 @@ describe('buildSave', () => {
         candidates: [cand('c1'), cand('c2', { fromSearch: true, rank: 1, score: 12, page: 3, passage: 'text-to-text' })],
       }),
       draft,
+      [],
     )
     expect(save.candidates).toEqual([
       { claim_id: 'p#0', reference_id: 'refB', cand_id: 'c1', origin: 'retrieved', status: 'relevant', page: null, passage: '' },
@@ -410,7 +411,7 @@ describe('buildSave', () => {
       added: [kept],
       labels: { refB: { evidence: 2, rationale: ' ok ', confidence: 'low' }, refC: emptyLabel() },
     }
-    const save = buildSave(claim(), draft, saved)
+    const save = buildSave(claim(), draft, [], saved)
     expect(save.candidates.map((c) => [c.passage, c.status])).toEqual([
       ['kept', 'relevant'],
       ['gone', 'rejected'],

@@ -173,12 +173,12 @@ describe('the passages of a claim', () => {
   it('names the cited paper in the heading for one reference, and the cited papers for several', () => {
     const second = { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C', ref: 'b2', authors: [], year: '2022' }
     const one = setup()
-    expect(screen.getByText('Passages found in Ref B')).toBeInTheDocument()
+    expect(screen.getByText('Evidence for Ref B')).toBeInTheDocument()
     one.rerender({
       claim: claim([cand('c1'), cand('c3', { reference_id: 'refC', reference_file: 'refC.pdf' })]),
       references: [refs[0], second],
     })
-    expect(screen.getByText('Passages found in the cited papers')).toBeInTheDocument()
+    expect(screen.getByText('Evidence from the cited papers')).toBeInTheDocument()
   })
 
   it('focuses an added passage or the reference file when switching to a tab with no candidates', () => {

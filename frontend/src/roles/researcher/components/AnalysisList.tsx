@@ -133,7 +133,7 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
       <StandingKey />
       {/* Read out as the search narrows the list. */}
       <p aria-live="polite" className="sr-only">
-        {words ? `${matching.length} of ${groups.length} papers` : ''}
+        {words ? `${papers.length} of ${groups.length} papers` : ''}
       </p>
       {papers.length ? (
         <ul className="divide-y divide-border-subtle overflow-hidden rounded-2xl border border-border-subtle bg-surface">

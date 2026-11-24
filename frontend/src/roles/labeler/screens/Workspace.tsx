@@ -498,7 +498,7 @@ function Body({
     if (!claim) return
     const index = claims.findIndex((c) => c.claim_id === claim.claim_id)
     const target = saveNextTarget(claims, drafts, saved, cited, index)
-    const body = buildSave({ ...claim, source: claimSource }, draft, saved[claim.claim_id])
+    const body = buildSave({ ...claim, source: claimSource }, draft, cited, saved[claim.claim_id])
     setSaveAllError(null)
     save.mutate(body, {
       onSuccess: (rows) => {
@@ -533,7 +533,7 @@ function Body({
       // The claim on screen may have been placed in the paper by a lookup; the others keep their own source.
       const source = item.claim.claim_id === currentId ? claimSource : item.claim.source
       try {
-        await save.mutateAsync(buildSave({ ...item.claim, source }, item.draft, saved[item.claim.claim_id]))
+        await save.mutateAsync(buildSave({ ...item.claim, source }, item.draft, cited, saved[item.claim.claim_id]))
       } catch (error) {
         const fail = problem(error)
         const failed = `${claimNumbers(ready.slice(at).map((rest) => rest.number))}: ${fail.title}. ${fail.hint}`
@@ -649,7 +649,7 @@ function Body({
         const index = nextUnfinishedIndex(claims, drafts, saved, cited, position)
         if (index != null) select(claims[index].claim_id)
       }
-      else if (deciding && labelRefId && referencesOf(claim, draft).includes(labelRefId)) {
+      else if (deciding && labelRefId && referencesOf(claim, draft, cited).includes(labelRefId)) {
         const label = draft.labels[labelRefId] ?? emptyLabel()
         const refTag = referenceTag(cited.find((r) => r.reference_id === labelRefId), session.markers)
         if (['1', '2', '3', '4'].includes(key)) {
