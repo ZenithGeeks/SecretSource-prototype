@@ -10,9 +10,11 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 from app.labeling import ledger
 from app.labeling.schema import current
+from app.pipeline.sources import lookup_key
 
 log = logging.getLogger(__name__)
 TTL = 30.0
@@ -130,6 +132,32 @@ def assign(
         _cache = (0.0, [])
 
 
+def private_pdf_names(analysis: dict) -> set[str]:
+    """Uploaded references stay private even when a verdict outlives the current upload."""
+    pdfs = analysis.get("pdfs") or {}
+    names = set(pdfs.values()) | set(analysis.get("uploaded_reference_pdfs") or ())
+
+    # Old rows did not record upload history. If a reference was uploaded more than once
+    # before that history existed, its retained verdict could cite an overwritten upload.
+    seen = set()
+    replaced = set()
+    for event in analysis.get("stages") or ():
+        ref = event.get("ref")
+        if ref in pdfs and event["stage"] == "rechecking" and "attempt" not in event:
+            if ref in seen:
+                replaced.add(ref)
+            seen.add(ref)
+    if replaced:
+        for claim in analysis.get("claims", ()):
+            keys = {lookup_key(citation) for citation in claim.get("citations", ())
+                    if citation.get("ref") in replaced}
+            names.update(
+                Path(verdict["source"]).name for verdict in claim.get("verdicts", ())
+                if verdict.get("source") and verdict.get("cited") in keys
+            )
+    return names
+
+
 def pdf_names(
     get: Callable[[str], dict | None], names_of: Callable[[list[dict]], frozenset[str]]
 ) -> frozenset[str]:
@@ -139,5 +167,5 @@ def pdf_names(
     found = [row for row in (get(i) for i in pooled()) if row]
     if not found:
         return frozenset()
-    uploaded = {name for row in found for name in (row.get("pdfs") or {}).values()}
+    uploaded = {name for row in found for name in private_pdf_names(row)}
     return names_of(found) - uploaded

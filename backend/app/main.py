@@ -45,6 +45,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -244,12 +245,55 @@ def _schedule_stream(analysis_id: str) -> None:
     _open_stream(analysis_id)
 
 
+def _fail_stuck_rechecks(analysis: dict) -> bool:
+    """Record a failed stage when a detached re-check was dropped by a restart.
+
+    The re-check runs in the gateway, not on a worker, so `_resync_running` never
+    sees it. The row stays `done`, `pdfs` is set, and the last stage is `rechecking`.
+    Returns True when a stage was added, so the caller can save.
+    """
+    pending: dict[str, dict] = {}
+    for event in analysis.get("stages") or []:
+        ref = event.get("ref")
+        if not ref:
+            continue
+        if event["stage"] == "rechecking":
+            pending[ref] = event
+        elif event["stage"] in {"rechecked", "recheck-failed"} and ref in pending:
+            if event.get("attempt") == pending[ref].get("attempt"):
+                del pending[ref]
+    if not pending:
+        return False
+    now = round(time.time(), 1)
+    analysis["stages"].extend(
+        {
+            "stage": "recheck-failed",
+            "ref": ref,
+            "message": "interrupted by a restart",
+            "at": now,
+            **({"attempt": event["attempt"]} if "attempt" in event else {}),
+        }
+        for ref, event in pending.items()
+    )
+    return True
+
+
+def _save_recovered(analysis: dict) -> None:
+    """Serialize recovery with subsequent gateway writes to the same analysis."""
+    loop = _loop
+    if loop is not None and loop.is_running():
+        loop.call_soon_threadsafe(_save_soon, analysis["id"])
+    else:
+        store.save(analysis)
+
+
 def restore():
     """Load running analyses and the newest stored rows. A "running" row may belong to a job an RQ
     worker is still executing (or was, before this gateway process last exited); only mark it
     interrupted when the job itself is confirmed gone, and otherwise let the snapshot subscriber
     catch it up. Older finished rows stay in the store until ensure_owner reads that owner."""
     loaded = store.load_startup(startup_recent())
+    recovered = [row for row in loaded.values() if _fail_stuck_rechecks(row)]
     with _load_lock:
         _missing.clear()
         analyses.clear()
@@ -274,6 +318,8 @@ def restore():
                 )
             # SSE replay invariant: a stream must hold every stage already recorded.
             _open_stream(analysis["id"])
+    for analysis in recovered:
+        store.save(analysis)
 
 
 def _apply_snapshot(snapshot: dict) -> None:
@@ -756,6 +802,7 @@ def ensure_owner(user: str | None) -> None:
         return
     stored = store.load_owned(user)
     to_open: list[str] = []
+    recovered: list[dict] = []
     with _load_lock:
         if analyses.owner_loaded(user):
             return
@@ -767,8 +814,11 @@ def ensure_owner(user: str | None) -> None:
                 continue
             seen.add(analysis_id)
             stored_ids.append(analysis_id)
-            if analysis_id not in analyses and _hold(row):
-                to_open.append(analysis_id)
+            if analysis_id not in analyses:
+                if _fail_stuck_rechecks(row):
+                    recovered.append(row)
+                if _hold(row):
+                    to_open.append(analysis_id)
         memory_only = [
             row["id"]
             for row in analyses.owned_by(user)
@@ -778,18 +828,17 @@ def ensure_owner(user: str | None) -> None:
         analyses.mark_owner_loaded(user)
     for analysis_id in to_open:
         _schedule_stream(analysis_id)
+    for row in recovered:
+        _save_recovered(row)
 
 
-def lookup(analysis_id: str) -> dict | None:
-    """The analysis in memory, or that one row from the store. A loaded row is kept, so the next
-    read of it does not ask again. Nothing is loaded for an id this process has deleted, or for
-    one the store recently said was absent."""
-    # A test may swap in a plain dict. It has no owner index; don't try to build one.
-    if not hasattr(analyses, "owner_loaded"):
-        if analysis_id in _deleted:
-            return None
-        row = analyses.get(analysis_id)
-        return row if row is not None else store.load(analysis_id)
+def lookup(analysis_id: str, *, authorize: Callable[[dict], dict] | None = None) -> dict | None:
+    """Read a row by id, caching it unless a cold row needs recovery without owner authorization.
+
+    An owner route supplies its access check so a denied request cannot persist recovery or
+    publish an unrecovered row. Shared and internal reads can see a recovered view without
+    saving it or preventing the owner from recovering the row on their next request.
+    """
     with _load_lock:
         if analysis_id in _deleted:
             return None
@@ -810,15 +859,22 @@ def lookup(analysis_id: str) -> dict | None:
             if not loaded:
                 _remember_missing(analysis_id)
             return None
+        if authorize is not None:
+            authorize(loaded)
+        recovered = _fail_stuck_rechecks(loaded)
+        if recovered and authorize is None:
+            return loaded
         to_open = _hold(loaded)
         owner = loaded.get("owner")
-        if analyses.owner_loaded(owner):
+        if isinstance(analyses, AnalysisTable) and analyses.owner_loaded(owner):
             ordered = sorted(
                 analyses.owned_by(owner),
                 key=lambda item: (item.get("started") or "", item["id"]),
             )
             analyses.order_owner(owner, [item["id"] for item in ordered])
         held = analyses.get(analysis_id)
+    if recovered:
+        _save_recovered(loaded)
     if to_open:
         _schedule_stream(analysis_id)
     return held
@@ -871,13 +927,16 @@ def _owned(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
     owned by someone else, or another kind (a check's id on an analysis route) is a 404, not
     a 403, so an id does not tell anyone that it exists. The rule itself lives in
     app/ownership.py, shared with the Author role's rows."""
-    return require_owner(lookup(analysis_id), user, "analysis", kind)
+    def authorize(row: dict | None) -> dict:
+        return require_owner(row, user, "analysis", kind)
+
+    return authorize(lookup(analysis_id, authorize=authorize))
 
 
 def _mine(analysis_id: str, user: str | None, kind: str = "paper") -> dict:
     """The analysis, only if this exact user created it. Same test as _owned(); kept as its
     own function since deleting one's own analysis is a distinct action from reading it."""
-    return require_owner(lookup(analysis_id), user, "analysis", kind)
+    return _owned(analysis_id, user, kind)
 
 
 @app.post("/analyses")
@@ -938,9 +997,14 @@ async def upload_reference_pdf(
     if not content.startswith(b"%PDF-"):
         raise HTTPException(422, "the file is not a PDF")
     path = await asyncio.to_thread(save_upload, content, file.filename)
-    analysis.setdefault("pdfs", {})[ref] = path.name
-    _record_stage(analysis_id, "rechecking", ref=ref)
-    _detach(_recheck_reference(analysis_id, ref, path))
+    pdfs = analysis.setdefault("pdfs", {})
+    uploads = analysis.get("uploaded_reference_pdfs") or ()
+    # Seed the history with existing uploads before replacing their current mapping.
+    analysis["uploaded_reference_pdfs"] = sorted(set(uploads) | set(pdfs.values()) | {path.name})
+    pdfs[ref] = path.name
+    attempt = uuid.uuid4().hex
+    _record_stage(analysis_id, "rechecking", ref=ref, attempt=attempt)
+    _detach(_recheck_reference(analysis_id, ref, path, attempt))
     return {"ref": ref, "pdf": path.name}
 
 
@@ -952,14 +1016,30 @@ def _record_stage(analysis_id: str, stage: str, **fields) -> None:
     _save_soon(analysis_id)
 
 
-async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
+async def _recheck_reference(analysis_id: str, ref: str, pdf: Path, attempt: str) -> None:
     """Check each claim that cites `ref` against `pdf`, replacing that citation's earlier result.
 
     The result keeps the citation's lookup key as `cited`, so the claim card and the labeler
     still match it to the citation. Claims are checked one at a time: a reference is cited by
-    a few claims, and the gateway serves everyone else meanwhile.
+    a few claims, and the gateway serves everyone else meanwhile. Replacements are applied only
+    after every claim has been checked, so a mid-loop failure leaves the previous results in place.
     """
-    analysis = analyses[analysis_id]
+    analysis = analyses.get(analysis_id)
+
+    def current() -> bool:
+        if analysis is None or analyses.get(analysis_id) is not analysis:
+            return False
+        latest = next(
+            (event for event in reversed(analysis["stages"])
+             if event.get("ref") == ref and event["stage"] == "rechecking"),
+            {},
+        )
+        return latest.get("attempt") == attempt
+
+    if not current():
+        return
+    terminal = "recheck-failed"
+    replacements: list[tuple[dict, str, dict, dict]] = []
     try:
         ready = await asyncio.to_thread(prepare_source, pdf.as_posix())
         for claim in analysis["claims"]:
@@ -978,14 +1058,22 @@ async def _recheck_reference(analysis_id: str, ref: str, pdf: Path) -> None:
                     verdict = await asyncio.to_thread(
                         check_prepared, *check_args,
                     )
-                claim["verdicts"] = [v for v in claim.get("verdicts", []) if v.get("cited") != source]
-                claim["unchecked"] = [u for u in claim.get("unchecked", []) if u.get("source") != source]
-                fold_check(claim, source, citation, verdict)
+                replacements.append((claim, source, citation, verdict))
+        if not current():
+            return
+        for claim, source, citation, verdict in replacements:
+            claim["verdicts"] = [v for v in claim.get("verdicts", []) if v.get("cited") != source]
+            claim["unchecked"] = [u for u in claim.get("unchecked", []) if u.get("source") != source]
+            fold_check(claim, source, citation, verdict)
     except Exception:
         # Detached from the request, so nothing else would report it.
         logger.exception("checking analysis %s again against an uploaded %s failed", analysis_id, ref)
+    else:
+        terminal = "rechecked"
     finally:
-        _record_stage(analysis_id, "rechecked", ref=ref)
+        # Older attempts are superseded; only the current one can close this ref's stage.
+        if current():
+            _record_stage(analysis_id, terminal, ref=ref, attempt=attempt)
 
 
 def _listed(user: str | None) -> list[dict]:

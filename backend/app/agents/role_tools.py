@@ -63,7 +63,7 @@ async def claim_passages(analysis_id: str, claim_number: int, tool_context: Tool
         analysis = await labeling.owned_analysis(analysis_id, _user(tool_context))
     except HTTPException as error:
         return _error(str(error.detail))
-    built = labeling.build_session(analysis)
+    built = labeling.build_session(analysis, _user(tool_context))
     claims = built["claims"]
     if not 1 <= claim_number <= len(claims):
         return _error(f"this paper has claims 1 to {len(claims)}, not {claim_number}")
