@@ -16,13 +16,13 @@ const SURE: { value: Confidence; label: string; key: string }[] = [
   { value: 'high', label: 'High', key: 'H' },
 ]
 
-// Condensed from ../annotation-guideline.md, sections 5 to 7. Change both together.
+// Condensed from docs/annotation-guideline.md, sections 5 to 7. Change both together.
 const HOW_TO_JUDGE = [
-  'Grade what the citation is for. Use related work only for background the cited work states. Use its own statements for its results.',
-  '3: minor omissions, rounding, one of several cases, or a synonym.',
-  '2: wider scope, stronger certainty, missing condition, wrong entity or number.',
-  'For contradictions, start the level 1 reason with “Contradicts:”.',
-  'If unsure, choose the lower level and say why.',
+  'Grade only what the citation is for, from the cited work’s own sentences, not its related work. Its related work is evidence only for a background claim that the cited work states.',
+  '3 allows only minor gaps: a left-out detail, a usual rounding, one case of several the evidence shows, a common synonym.',
+  'Any other gap is a 2: wider scope, stronger certainty (“shows” for “suggests”), a missing condition, a different entity or number.',
+  '1 when no passage backs it, or it contradicts the claim: start the reason with “Contradicts:”.',
+  'Between two levels, pick the lower one and say why.',
 ]
 
 export function LabelForm({
@@ -31,7 +31,6 @@ export function LabelForm({
   active,
   label,
   others,
-  noRelevantPassage = false,
   onChange,
 }: {
   /** The reference in a few words, as the paper cites it: "[7]" or "Karpukhin et al. · 2020". */
@@ -42,18 +41,16 @@ export function LabelForm({
   label: LabelDraft | undefined
   /** People who already labeled this pair. Shown, not blocking: a second label is how agreement is measured. */
   others: string[]
-  noRelevantPassage?: boolean
   onChange: (label: LabelDraft) => void
 }) {
   const value = label ?? emptyLabel()
-  const selected = noRelevantPassage && value.evidence !== 1 ? null : value.evidence
   const group = useId()
   const why = useId()
   const sure = useId()
   const heading = useId()
   // The level under the pointer or keyboard focus, whose rule the line under the buttons shows.
   const [pointed, setPointed] = useState<Level | null>(null)
-  const ruleOf = LEVELS[(pointed ?? selected ?? 0) - 1]
+  const ruleOf = LEVELS.find((item) => item.level === (pointed ?? value.evidence))
   // A group with a heading, not a fieldset: a legend sits on the fieldset's top border, and
   // the question was drawn across the card's edge.
   return (
@@ -76,19 +73,19 @@ export function LabelForm({
         )}
       </div>
       {others.length > 0 && (
-        <p className="text-sm text-ink-muted">Also labeled by {others.join(', ')}. Their levels are hidden.</p>
+        <p className="text-sm text-ink-muted">Also labeled by {others.join(', ')}. Their levels are not shown here, so choose yours on your own.</p>
       )}
       <div role="radiogroup" aria-labelledby={group} onKeyDown={onRadioKeys} className="grid grid-cols-4 gap-1.5">
         <span id={group} className="sr-only">
           Support level for {tag}
         </span>
-        {LEVELS.slice(0, noRelevantPassage ? 1 : LEVELS.length).map(({ level, name }, index) => (
+        {LEVELS.map(({ level, name }, index) => (
           <button
             key={level}
             type="button"
             role="radio"
-            aria-checked={selected === level}
-            tabIndex={radioTabIndex(selected === level, index, selected != null)}
+            aria-checked={value.evidence === level}
+            tabIndex={radioTabIndex(value.evidence === level, index, value.evidence != null)}
             aria-label={`${level} · ${name}`}
             aria-describedby={`${group}-${level}`}
             aria-keyshortcuts={active ? String(level) : undefined}
@@ -97,11 +94,11 @@ export function LabelForm({
             onFocus={() => setPointed(level)}
             onBlur={() => setPointed(null)}
             // Choosing the same level again takes it back: a level may be left unset.
-            onClick={() => onChange({ ...value, evidence: selected === level ? null : (level as Level) })}
+            onClick={() => onChange({ ...value, evidence: value.evidence === level ? null : (level as Level) })}
             className={cn(
               'flex min-h-11 flex-col items-center justify-center rounded-lg border px-1 py-1 transition-colors',
               'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-              selected === level
+              value.evidence === level
                 ? 'border-accent bg-accent-soft text-ink'
                 : 'border-border-subtle bg-surface text-ink-muted hover:border-accent',
             )}
@@ -133,8 +130,12 @@ export function LabelForm({
         <summary className="w-fit cursor-pointer text-xs font-medium text-accent">How to judge</summary>
         <ul className="mt-1 flex flex-col gap-1">
           {LEVELS.map(({ level, name, hint }) => (
-            <li key={level}>
-              <strong>{level} {name}.</strong> <span id={`${group}-${level}`}>{hint}</span>
+            <li key={level} className="flex gap-2">
+              <span className="w-5 shrink-0 font-semibold tabular-nums">{level}</span>
+              {/* Only the rule is read out with the button, which already says the level and name. */}
+              <span>
+                <span className="font-medium">{name}.</span> <span id={`${group}-${level}`}>{hint}</span>
+              </span>
             </li>
           ))}
         </ul>
@@ -147,9 +148,7 @@ export function LabelForm({
       </details>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={why} className="text-sm font-medium text-ink">
-          {noRelevantPassage
-            ? 'No relevant passage: what did you look for and where?'
-            : 'Why this level? (sample size, controls, replication…)'}
+          Why this level? (the deciding fact: sample size, control, replication…)
         </label>
         <Textarea
           id={why}

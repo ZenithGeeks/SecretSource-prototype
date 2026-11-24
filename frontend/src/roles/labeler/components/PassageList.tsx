@@ -239,7 +239,7 @@ export function PassageList({
   onJudge: (candId: string, status: CandidateStatus) => void
   onAdd: (passage: AddedPassage) => void
   onRemove: (passage: AddedPassage) => void
-  /** What goes under one reference's passages: its level and reason form. */
+  /** What goes under one reference's passages: its level form, or a note that it needs a relevant passage. */
   grade: (referenceId: string) => ReactNode
   /** The one line shown when the claim has no passages at all. */
   empty?: string

@@ -2008,27 +2008,6 @@ def test_review_agrees_when_the_level_fits_the_verdict(api, monkeypatch):
     assert [f["tone"] for f in findings if f["target"]["kind"] == "reference"] == ["agrees"]
 
 
-@pytest.mark.parametrize(
-    ("evidence", "rationale", "expected"),
-    [
-        (1, "Looked for recall in the results and tables.", []),
-        (1, "   ", ["Say what you looked for and where"]),
-        (4, "Looked in the results.", ["this reference needs level 1"]),
-    ],
-)
-def test_review_checks_level_and_reason_without_relevant_passages(
-    api, monkeypatch, evidence, rationale, expected
-):
-    client, _, _ = api
-    _save_claim(client, evidence=evidence, rationale=rationale, relevant=0)
-    monkeypatch.setattr(verify, "judge_passages", lambda c, p: pytest.fail("the judge was asked"))
-    events = _events(client.post("/labeling/sessions/a1/review", json={"claim_id": CLAIM_0}))
-    findings = [e for e in events if e["type"] == "finding" and e["target"]["kind"] == "reference"]
-    assert len(findings) == len(expected)
-    for finding, message in zip(findings, expected, strict=True):
-        assert finding["tone"] == "flags" and message in finding["text"]
-
-
 def test_review_skips_the_judge_on_a_rejected_claim(api, monkeypatch):
     client, _, _ = api
     body = {"claims": [{"claim_id": CLAIM_0, "origin": "extracted", "status": "rejected", "claim": "x"}]}

@@ -197,6 +197,14 @@ describe('the Analyses list', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(4)
   })
 
+  it('counts only the papers shown when a search and a standing are both on', () => {
+    wrap(<AnalysisList analyses={list} onOpen={vi.fn()} />)
+    pickStanding('Source contradicts')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '10.' } })
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getByText('1 of 4 papers')).toBeInTheDocument()
+  })
+
   it('offers one filter per standing that needs reading and some paper has', () => {
     const silent = { claim: 's', citations: [], verdicts: [{ verdict: 'insufficient' }] }
     const backed = { claim: 'b', citations: [], verdicts: [{ verdict: 'supports' }] }

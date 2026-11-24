@@ -307,7 +307,7 @@ describe('the keyboard', () => {
     expect(screen.getByRole('radio', { name: '4 · Strong' })).toHaveAttribute('aria-checked', 'true')
   })
 
-  it('does not give level 3 to a reference with no relevant passage', async () => {
+  it('does not give a level to a reference with no relevant passage', async () => {
     await open()
     key('k')
     key('r') // focus moves on to the second passage of Ref B
@@ -599,7 +599,7 @@ describe('passages and levels in the panel', () => {
     await open()
     key('k')
     key('r')
-    expect(screen.getByText('Also labeled by Somchai. Their levels are hidden.')).toBeInTheDocument()
+    expect(screen.getByText('Also labeled by Somchai. Their levels are not shown here, so choose yours on your own.')).toBeInTheDocument()
   })
 })
 
@@ -1170,6 +1170,27 @@ describe('an edit that is not a new wording', () => {
   })
 })
 
+// A passage judged with no decision on its claim, as a browser may have kept it from an earlier visit.
+const keepUndecidedDraft = () =>
+  window.localStorage.setItem(
+    'labeler.unsaved.a1.chanya',
+    JSON.stringify({ drafts: { 'paperA#0': { status: '', edited: '', cands: { c1: 'relevant' }, added: [], labels: {} } }, added: [] }),
+  )
+
+describe('a change to a claim with no decision', () => {
+  it('cannot be saved, so it stays unsaved instead of looking saved', async () => {
+    keepUndecidedDraft()
+    await open()
+    const title = "Can't save yet: keep, edit or reject the claim."
+    expect(screen.getByRole('button', { name: /^Save claim \d+$/ })).toHaveAttribute('title', title)
+    expect(screen.getByRole('button', { name: /^Save claim \d+$/ })).toBeDisabled()
+    key('s', { ctrlKey: true })
+    expect(gateway.posts).toEqual([])
+    key('k')
+    expect(screen.getByRole('button', { name: /^Save claim \d+$/ })).toBeEnabled()
+  })
+})
+
 describe('Reference only on a claim with no reference', () => {
   const group = () => screen.getByRole('group', { name: 'Which papers to show' })
 
@@ -1455,6 +1476,18 @@ describe('saving every unsaved claim', () => {
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent(/^2 saved · claim 1 not saved: reword the claim, or choose Keep$/),
     )
+    expect(unsavedMarks()).toBe(1)
+  })
+
+  it('skips a claim with no decision, and names it', async () => {
+    keepUndecidedDraft()
+    await open()
+    await decide(2, 'x')
+    await decide(3, 'x')
+    key('s', { ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(gateway.posts).toHaveLength(2))
+    expect(gateway.posts.map((post) => post.claims[0].claim_id)).toEqual(['paperA#1', 'paperA#2'])
+    expect(await screen.findByText('2 saved · claim 1 not saved: keep, edit or reject the claim')).toBeInTheDocument()
     expect(unsavedMarks()).toBe(1)
   })
 

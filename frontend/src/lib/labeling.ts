@@ -663,14 +663,12 @@ export function draftFromSaved(claim: WorkClaim, saved: Session['saved']): Draft
   return draft
 }
 
-const hasNoPassageLabel = (label: LabelDraft | undefined) =>
-  label?.evidence === 1 && Boolean(label.rationale.trim())
-
-/** A reference can fold once its passages and evidence level are decided. */
+/** A reference can fold once every passage is judged and, if any of them were relevant, it has a level. */
 export function referenceFinished(claim: WorkClaim, draft: Draft, referenceId: string): boolean {
-  if (claim.candidates.some((c) => c.reference_id === referenceId && !draft.cands[c.cand_id])) return false
+  const cands = claim.candidates.filter((c) => c.reference_id === referenceId)
+  if (cands.some((c) => !draft.cands[c.cand_id])) return false
   if (relevantPassages(claim, draft, referenceId).length > 0) return Boolean(draft.labels[referenceId]?.evidence)
-  return hasNoPassageLabel(draft.labels[referenceId])
+  return cands.length > 0 || draft.added.some((a) => a.reference_id === referenceId)
 }
 
 /** "Karpukhin et al. · 2020: 3 of 4 relevant · level 3 Clear · medium confidence" for a folded reference. Not GROBID's
@@ -884,11 +882,10 @@ export function remaining(claim: WorkClaim, draft: Draft, references: Reference[
   for (const id of referencesOf(claim, draft)) {
     const ref = references.find((r) => r.reference_id === id)
     const title = ref ? printedRef(ref, markers) || byline(ref) || ref.label : id
-    const label = draft.labels[id]
-    if (!relevantPassages(claim, draft, id).length && !hasNoPassageLabel(label)) {
-      left.push(`Give ${title} level 1 and a search reason`)
-    } else if (!label?.evidence) left.push(`Give ${title} a level`)
-    else if (!label.confidence) left.push(`Give ${title} a confidence`)
+    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) left.push(`Give ${title} a level`)
+    else if (draft.labels[id]?.evidence && !draft.labels[id]?.confidence) {
+      left.push(`Give ${title} a confidence`)
+    }
   }
   return left
 }
@@ -1041,14 +1038,12 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
   for (const id of referencesOf(claim, draft)) {
     const label = draft.labels[id]
     if (!label?.evidence) continue
-    const spans = relevantPassages(claim, draft, id).slice(0, 10)
-    if (!spans.length && !hasNoPassageLabel(label)) continue
     save.labels.push({
       claim_id: claim.claim_id,
       reference_id: id,
       evidence: label.evidence,
       rationale: label.rationale.trim(),
-      spans,
+      spans: relevantPassages(claim, draft, id).slice(0, 10),
       confidence: label.confidence ?? '',
     })
   }

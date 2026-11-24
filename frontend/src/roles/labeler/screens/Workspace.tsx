@@ -42,7 +42,6 @@ import {
   readUnsaved,
   relevantPassages,
   remaining,
-  referencesOf,
   sameDraft,
   unresolvedCitations,
   saveNextTarget,
@@ -472,7 +471,10 @@ function Body({
 
   const dirty = !sameDraft(draft, saved[currentId])
   // Edit with the wording left as extracted is no change of wording: Keep says that.
-  const saveBlocked = claim && editNotReworded(claim, draft) ? "Can't save yet: reword the claim, or choose Keep." : null
+  let saveBlocked: string | null = null
+  if (claim && editNotReworded(claim, draft)) saveBlocked = "Can't save yet: reword the claim, or choose Keep."
+  // A claim with no decision saves no row, so its passages would look saved and be lost.
+  else if (dirty && !draft.status) saveBlocked = "Can't save yet: keep, edit or reject the claim."
   const anyDirty = Object.keys(drafts).some((id) => !sameDraft(drafts[id], saved[id]))
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
@@ -513,7 +515,7 @@ function Body({
 
   // Every claim with unsaved changes, one after another through the same save as one claim. It
   // stops at the first failure, so the error line can say which claims were saved and which not.
-  // A claim that cannot be saved yet (an Edit not reworded) is skipped and named.
+  // A claim that cannot be saved yet (no decision, or an Edit not reworded) is skipped and named.
   const saveAll = async () => {
     const changed = claims.flatMap((c, index) => {
       const d = drafts[c.claim_id]
@@ -523,9 +525,15 @@ function Body({
       setNotice('Nothing to save')
       return
     }
-    const ready = changed.filter((item) => !editNotReworded(item.claim, item.draft))
+    const undecided = changed.filter((item) => !item.draft.status).map((item) => item.number)
     const skipped = changed.filter((item) => editNotReworded(item.claim, item.draft)).map((item) => item.number)
-    const reword = skipped.length ? `${claimNumbers(skipped)} not saved: reword the claim, or choose Keep` : ''
+    const ready = changed.filter((item) => item.draft.status && !editNotReworded(item.claim, item.draft))
+    const notSaved = [
+      undecided.length ? `${claimNumbers(undecided)} not saved: keep, edit or reject the claim` : '',
+      skipped.length ? `${claimNumbers(skipped)} not saved: reword the claim, or choose Keep` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
     const done: number[] = []
     setSaveAllError(null)
     setSavedRows(null)
@@ -537,13 +545,13 @@ function Body({
       } catch (error) {
         const fail = problem(error)
         const failed = `${claimNumbers(ready.slice(at).map((rest) => rest.number))}: ${fail.title}. ${fail.hint}`
-        setSaveAllError([failed, reword, done.length ? `${claimNumbers(done)} saved` : ''].filter(Boolean).join(' · '))
+        setSaveAllError([failed, notSaved, done.length ? `${claimNumbers(done)} saved` : ''].filter(Boolean).join(' · '))
         return
       }
       done.push(item.number)
       setSaved((all) => ({ ...all, [item.claim.claim_id]: structuredClone(item.draft) }))
     }
-    setNotice([`${done.length} saved`, reword].filter(Boolean).join(' · '), Boolean(reword))
+    setNotice([`${done.length} saved`, notSaved].filter(Boolean).join(' · '), Boolean(notSaved))
   }
 
   useEffect(() => {
@@ -565,7 +573,7 @@ function Body({
 
   // Keys: Ctrl/⌘+S saves; K/E/X decide the claim; R/N judge the focused passage; J/U (or the
   // up and down arrows) move between passages; [ ] (or Shift+left/right) between claims;
-  // 1-4 label the reference in view; without a relevant passage only 1 applies.
+  // 1-4 label the reference in view, once it has a relevant passage.
   const refId = claim && focus ? session.references.find((r) => r.file === focus.file)?.reference_id : undefined
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -623,6 +631,7 @@ function Body({
       }
       // An added passage on an unread reference does not have a PDF.
       const labelRefId = refId ?? draft.added.find((p) => focus?.key === `added:${p.reference_id}:${p.passage}`)?.reference_id
+      const refTag = referenceTag(cited.find((r) => r.reference_id === labelRefId), session.markers)
       // A handled letter must not also be typed: E opens the edit box, which takes the focus.
       if (['k', 'e', 'x', 'r', 'n', 'l', 'm', 'h', '1', '2', '3', '4'].includes(key)) event.preventDefault()
       if (key === 'k') keyed({ status: 'accepted' }, DECISION_WORDS.accepted)
@@ -649,17 +658,14 @@ function Body({
         const index = nextUnfinishedIndex(claims, drafts, saved, cited, position)
         if (index != null) select(claims[index].claim_id)
       }
-      else if (deciding && labelRefId && referencesOf(claim, draft).includes(labelRefId)) {
+      else if (['1', '2', '3', '4'].includes(key) && deciding && labelRefId && relevantPassages(claim, draft, labelRefId).length > 0) {
         const label = draft.labels[labelRefId] ?? emptyLabel()
-        const refTag = referenceTag(cited.find((r) => r.reference_id === labelRefId), session.markers)
-        if (['1', '2', '3', '4'].includes(key)) {
-          const level = Number(key) as Level
-          if (level !== 1 && !relevantPassages(claim, draft, labelRefId).length) return
-          keyed({ labels: { ...draft.labels, [labelRefId]: { ...label, evidence: level } } }, levelWords(refTag, level))
-        } else if (['l', 'm', 'h'].includes(key)) {
-          const confidence = key === 'l' ? 'low' : key === 'm' ? 'medium' : 'high'
-          keyed({ labels: { ...draft.labels, [labelRefId]: { ...label, confidence } } }, confidenceWords(refTag, confidence))
-        }
+        const level = Number(key) as Level
+        keyed({ labels: { ...draft.labels, [labelRefId]: { ...label, evidence: level } } }, levelWords(refTag, level))
+      } else if (['l', 'm', 'h'].includes(key) && deciding && labelRefId && relevantPassages(claim, draft, labelRefId).length > 0) {
+        const label = draft.labels[labelRefId] ?? emptyLabel()
+        const confidence = key === 'l' ? 'low' : key === 'm' ? 'medium' : 'high'
+        keyed({ labels: { ...draft.labels, [labelRefId]: { ...label, confidence } } }, confidenceWords(refTag, confidence))
       }
     }
     window.addEventListener('keydown', onKey)
@@ -832,21 +838,22 @@ function Body({
 
   // Everything done to one claim, in the order it is done. Wide screens keep it beside the
   // papers, scrolling by itself, so the papers never move while you work.
+  // A reference with a passage you called relevant needs a level; the others are optional.
   const grade = (id: string) => {
-    const ref = cited.find((r) => r.reference_id === id)
-    const tag = referenceTag(ref, session.markers)
-    return (
+    const tag = referenceTag(cited.find((r) => r.reference_id === id), session.markers)
+    return relevantPassages(claim, draft, id).length > 0 || draft.labels[id]?.evidence ? (
       <LabelForm
         tag={tag}
-        title={ref?.label ?? id}
+        title={cited.find((r) => r.reference_id === id)?.label ?? id}
         active={id === refId}
         label={draft.labels[id]}
-        noRelevantPassage={!relevantPassages(claim, draft, id).length}
         others={session.others[`${claim.claim_id}|${id}`] ?? []}
         onChange={(label) =>
           patch({ labels: { ...draft.labels, [id]: label } }, labelChangeWords(tag, draft.labels[id] ?? emptyLabel(), label))
         }
       />
+    ) : (
+      <p className="text-sm text-ink-muted">Mark a passage relevant to grade this reference</p>
     )
   }
 

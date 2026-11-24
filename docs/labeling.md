@@ -67,8 +67,7 @@ Opening a paper reads only that paper's rows. Each paper in the queue shows how 
 decided (keep, edit or reject; a claim you added by hand is not counted), a progress bar, and who else has labeled it. The button says
 Label before you start, Continue part-way and Review once every claim has your decision; a claim with a decision
 can still have passages or a level left, which the workspace shows: its bar counts a claim as finished only when the passages and levels are done too. Papers you have not finished list before finished ones
-within a topic. When no passage is relevant for a reference being graded, choose level 1 and record
-what you looked for and where. Removing a paper from the team's list asks first; saved labels are kept.
+within a topic. Removing a paper from the team's list asks first; saved labels are kept.
 
 Two people can label the same pair: the page tells the second person it was already labeled. Keep a
 double-labeled subset in the test split and measure agreement (weighted kappa) before trusting it.
@@ -77,9 +76,8 @@ double-labeled subset in the test split and measure agreement (weighted kappa) b
 
 **Ask AI** under the claim panel has two parts:
 - **Review** works only on a claim you saved, with no unsaved changes. It points out passages you
-  have not judged, relevant passages without a level, and missing reasons. When a reference has a
-  level but no relevant passage, Review checks for level 1 and a reason describing the search.
-  Then it shows how the pipeline's judge reads the passages you marked relevant. A
+  have not judged, a relevant reference with no level, a level with no relevant passage, and a level
+  with no reason. Then it shows how the pipeline's judge reads the passages you marked relevant. A
   cursor moves to each thing it talks about.
 - **Ask a question** answers from the paper under review or from one of the references this claim
   cites. The answer is the same checked statements as Ask in the other roles.

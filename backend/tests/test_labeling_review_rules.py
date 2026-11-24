@@ -39,11 +39,11 @@ def test_passages_marked_relevant_with_no_level_are_flagged():
     assert finding.target.id == "r1" and "no level" in finding.text
 
 
-def test_a_level_above_one_with_no_relevant_passage_is_flagged():
+def test_a_level_with_no_relevant_passage_is_flagged():
     rows = [passage_row("c1", "irrelevant"), passage_row("c2", "irrelevant")]
     saved = Saved({}, rows, [{"reference_id": "r1", "evidence": "3"}])
     [finding] = rule_findings(CLAIM, saved)
-    assert "this reference needs level 1" in finding.text
+    assert "none of its passages is marked relevant" in finding.text
 
 
 def test_a_ledger_is_made_once_and_reused(monkeypatch):

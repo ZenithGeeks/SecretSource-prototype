@@ -210,22 +210,9 @@ describe('what is left to decide', () => {
     expect(referenceSummary(claim, done, refs[0], 'refB')).toBe('Silva, Lee · 2021: 1 of 2 relevant · level 3 Clear · medium confidence')
   })
 
-  it('requires level 1 and a reason when all passages are rejected', () => {
+  it('finishes a reference with no relevant passages and checks hand-added passages when there are no candidates', () => {
     const rejected = judged({ status: 'accepted', cands: { c1: 'rejected', c2: 'rejected' } })
-    const withLabel = (evidence: 1 | 2, rationale: string) =>
-      judged({ ...rejected, labels: { refB: { evidence, rationale, confidence: 'medium' } } })
-    for (const incomplete of [rejected, withLabel(1, '  '), withLabel(2, 'Checked the results')]) {
-      expect(referenceFinished(claim, incomplete, 'refB')).toBe(false)
-      expect(isDone(claim, incomplete, refs)).toBe(false)
-      expect(buildSave(claim, incomplete).labels).toEqual([])
-    }
-    const finished = withLabel(1, '  Looked for recall in the results and tables. ')
-    expect(referenceFinished(claim, finished, 'refB')).toBe(true)
-    expect(isDone(claim, finished, refs)).toBe(true)
-    expect(buildSave(claim, finished).labels).toEqual([
-      { claim_id: claim.claim_id, reference_id: 'refB', evidence: 1,
-        rationale: 'Looked for recall in the results and tables.', spans: [], confidence: 'medium' },
-    ])
+    expect(referenceFinished(claim, rejected, 'refB')).toBe(true)
 
     const noCandidates = { ...claim, candidates: [] }
     const added = [{ reference_id: 'other', page: 1, passage: 'other reference' }]
@@ -240,13 +227,10 @@ describe('what is left to decide', () => {
   })
 
   it('wants the new wording of an edited claim', () => {
-    const decisions = { cands: { c1: 'rejected', c2: 'rejected' }, labels: {
-      refB: { evidence: 1, rationale: 'Read the results for recall.', confidence: 'high' },
-    } } as const
-    expect(remaining(claim, judged({ status: 'edited', ...decisions }), refs)).toEqual([
+    expect(remaining(claim, judged({ status: 'edited', cands: { c1: 'rejected', c2: 'rejected' } }), refs)).toEqual([
       'Reword the claim, or choose Keep',
     ])
-    const unchanged = judged({ status: 'edited', edited: claim.claim, ...decisions })
+    const unchanged = judged({ status: 'edited', edited: claim.claim, cands: { c1: 'rejected', c2: 'rejected' } })
     expect(remaining(claim, unchanged, refs)).toEqual(['Reword the claim, or choose Keep'])
   })
 })
@@ -527,7 +511,7 @@ describe('the workspace', () => {
     }
   })
 
-  it('allows only level 1 and saves the entered reason when neither passage is relevant', async () => {
+  it('keys 1-4 do nothing while the reference shown has no relevant passage', async () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
         <Workspace analysisId="a1" />
@@ -535,22 +519,12 @@ describe('the workspace', () => {
     )
     await screen.findByRole('radiogroup', { name: 'Decision on this claim' })
     fireEvent.click(screen.getByRole('radio', { name: /Keep/ }))
-    for (const radio of screen.getAllByRole('radio', { name: /^Not relevant/ })) fireEvent.click(radio)
-    expect(fireEvent.keyDown(window, { key: 'q' })).toBe(true)
+    expect(screen.getByText('Mark a passage relevant to grade this reference')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: '4' })
     expect(screen.queryByRole('radio', { name: /4 · Strong/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: /1 ·/ })).toHaveAttribute('aria-checked', 'false')
-    fireEvent.keyDown(window, { key: '1' })
-    fireEvent.keyDown(window, { key: 'l' })
-    expect(screen.getByRole('radio', { name: /1 ·/ })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('radio', { name: 'Low' })).toHaveAttribute('aria-checked', 'true')
-    fireEvent.change(screen.getByRole('textbox', { name: /what did you look for and where/ }), {
-      target: { value: 'Looked for recall in the results.' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: /^Save claim \d+$/ }))
-    await waitFor(() => expect(gateway.posts.at(-1)?.labels).toMatchObject([
-      { evidence: 1, rationale: 'Looked for recall in the results.', spans: [], confidence: 'low' },
-    ]))
+    fireEvent.click(screen.getAllByRole('radio', { name: /^Not relevant/ })[0]) // judged, but not relevant
+    fireEvent.keyDown(window, { key: '4' })
+    expect(screen.queryByRole('radio', { name: /4 · Strong/ })).not.toBeInTheDocument()
   })
 
   const open = async () => {
@@ -715,7 +689,7 @@ describe('the workspace', () => {
   it('ignores the shortcut keys while typing in a field', async () => {
     await open()
     fireEvent.click(screen.getByRole('radio', { name: /Edit/ }))
-    fireEvent.keyDown(screen.getByRole('textbox', { name: 'The claim, as it should read' }), { key: 'x' })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'x' })
     expect(screen.getByRole('button', { name: /Edit/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
@@ -756,7 +730,7 @@ describe('the workspace', () => {
     const lastCard = within(section).getAllByRole('radiogroup', { name: /^Passage/ }).at(-1)!.closest('li')!
     expect(lastCard.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(focused?.nextElementSibling).not.toHaveAttribute('data-level-form')
-    expect(form).toHaveTextContent('No relevant passage: what did you look for and where?')
+    expect(form).toHaveTextContent('Mark a passage relevant to grade this reference')
     fireEvent.click(within(section).getAllByRole('radio', { name: /^Relevant/ })[0])
     expect(within(section).getByRole('radiogroup', { name: 'Support level for Silva, Lee · 2021' })).toBeInTheDocument()
     expect(section.querySelectorAll('[data-level-form]')).toHaveLength(1)
