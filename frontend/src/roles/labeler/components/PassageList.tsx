@@ -1,8 +1,10 @@
 /**
  * The passages retrieval found for a claim, grouped by reference paper. Each paper is one section:
  * its passages (each judged by hand: does it bear on the claim or not?), the ones the person added
- * for it, and the level form for it. Clicking a passage shows it in the reference viewer, and the
- * focused one is shown in full. Below, a form to add a passage retrieval missed.
+ * for it, and the level form for it. Clicking a passage, or moving keyboard focus onto it, shows
+ * it in the reference viewer and opens the full text. The others stay at three lines. The level
+ * form sits directly under the passage in focus, so the grade is read with that passage. Below,
+ * a form to add a passage retrieval missed.
  */
 
 import { Loader2, Plus, Sparkles, X } from 'lucide-react'
@@ -98,13 +100,18 @@ function PassageCard({
       ref={ref}
       data-ask-target={askTarget({ kind: 'passage', id: c.cand_id })}
       className={cn(
-        'scroll-mb-48 rounded-lg border p-3 transition-colors',
-        shown ? 'border-accent bg-accent-soft' : 'border-border-subtle bg-surface',
+        'scroll-mb-48 rounded-lg border transition-colors',
+        shown ? 'border-accent bg-accent-soft p-3' : 'border-border-subtle bg-surface p-2',
       )}
     >
       <button
         type="button"
         onClick={onFocus}
+        onFocus={() => {
+          // Tabbing onto a clamped passage opens it, the same as a click.
+          if (!shown) onFocus()
+        }}
+        aria-expanded={shown}
         aria-pressed={shown}
         className="w-full rounded text-left focus-visible:outline-2 focus-visible:outline-accent"
       >
@@ -112,7 +119,9 @@ function PassageCard({
           #{c.rank}
           {c.page != null && <span className="font-normal text-ink-muted"> · p.{c.page}</span>}
         </span>
-        <span title={shown ? undefined : c.passage} className={cn('mt-1 block text-sm leading-6 text-ink', !shown && 'line-clamp-3')}>
+        {/* `block` and `line-clamp` both set `display`. Keeping both leaves the clamp unset and
+            the card at the full passage height. */}
+        <span title={shown ? undefined : c.passage} className={cn('mt-1 text-sm leading-6 text-ink', shown ? 'block' : 'line-clamp-3')}>
           {c.passage}
         </span>
       </button>
@@ -126,7 +135,8 @@ function PassageCard({
             aria-keyshortcuts={shown ? s.key : undefined}
             onClick={() => onJudge(s.status)}
             className={cn(
-              'flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent',
+              'flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent',
+              shown ? 'min-h-11' : 'min-h-9 pointer-coarse:min-h-11',
               status === s.status
                 ? s.status === 'relevant'
                   ? 'border-supports bg-supports-soft text-supports'
@@ -164,19 +174,23 @@ function AddedCard({
     <li
       ref={ref}
       className={cn(
-        'scroll-mb-48 flex flex-col rounded-lg border p-3',
-        shown ? 'border-accent bg-accent-soft' : 'border-border-subtle bg-surface',
+        'flex scroll-mb-48 flex-col rounded-lg border',
+        shown ? 'border-accent bg-accent-soft p-3' : 'border-border-subtle bg-surface p-2',
       )}
     >
       <div className="flex items-start gap-2">
         <button
           type="button"
           onClick={onFocus}
+          onFocus={() => {
+            if (!shown) onFocus()
+          }}
+          aria-expanded={shown}
           aria-pressed={shown}
           className="min-w-0 flex-1 rounded text-left focus-visible:outline-2 focus-visible:outline-accent"
         >
           {a.page != null && <span className="block text-xs text-ink-muted">p.{a.page}</span>}
-          <span title={shown ? undefined : a.passage} className={cn('block text-sm leading-6 text-ink', !shown && 'line-clamp-3')}>
+          <span title={shown ? undefined : a.passage} className={cn('text-sm leading-6 text-ink', shown ? 'block' : 'line-clamp-3')}>
             {a.passage}
           </span>
         </button>
@@ -325,36 +339,49 @@ export function PassageList({
         const id = activeId
         const cands = claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank)
         const added = draft.added.filter((a) => a.reference_id === id)
+        const addedKey = (a: AddedPassage) => `added:${a.reference_id}:${a.passage}`
+        const focusedCand = cands.some((c) => focus?.key === c.cand_id)
+        const focusedAdded = added.some((a) => focus?.key === addedKey(a))
+        // Not a passage, so it is left out of the list. It follows the passage in focus, so the
+        // level is chosen with that passage instead of after every other one.
+        const levelForm = (focusedCand || focusedAdded) && (
+          <li key="level-form" role="presentation" data-level-form="" className="list-none">
+            {grade(id)}
+          </li>
+        )
         return (
           <section key={id} aria-label={labelOf(id)} data-ask-target={askTarget({ kind: 'reference', id })} className="flex flex-col gap-2">
             {refIds.length === 1 && <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>}
             {cands.length > 0 && (
               <ul className="flex flex-col gap-2">
-                {cands.map((c) => (
-                  <PassageCard
-                    key={c.cand_id}
-                    c={c}
-                    label={labelOf(id)}
-                    shown={focus?.key === c.cand_id}
-                    reveal={revealFocused}
-                    status={draft.cands[c.cand_id]}
-                    onFocus={() => onFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id })}
-                    onJudge={(status) => onJudge(c.cand_id, status)}
-                    onAsk={
-                      onAsk &&
-                      (() => onAsk({ referenceId: id, name: `#${c.rank} ${labelOf(id)}`, page: c.page, text: c.passage }))
-                    }
-                  />
-                ))}
+                {cands.flatMap((c) => {
+                  const card = (
+                    <PassageCard
+                      key={c.cand_id}
+                      c={c}
+                      label={labelOf(id)}
+                      shown={focus?.key === c.cand_id}
+                      reveal={revealFocused}
+                      status={draft.cands[c.cand_id]}
+                      onFocus={() => onFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id })}
+                      onJudge={(status) => onJudge(c.cand_id, status)}
+                      onAsk={
+                        onAsk &&
+                        (() => onAsk({ referenceId: id, name: `#${c.rank} ${labelOf(id)}`, page: c.page, text: c.passage }))
+                      }
+                    />
+                  )
+                  return focus?.key === c.cand_id ? [card, levelForm] : [card]
+                })}
               </ul>
             )}
             {added.length > 0 && (
               <>
                 <p className="text-sm font-medium text-ink">Passages you added</p>
                 <ul className="flex flex-col gap-2">
-                  {added.map((a) => {
-                    const key = `added:${a.reference_id}:${a.passage}`
-                    return (
+                  {added.flatMap((a) => {
+                    const key = addedKey(a)
+                    const card = (
                       <AddedCard
                         key={key}
                         a={a}
@@ -370,11 +397,12 @@ export function PassageList({
                         }
                       />
                     )
+                    return focus?.key === key ? [card, levelForm] : [card]
                   })}
                 </ul>
               </>
             )}
-            {grade(id)}
+            {!focusedCand && !focusedAdded && <div data-level-form="">{grade(id)}</div>}
           </section>
         )
       })()}

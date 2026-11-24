@@ -64,6 +64,73 @@ describe('the passages of a claim', () => {
     expect(within(section).getByText('grade for refB')).toBeInTheDocument()
   })
 
+  it('clamps passages that are not in focus and opens one from the keyboard', () => {
+    const long = 'word '.repeat(80).trim()
+    const props = setup({
+      claim: claim([cand('c1', { passage: long }), cand('c2', { rank: 2, page: null, passage: long })]),
+      focus: { file: 'refB.pdf', passage: long, page: 4, key: 'c1' },
+    })
+    const open = screen.getByRole('button', { name: /#1/ })
+    const shut = screen.getByRole('button', { name: /#2/ })
+    expect(open).toHaveAttribute('aria-expanded', 'true')
+    expect(shut).toHaveAttribute('aria-expanded', 'false')
+    const openText = within(open).getByText(long)
+    const shutText = within(shut).getByText(long)
+    expect(openText).toHaveClass('block')
+    expect(openText).not.toHaveClass('line-clamp-3')
+    expect(shutText).toHaveClass('line-clamp-3')
+    expect(shutText).not.toHaveClass('block')
+
+    fireEvent.focus(open)
+    expect(props.onFocus).not.toHaveBeenCalled()
+    fireEvent.focus(shut)
+    expect(props.onFocus).toHaveBeenCalledWith({ file: 'refB.pdf', passage: long, page: null, key: 'c2' })
+  })
+
+  it('puts the level form directly after the passage in focus', () => {
+    setup({ focus: { file: 'refB.pdf', passage: 'text of c2', page: null, key: 'c2' } })
+    const focused = screen.getByRole('button', { name: /text of c2/ }).closest('li')
+    const other = screen.getByRole('button', { name: /text of c1/ }).closest('li')
+    const form = focused?.nextElementSibling
+    expect(form).toHaveAttribute('data-level-form')
+    expect(form).toHaveTextContent('grade for refB')
+    expect(other?.nextElementSibling).toBe(focused)
+  })
+
+  it('puts the level form directly after a focused passage the person added', () => {
+    setup({
+      draft: { ...emptyDraft(), added: [{ reference_id: 'refB', page: 9, passage: 'mine' }] },
+      focus: { file: 'refB.pdf', passage: 'mine', page: 9, key: 'added:refB:mine' },
+    })
+    const focused = screen.getByRole('button', { name: /mine/ }).closest('li')
+    expect(focused?.nextElementSibling).toHaveAttribute('data-level-form')
+  })
+
+  it('opens an added passage from the keyboard, and leaves the open one as it is', () => {
+    const props = setup({
+      claim: claim([]),
+      draft: {
+        ...emptyDraft(),
+        added: [
+          { reference_id: 'refB', page: 9, passage: 'mine' },
+          { reference_id: 'refB', page: 2, passage: 'other note' },
+        ],
+      },
+      focus: { file: 'refB.pdf', passage: 'mine', page: 9, key: 'added:refB:mine' },
+    })
+    fireEvent.focus(screen.getByRole('button', { name: /mine/ }))
+    expect(props.onFocus).not.toHaveBeenCalled()
+    fireEvent.focus(screen.getByRole('button', { name: /other note/ }))
+    expect(props.onFocus).toHaveBeenCalledWith({
+      file: 'refB.pdf',
+      passage: 'other note',
+      page: 2,
+      key: 'added:refB:other note',
+    })
+    expect(screen.getByRole('button', { name: /other note/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: /mine/ })).toHaveAttribute('aria-expanded', 'true')
+  })
+
   it('switches between reference tabs and shows the summary chip on a finished one', () => {
     const second = { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C', ref: 'b2', authors: [], year: '2022' }
     const bothClaims: WorkClaim = claim([

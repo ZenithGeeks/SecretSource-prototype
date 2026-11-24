@@ -680,7 +680,14 @@ function Body({
 
   const panel = (
     <>
-      <ClaimDecision claim={claim} draft={draft} position={position + 1} count={claims.length} onChange={patch} />
+      <ClaimDecision
+        claim={claim}
+        draft={draft}
+        position={position + 1}
+        count={claims.length}
+        pinned={Boolean(draft.status)}
+        onChange={patch}
+      />
       {deciding && (
         <PassageList
           claim={claim}

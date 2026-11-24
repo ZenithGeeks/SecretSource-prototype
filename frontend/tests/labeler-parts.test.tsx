@@ -234,6 +234,32 @@ describe('ClaimDecision', () => {
     expect(screen.getByRole('radiogroup', { name: 'Decision on this claim' })).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /Reject/ })).toHaveAttribute('aria-checked', 'true')
   })
+
+  it('quotes the paper sentence until the claim is pinned', () => {
+    const row = claim('c1', 'Original.', { sentence: 'The paper wrote a longer sentence.' })
+    const { rerender } = render(
+      <ClaimDecision claim={row} position={1} count={1} draft={emptyDraft()} onChange={vi.fn()} />,
+    )
+    expect(screen.getByText(/The paper says/)).toHaveTextContent('The paper wrote a longer sentence.')
+
+    rerender(<ClaimDecision claim={row} pinned position={1} count={1} draft={emptyDraft()} onChange={vi.fn()} />)
+    expect(screen.queryByText(/The paper says/)).not.toBeInTheDocument()
+    expect(screen.getByText('Original.')).toBeInTheDocument()
+  })
+
+  it('leaves the quote out when the claim is the sentence, or a decision is already made', () => {
+    const same = claim('c1', 'Original.', { sentence: 'Original.' })
+    const { rerender } = render(
+      <ClaimDecision claim={same} position={1} count={1} draft={emptyDraft()} onChange={vi.fn()} />,
+    )
+    expect(screen.queryByText(/The paper says/)).not.toBeInTheDocument()
+
+    const row = claim('c1', 'Original.', { sentence: 'The paper wrote a longer sentence.' })
+    rerender(
+      <ClaimDecision claim={row} position={1} count={1} draft={{ ...emptyDraft(), status: 'accepted' }} onChange={vi.fn()} />,
+    )
+    expect(screen.queryByText(/The paper says/)).not.toBeInTheDocument()
+  })
 })
 
 describe('LabelForm', () => {

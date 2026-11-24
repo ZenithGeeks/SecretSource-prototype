@@ -1,4 +1,6 @@
-/** The 1-4 label for one (claim, reference paper) pair, with the reason for it. */
+/** The 1-4 label for one (claim, reference paper) pair, with the reason for it.
+ * PassageList puts this directly under the passage in focus, so the level is chosen
+ * while that passage is on screen. */
 
 import { useId } from 'react'
 
@@ -34,7 +36,7 @@ export function LabelForm({
   return (
     <fieldset
       className={cn(
-        'flex flex-col gap-3 rounded-lg border p-3',
+        'flex min-w-0 flex-col gap-2 rounded-lg border p-3',
         active ? 'border-accent bg-accent-soft/40 ring-2 ring-accent' : 'border-border-subtle',
       )}
     >
@@ -57,7 +59,7 @@ export function LabelForm({
             aria-describedby={`${group}-${level}`}
             onClick={() => onChange({ ...value, evidence: level as Level })}
             className={cn(
-              'flex min-h-14 flex-col items-center justify-center rounded-lg border px-1 py-1.5 transition-colors',
+              'flex min-h-11 flex-col items-center justify-center rounded-lg border px-1 py-1 transition-colors',
               'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
               value.evidence === level
                 ? 'border-accent bg-accent-soft text-ink'
