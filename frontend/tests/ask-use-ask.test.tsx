@@ -156,7 +156,7 @@ describe('opening a source from an answer', () => {
   }
 
   it('looks the longest piece of the quote up on its page and opens the paper there', async () => {
-    finds = [() => ({ page: 3, boxes: [] })]
+    finds = [() => ({ page: 3, boxes: [], coverage: 1 })]
     await openSource(cited, 'ColBERTv2 · p. 3')
 
     expect(await screen.findByRole('heading', { name: 'Quoted passage · page 3' })).toBeInTheDocument()

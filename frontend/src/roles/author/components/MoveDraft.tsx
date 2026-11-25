@@ -115,13 +115,13 @@ function ExistingDraftsPicker({
   return (
     // min-w-0: a fieldset is as wide as its longest line otherwise, and a long title would widen the dialog.
     <fieldset className="mt-4 min-w-0" disabled={disabled}>
-      <legend className="text-[13px] font-medium text-ink">Add existing drafts (optional)</legend>
+      <legend className="text-ui font-medium text-ink">Add existing drafts (optional)</legend>
       <div className="mt-1.5 max-h-40 overflow-y-auto rounded-lg border border-border-subtle px-3 py-1">
         {groups.map((group) => (
           <div key={group.id} role="group" aria-label={group.name} className="py-1">
-            <p className="truncate text-[11px] font-medium tracking-wide text-ink-muted uppercase">{group.name}</p>
+            <p className="truncate text-caption font-medium tracking-wide text-ink-muted uppercase">{group.name}</p>
             {group.drafts.map((draft) => (
-              <label key={draft.id} className="flex cursor-pointer items-center gap-2 py-1 text-[13px] text-ink">
+              <label key={draft.id} className="flex cursor-pointer items-center gap-2 py-1 text-ui text-ink">
                 <input type="checkbox" checked={selected.includes(draft.id)} onChange={() => toggle(draft.id)} className="accent-accent" />
                 <span className="truncate">{draft.title}</span>
               </label>
@@ -240,16 +240,16 @@ export function MoveDraftMenu({ draft, onCreated }: { draft: Draft; onCreated?: 
   let panel: ReactNode = null
   if (target) {
     panel = (
-      <div role="dialog" aria-label={`Move ${draft.title}`} className="absolute right-0 z-20 mt-1 w-64 rounded-xl border border-border-subtle bg-surface p-3 text-[13px] shadow-card">
+      <div role="dialog" aria-label={`Move ${draft.title}`} className="absolute right-0 z-20 mt-1 w-64 rounded-xl border border-border-subtle bg-surface p-3 text-ui shadow-card">
         <p className="text-ink">
           Move “{draft.title}” to {target.name}?
         </p>
         <MoveWarning check={check} />
         <div className="mt-3 flex justify-end gap-2">
-          <Button type="button" variant="ghost" className="px-3 py-1.5 text-[13px]" onClick={() => setTarget(null)} disabled={moving}>
+          <Button type="button" variant="ghost" className="px-3 py-1.5 text-ui" onClick={() => setTarget(null)} disabled={moving}>
             Cancel
           </Button>
-          <Button type="button" className="px-3 py-1.5 text-[13px]" onClick={() => void move()} disabled={moving || check.pending || check.failed} aria-busy={moving} autoFocus>
+          <Button type="button" className="px-3 py-1.5 text-ui" onClick={() => void move()} disabled={moving || check.pending || check.failed} aria-busy={moving} autoFocus>
             {moving ? 'Moving…' : 'Move'}
           </Button>
         </div>

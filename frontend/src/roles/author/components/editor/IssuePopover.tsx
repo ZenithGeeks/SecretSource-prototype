@@ -88,7 +88,7 @@ export function IssuePopover({
     >
       <div className="flex flex-wrap items-center gap-2">
         <CitationBadge verdict={citation.verdict} notFound={isNotFound(citation)} />
-        <span id="issue-popover-title" className="text-[11px] text-ink-muted">
+        <span id="issue-popover-title" className="text-caption text-ink-muted">
           [{numberOf(citation.key) ?? '?'}] {sourceLabel(citation)}
         </span>
       </div>
@@ -99,7 +99,7 @@ export function IssuePopover({
         </blockquote>
       )}
       <AuditNote findings={citation.audit} className="text-xs" />
-      {citation.verdict === 'unavailable' && citation.message && <p className="text-xs break-words text-ink-muted">{shortMessage(citation.message)}</p>}
+      {citation.verdict === 'unavailable' && citation.message && <p className="text-xs wrap-break-word text-ink-muted">{shortMessage(citation.message)}</p>}
       {citation.resolution ? (
         <p className="text-xs text-ink-muted">
           {citation.resolution.kind === 'replaced' ? `Replaced with \\cite{${citation.key}}.` : 'Kept as written.'}
@@ -112,7 +112,7 @@ export function IssuePopover({
             onKeepMine(note)
           }}
         >
-          <label htmlFor="popover-note" className="text-[11px] font-medium text-ink">
+          <label htmlFor="popover-note" className="text-caption font-medium text-ink">
             Why you are keeping this citation
           </label>
           <textarea
@@ -135,12 +135,12 @@ export function IssuePopover({
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           {onAskToFix && (
-            <Button className="px-3 py-1.5 text-[13px]" onClick={onAskToFix}>
+            <Button className="px-3 py-1.5 text-ui" onClick={onAskToFix}>
               <Sparkles className="size-4" aria-hidden="true" />
               Ask AI how to fix
             </Button>
           )}
-          <Button variant="ghost" className="px-3 py-1.5 text-[13px]" onClick={() => setNoteOpen(true)}>
+          <Button variant="ghost" className="px-3 py-1.5 text-ui" onClick={() => setNoteOpen(true)}>
             Keep mine
           </Button>
         </div>
@@ -149,7 +149,7 @@ export function IssuePopover({
         type="button"
         onClick={onNext}
         disabled={total === 0}
-        className={`flex items-center gap-1 self-start text-[11px] text-accent disabled:text-ink-muted ${LINK}`}
+        className={`flex items-center gap-1 self-start text-caption text-accent disabled:text-ink-muted ${LINK}`}
       >
         {pager} · next
         <ChevronRight className="size-3" aria-hidden="true" />

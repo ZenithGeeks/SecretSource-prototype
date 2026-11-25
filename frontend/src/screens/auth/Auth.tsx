@@ -36,7 +36,7 @@ function Wordmark() {
 function Card({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="flex w-[400px] max-w-full flex-col items-center gap-3.5 rounded-2xl border border-border-subtle bg-surface p-8 shadow-xl">
+      <div className="flex w-100 max-w-full flex-col items-center gap-3.5 rounded-2xl border border-border-subtle bg-surface p-8 shadow-xl">
         {children}
       </div>
     </div>
@@ -60,7 +60,7 @@ function Field({
 }) {
   return (
     <label className="flex w-full flex-col gap-1.5">
-      <span className="flex items-center justify-between text-[13px] font-medium text-ink">
+      <span className="flex items-center justify-between text-ui font-medium text-ink">
         {label}
         {right}
       </span>
@@ -173,7 +173,7 @@ export function Auth() {
   const heading = (title: string, sub: string) => (
     <div className="flex flex-col items-center gap-0.5 text-center">
       <h1 className="font-serif text-lg font-semibold text-ink">{title}</h1>
-      <p className="text-[13px] text-ink-muted">{sub}</p>
+      <p className="text-ui text-ink-muted">{sub}</p>
     </div>
   )
 
@@ -191,7 +191,7 @@ export function Auth() {
         <Button className="w-full justify-center" onClick={signUp} disabled={busy}>
           Create account
         </Button>
-        <p className="text-[13px] text-ink-muted">
+        <p className="text-ui text-ink-muted">
           Already have an account?{' '}
           <TextButton onClick={() => go('signin')}>
             Sign in
@@ -211,7 +211,7 @@ export function Auth() {
         <Button className="w-full justify-center" onClick={forgot} disabled={busy}>
           Send reset link
         </Button>
-        <button type="button" onClick={() => go('signin')} className="text-[13px] text-ink-muted hover:text-ink">
+        <button type="button" onClick={() => go('signin')} className="text-ui text-ink-muted hover:text-ink">
           ← Back to <span className="font-medium text-accent">Sign in</span>
         </button>
       </Card>
@@ -229,7 +229,7 @@ export function Auth() {
         <Button variant="ghost" className="w-full justify-center" onClick={forgot} disabled={busy}>
           Resend link
         </Button>
-        <button type="button" onClick={() => go('signin')} className="text-[13px] text-ink-muted hover:text-ink">
+        <button type="button" onClick={() => go('signin')} className="text-ui text-ink-muted hover:text-ink">
           ← Back to <span className="font-medium text-accent">Sign in</span>
         </button>
       </Card>
@@ -275,7 +275,7 @@ export function Auth() {
       <Button className="w-full justify-center" onClick={signIn} disabled={busy}>
         Sign in
       </Button>
-      <p className="text-[13px] text-ink-muted">
+      <p className="text-ui text-ink-muted">
         New to SecretSource?{' '}
         <TextButton onClick={() => go('signup')}>
           Create account

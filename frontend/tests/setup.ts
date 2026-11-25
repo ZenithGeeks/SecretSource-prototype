@@ -52,3 +52,6 @@ afterEach(() => {
   cleanup()
   clearDoItConversation()
 })
+
+// jsdom does not implement window scrolling; the Analyses list scrolls to its top on return.
+window.scrollTo = vi.fn() as never

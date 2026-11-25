@@ -8,12 +8,12 @@ export function PaperKeywords({ subject, keywords, className }: { subject: strin
   return (
     <ul aria-label="Subject and keywords" className={cn('flex flex-wrap gap-1', className)}>
       {subject && (
-        <li title="Subject, from OpenAlex" className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-ink">
+        <li title="Subject, from OpenAlex" className="rounded-full bg-accent-soft px-2 py-0.5 text-caption font-medium text-ink">
           {subject}
         </li>
       )}
       {keywords.map((keyword) => (
-        <li key={keyword} className="rounded-full border border-border-subtle px-2 py-0.5 text-[11px] text-ink-muted">
+        <li key={keyword} className="rounded-full border border-border-subtle px-2 py-0.5 text-caption text-ink-muted">
           {keyword}
         </li>
       ))}

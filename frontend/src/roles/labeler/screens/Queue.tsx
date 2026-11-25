@@ -7,6 +7,7 @@ import { Mascot } from '../../../components/Mascot'
 import { Button, Card, Empty, FadeIn, LoadingScreen } from '../../../components/ui'
 import { labelingApi, problem, useLabelStatus, usePool } from '../../../lib/labeling'
 import { cn } from '../../../lib/utils'
+import { GuideButton } from '../components/GuideButton'
 import { NoMatch, PaperFilters } from '../components/PaperFilters'
 import { PaperTable } from '../components/PaperTable'
 import { ScopusAdd } from '../components/ScopusAdd'
@@ -68,7 +69,8 @@ export function Queue({
 
   useEffect(() => {
     const query = writeFilters(window.location.search, filters)
-    window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
+    // The entry's state holds the list's scroll (LabelerApp), so it is kept.
+    window.history.replaceState(window.history.state, '', query ? `?${query}` : window.location.pathname)
   }, [filters])
 
   if (status.isLoading) return <LoadingScreen />
@@ -120,11 +122,17 @@ export function Queue({
             <p className="text-sm text-ink-muted">
               Signed in as {status.data?.annotator}. You judge every claim and passage; nothing is saved until you save it.
             </p>
+            <GuideButton />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {nextPaper && (
-            <Button onClick={() => onOpen(nextPaper.analysis_id)} aria-label={`Continue: ${nextPaper.title}`} className="max-w-xs">
+            <Button
+              onClick={() => onOpen(nextPaper.analysis_id)}
+              aria-label={`Continue: ${nextPaper.title}`}
+              title={nextPaper.title}
+              className="max-w-md"
+            >
               {/* Only the title is cut short, so the button always says what it does. */}
               <span className="shrink-0">Continue:</span>
               <span className="min-w-0 truncate">{nextPaper.title}</span>
@@ -228,8 +236,9 @@ export function Queue({
 
       <section aria-labelledby="papers-heading" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          {/* "All papers", not the screen's name again: the breadcrumb and sidebar already say it. */}
           <h2 id="papers-heading" className="text-sm font-semibold text-ink">
-            Papers to label
+            All papers
           </h2>
           {reading > 0 && (
             <p className="text-xs text-ink-muted">
@@ -237,8 +246,13 @@ export function Queue({
             </p>
           )}
         </div>
-        {papers.length === 0 ? (
-          <Empty title="No papers yet" hint="Search Scopus above and add some. They appear here once their text has been read." />
+        {pool.isLoading ? (
+          <p role="status" className="flex items-center gap-2 text-sm text-ink-muted">
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            Loading papers…
+          </p>
+        ) : papers.length === 0 ? (
+          <Empty title="No papers yet" hint="Use Add papers to search Scopus. A paper appears here once its text has been read." />
         ) : (
           <>
             {/* A paper is listed only once the pool has loaded, so `pool.data` is set; `?? []` only satisfies the type. */}

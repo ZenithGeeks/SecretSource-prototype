@@ -80,9 +80,9 @@ describe('a running analysis', () => {
 
   it('shows every step on request', () => {
     show([at('queued'), at('extracting')], 'running')
-    fireEvent.click(screen.getByRole('button', { name: 'Show all 2 steps' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show the run log' }))
     expect(screen.getByText('Waiting for a free worker')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Hide the steps' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the run log' }))
     expect(screen.queryByText('Waiting for a free worker')).not.toBeInTheDocument()
   })
 
@@ -132,11 +132,11 @@ describe('a finished analysis', () => {
     at('done', { at: NOW }),
   ]
 
-  it('is one line with the outcome of every citation check and the time taken', () => {
+  it('is one line with the claims, the citations checked and the time taken', () => {
     show(full, 'done')
     expect(screen.getByText('Finished')).toBeInTheDocument()
     expect(screen.getByText('3 claims')).toBeInTheDocument()
-    expect(screen.getByText('4 citation checks: 1 backed, 1 contradicted, 1 silent, 1 not checked')).toBeInTheDocument()
+    expect(screen.getByText('4 citations checked')).toBeInTheDocument()
     expect(screen.getByText('5 min')).toBeInTheDocument()
   })
 
@@ -148,12 +148,27 @@ describe('a finished analysis', () => {
 
   it('counts checks with no outcome to list', () => {
     show([at('extracted'), at('planned', { checks: 2 }), at('done')], 'done')
-    expect(screen.getByText('0 citation checks')).toBeInTheDocument()
+    expect(screen.getByText('0 citations checked')).toBeInTheDocument()
   })
 
   it('says Stopped for a run that ended in error', () => {
     show([at('queued'), at('error', { message: 'boom' })], 'error')
     expect(screen.getByText('Stopped')).toBeInTheDocument()
+  })
+
+  it('opens a stopped run on its steps, with its lowercase "started" time, and folds it to one line', () => {
+    render(<AnalysisProgress stages={[at('queued'), at('error', { message: 'boom' })]} claims={claims} status="error" when="Started 8 Nov 2026, 17:40" />)
+    expect(within(tile('Read the paper')).getByText('Stopped here')).toBeInTheDocument()
+    expect(screen.getByText(/· started 8 Nov 2026, 17:40/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide details' }))
+    expect(screen.getByText('started 8 Nov 2026, 17:40')).toBeInTheDocument()
+    expect(screen.getByText('Stopped')).toBeInTheDocument()
+  })
+
+  it('marks the step a run stopped at, and the bar, as a warning', () => {
+    show([at('queued'), at('error', { message: 'boom' })], 'error')
+    expect(tile('Read the paper').closest('li')).toHaveClass('bg-insufficient-soft')
+    expect(bar().firstElementChild).toHaveClass('bg-insufficient')
   })
 
   it('opens the four tiles on request and folds again', () => {
@@ -169,22 +184,34 @@ describe('a finished analysis', () => {
 
   it('shows where a stopped run got to', () => {
     show([at('queued'), at('extracting'), at('error', { message: 'boom' })], 'error')
-    fireEvent.click(screen.getByRole('button', { name: /Details/ }))
     expect(screen.getByText('Stopped')).toBeInTheDocument()
-    expect(tile('Find the claims').querySelector('.text-refutes')).toBeInTheDocument()
+    expect(tile('Find the claims').querySelector('.text-ink-muted')).toBeInTheDocument()
+    // The bar stops at the one finished tile of four, and the tiles after it say they did not run.
+    expect(bar()).toHaveAttribute('aria-valuenow', '25')
+    expect(within(tile('Match citations')).getByText('Not run')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting')).not.toBeInTheDocument()
   })
 
   it('shows a run stopped after reading as failed on the matching tile', () => {
     show([at('queued'), at('extracted', { claims: 1 }), at('error', { message: 'boom' })], 'error')
-    fireEvent.click(screen.getByRole('button', { name: /Details/ }))
-    expect(tile('Match citations').querySelector('.text-refutes')).toBeInTheDocument()
+    expect(tile('Match citations').querySelector('.text-insufficient')).toBeInTheDocument()
     expect(tile('Find the claims').querySelector('.text-supports')).toBeInTheDocument()
+    expect(bar()).toHaveAttribute('aria-valuenow', '50')
   })
 
   it('shows a stopped run that never started reading as failed on the first tile', () => {
     show([at('queued'), at('error', { message: 'boom' })], 'error')
-    fireEvent.click(screen.getByRole('button', { name: /Details/ }))
-    expect(tile('Read the paper').querySelector('.text-refutes')).toBeInTheDocument()
+    expect(tile('Read the paper').querySelector('.text-insufficient')).toBeInTheDocument()
+  })
+
+  it('says Stopped here on the step a run stopped at', () => {
+    show([at('queued'), at('error', { message: 'boom' })], 'error')
+    expect(within(tile('Read the paper')).getByText('Stopped here')).toBeInTheDocument()
+  })
+
+  it('puts the detail of the step after Stopped here', () => {
+    show([at('queued'), at('extracted', { claims: 1 }), at('planned', { checks: 2 }), at('error', { message: 'boom' })], 'error')
+    expect(within(tile('Match citations')).getByText('Stopped here · 0 of 2 found')).toBeInTheDocument()
   })
 
   it('shows a plan whose checks never ran as in progress', () => {

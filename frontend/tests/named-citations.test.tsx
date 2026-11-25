@@ -1,5 +1,5 @@
 /** A claim about the paper's own work cites a benchmark or model only to name it. Those citations
- * are not checked, and the claim is "Names what it uses", not "Not checked" (#475). */
+ * are not checked, and the claim is "Names a tool or dataset", not "Not checked" (#475). */
 
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
@@ -40,7 +40,7 @@ describe('a claim that only names what it uses', () => {
 
     fireEvent.click(screen.getByRole('button', { expanded: false }))
 
-    expect(screen.getByText('Names what it uses')).toBeInTheDocument()
+    expect(screen.getByText('Names a tool or dataset')).toBeInTheDocument()
     expect(screen.getByText(/only names this as something the paper used/)).toBeInTheDocument()
     expect(screen.queryByText(/verification did not run/)).not.toBeInTheDocument()
   })

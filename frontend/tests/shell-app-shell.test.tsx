@@ -248,3 +248,26 @@ describe('the sidebar', () => {
     expect(screen.getByRole('button', { name: /Alex/ })).toHaveClass('border-accent')
   })
 })
+
+describe('the Main nav', () => {
+  const mainNav = () => within(screen.getAllByRole('navigation', { name: 'Main' })[0])
+
+  it('is one Tab stop, on the current screen', () => {
+    shell({ active: 'library' })
+    expect(mainNav().getByRole('button', { name: 'Library' })).toHaveAttribute('tabindex', '0')
+    expect(mainNav().getByRole('button', { name: 'Home' })).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('puts the first screen on the Tab stop when none is current', () => {
+    shell({ active: 'settings' })
+    expect(mainNav().getByRole('button', { name: 'Home' })).toHaveAttribute('tabindex', '0')
+    expect(mainNav().getByRole('button', { name: 'Library' })).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('moves focus to the next screen on ArrowDown', () => {
+    shell()
+    mainNav().getByRole('button', { name: 'Home' }).focus()
+    fireEvent.keyDown(mainNav().getByRole('button', { name: 'Home' }), { key: 'ArrowDown' })
+    expect(mainNav().getByRole('button', { name: 'Library' })).toHaveFocus()
+  })
+})

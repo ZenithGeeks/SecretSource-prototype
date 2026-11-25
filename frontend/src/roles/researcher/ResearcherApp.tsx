@@ -22,6 +22,7 @@ import { AppShell } from '../../components/AppShell'
 import { type AskNode, useAsk } from '../../components/Ask'
 import { useHistoryWorkspace } from '../../components/HistoryWorkspace'
 import { SettingsModal } from '../../components/SettingsModal'
+import { standingsIn, type Standing } from '../../lib/claims'
 import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { Graph } from './screens/Graph'
@@ -53,19 +54,26 @@ function initialScreen(): ResearcherScreen {
   return params.get('analysis') ? 'analyses' : 'home'
 }
 
-/** Keeps `?screen=`/`?analysis=` in sync with what's showing, so a refresh reopens the same
- * screen and, on Analyses, the same analysis (#132) instead of the params only ever being
- * read at mount. Reads the URL fresh each time so Root's own `?role=` param is untouched. */
-function syncScreenParams(screen: ResearcherScreen, selected: string | null, keepHistory: boolean) {
+/** Keeps `?screen=`/`?analysis=`/`?standing=` in sync with what's showing, so a refresh reopens
+ * the same screen and, on Analyses, the same analysis (#132) with the same tile filter, instead
+ * of the params only ever being read at mount. Reads the URL fresh each time so Root's own
+ * `?role=` param is untouched. */
+function syncScreenParams(screen: ResearcherScreen, selected: string | null, filter: Standing | null, keepHistory: boolean) {
   const params = new URLSearchParams(window.location.search)
-  // A new screen is a new history entry, so Back returns to the screen before it. Opening a
-  // different analysis on the same screen only rewrites the entry it is on.
-  const newScreen = keepHistory && params.get('screen') !== screen
+  const analysis = screen === 'analyses' ? selected : null
+  // A new screen, or another analysis (or another run of one), is a new history entry, so Back
+  // returns to the page before it.
+  const newPage = keepHistory && (params.get('screen') !== screen || params.get('analysis') !== analysis)
   params.set('screen', screen)
-  if (screen === 'analyses' && selected) params.set('analysis', selected)
+  if (analysis) params.set('analysis', analysis)
   else params.delete('analysis')
-  if (newScreen) window.history.pushState(null, '', `?${params}`)
-  else window.history.replaceState(null, '', `?${params}`)
+  // An analysis's filter is its tile; the Analyses list writes its own filter, which a list
+  // reached from elsewhere starts without.
+  if (analysis && filter) params.set('standing', filter)
+  else if (analysis || newPage || screen !== 'analyses') params.delete('standing')
+  if (newPage) window.history.pushState(null, '', `?${params}`)
+  // Keeps what the Analyses list saved in the entry's state (search, filter, scroll).
+  else window.history.replaceState(window.history.state, '', `?${params}`)
 }
 
 const NOTHING_TO_GRAPH = {
@@ -85,26 +93,32 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
   // The first sync only normalises the URL it opened with; later ones follow the reader.
   const synced = useRef(false)
   useEffect(() => {
-    syncScreenParams(screen, history.selected, synced.current)
+    syncScreenParams(screen, history.selected, history.filter, synced.current)
     synced.current = true
-  }, [screen, history.selected])
+  }, [screen, history.selected, history.filter])
   // Back and Forward: show the screen (and analysis) the address now names.
-  const openFromHistory = history.open
+  const selectFromHistory = history.select
   useEffect(() => {
     const onPop = () => {
+      const params = new URLSearchParams(window.location.search)
       setScreen(initialScreen())
-      const analysis = new URLSearchParams(window.location.search).get('analysis')
-      if (analysis) openFromHistory(analysis)
+      const analysis = params.get('analysis')
+      selectFromHistory(analysis, analysis ? (standingsIn(params.get('standing'))[0] ?? null) : null)
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [openFromHistory])
+  }, [selectFromHistory])
 
   const [graphNode, setGraphNode] = useState<AskNode | null>(null)
   const onGraph = screen === 'graph' || screen === 'field-consensus'
   const navigate = (next: ResearcherScreen) => {
     setScreen(next)
     history.closePage()
+  }
+  // The nav's Analyses, picked with an analysis open, goes back to the list as the breadcrumb does.
+  const pickNav = (next: ResearcherScreen) => {
+    if (next === 'analyses' && screen === 'analyses') history.select(null)
+    navigate(next)
   }
   /** Open one analysis on Analyses, from anywhere a paper or claim is listed. */
   const openAnalysis = (id: string) => {
@@ -145,7 +159,7 @@ export function ResearcherApp({ onChangeRole, onSwitchRole }: { onChangeRole?: (
     <AppShell
       nav={NAV}
       active={screen}
-      onNavigate={navigate}
+      onNavigate={pickNav}
       role="Researcher"
       roleIcon={Microscope}
       onChangeRole={onChangeRole}

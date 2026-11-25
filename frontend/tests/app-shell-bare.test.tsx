@@ -54,7 +54,7 @@ test('the default shell has the sidebar, the phone top bar and the toolbar, with
   expect(screen.getByRole('button', { name: 'Ask AI' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument()
   expect(screen.getByRole('main')).toHaveClass('mx-auto', 'max-w-6xl', 'px-4', 'py-6')
-  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-[52px]', 'lg:h-[calc(100vh-52px)]', 'lg:w-[400px]')
+  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-13', 'lg:h-[calc(100vh-var(--spacing)*13)]', 'lg:w-100')
 })
 
 test('a bare shell has none of them: the content fills the window and the panel runs its full height', () => {
@@ -67,7 +67,7 @@ test('a bare shell has none of them: the content fills the window and the panel 
   expect(screen.getByText('content')).toBeInTheDocument()
   expect(screen.getByRole('main')).toHaveClass('h-screen', 'overflow-hidden')
   expect(screen.getByRole('main')).not.toHaveClass('max-w-6xl')
-  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-0', 'lg:h-screen', 'lg:w-[400px]')
+  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-0', 'lg:h-screen', 'lg:w-100')
 })
 
 test('moving between the default shell and a bare one keeps the panel mounted', () => {
@@ -134,7 +134,7 @@ test('a full-width screen can put a header row in the top bar, and draws it in p
   )
   expect(screen.getByText('Claim strip').closest('main')).toBeNull()
   const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' }).parentElement
-  expect(breadcrumb).toHaveClass('max-w-xs', 'lg:shrink-0')
+  expect(breadcrumb).toHaveClass('max-w-md', 'lg:shrink-0')
   expect(breadcrumb).not.toHaveClass('shrink-0')
   expect(breadcrumb?.nextElementSibling).toHaveClass('shrink-0', 'lg:flex-1', 'lg:shrink')
   unmount()

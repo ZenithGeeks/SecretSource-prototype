@@ -36,7 +36,7 @@ export function GraphSegmented<T extends string>({
       role="radiogroup"
       aria-label={label}
       onKeyDown={move}
-      className="inline-flex gap-0.5 rounded-[9px] bg-neutral-soft p-0.5"
+      className="inline-flex gap-0.5 rounded-lg bg-neutral-soft p-0.5"
     >
       {options.map((option) => {
         const on = option.key === value
@@ -49,7 +49,7 @@ export function GraphSegmented<T extends string>({
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(option.key)}
             className={cn(
-              'rounded-lg px-3.5 py-[5px] text-[13px] leading-[18px] font-medium whitespace-nowrap transition-colors pointer-coarse:min-h-11',
+              'rounded-lg px-3.5 py-1.25 text-ui leading-4.5 font-medium whitespace-nowrap transition-colors pointer-coarse:min-h-11',
               on ? 'bg-surface text-ink shadow-[0_1px_1px_rgba(31,20,36,0.04)]' : 'text-ink-muted hover:text-ink',
             )}
           >

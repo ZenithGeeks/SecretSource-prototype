@@ -95,7 +95,7 @@ export function BibliographyCard({
                       className={`flex w-full min-w-0 flex-col items-start gap-0.5 px-5 py-2.5 text-left hover:bg-accent-soft/40 ${FOCUS}`}
                       aria-label={`${WARNING_TITLE[w.type]}: ${w.detail}${elsewhere ? ` in ${elsewhere}` : ''}. Open ${w.file} line ${w.line} in the editor`}
                     >
-                      <span className={cn('text-[13px]', WARNING_TONE[w.type])}>{WARNING_TITLE[w.type]}</span>
+                      <span className={cn('text-ui', WARNING_TONE[w.type])}>{WARNING_TITLE[w.type]}</span>
                       <span title={w.detail} className="max-w-full truncate font-mono text-xs text-ink-muted">
                         {w.detail}
                         {elsewhere && ` · ${elsewhere}`}
@@ -109,7 +109,7 @@ export function BibliographyCard({
           <div className={cn('px-5 py-3', warnings.length > 0 && 'border-t border-border-subtle')}>
             <TextLink
               onClick={() => (first ? openAt(first) : onOpenEditor({ draftId }))}
-              className="text-[13px]"
+              className="text-ui"
               data-ask-target={askTarget({ kind: 'action', id: 'fix-in-editor' })}
             >
               Fix in editor

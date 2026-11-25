@@ -60,6 +60,77 @@ beforeEach(() => {
   gateway.findInPaper.mockResolvedValue({ page: null, boxes: [] })
 })
 
+describe('what the other cited works said, beside the standing', () => {
+  const second = cite({ title: 'Layer Norm', doi: '10.1/ln' })
+  const third = cite({ title: 'Weight Norm', doi: '10.1/wn' })
+  const claim = {
+    citations: [cite(), second, third],
+    verdicts: [
+      verdict({ verdict: 'refutes' }),
+      verdict({ cited: '10.1/ln', source: 'ln.pdf', verdict: 'insufficient' }),
+      verdict({ cited: '10.1/wn', source: 'wn.pdf' }),
+    ],
+  }
+
+  it('says on the collapsed row how the other works answered', () => {
+    card(claim, { standing: 'refutes', startCollapsed: true })
+    expect(screen.getByText(/^also 1 silent/)).toBeInTheDocument()
+  })
+
+  it('says it on the open card too', () => {
+    card(claim, { standing: 'refutes', startCollapsed: false })
+    expect(screen.getByText(/^also 1 silent/)).toBeInTheDocument()
+  })
+
+  it('counts the works that were not checked too, as the fold below lists them', () => {
+    const fourth = cite({ title: 'Group Norm', doi: '10.1/gn' })
+    card(
+      { ...claim, citations: [...claim.citations, fourth], unchecked: [{ source: 'loose.pdf', reason: 'no-open-access', message: '' }] },
+      { standing: 'refutes', startCollapsed: true },
+    )
+    expect(screen.getByText('also 1 silent, 1 backs it, 2 not checked')).toBeInTheDocument()
+  })
+
+  it('names a contradicting or an unsettled quote from a work that did not decide the claim by its verdict', async () => {
+    const onShow = vi.fn<(target: Target) => void>()
+    const others = {
+      citations: [cite(), second, third],
+      verdicts: [
+        verdict({ verdict: 'refutes' }),
+        verdict({ cited: '10.1/ln', source: 'ln.pdf', verdict: 'refutes', quote: 'ln says no' }),
+        verdict({ cited: '10.1/wn', source: 'wn.pdf', verdict: 'insufficient', quote: 'wn says little' }),
+      ],
+    }
+    card(others, { standing: 'refutes', onShow })
+    fireEvent.click(screen.getByRole('button', { name: /ln says no/ }))
+    fireEvent.click(screen.getByRole('button', { name: /wn says little/ }))
+    const shows = screen.getAllByRole('button', { name: /Show in cited paper/ })
+    fireEvent.click(shows[0])
+    await waitFor(() => expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ label: 'Claim 1 · Contradicting quote in Layer Norm' })))
+    fireEvent.click(shows[1])
+    await waitFor(() => expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ label: 'Claim 1 · Quote in Weight Norm' })))
+  })
+
+  it('says nothing when the card has one answer', () => {
+    card({ verdicts: [verdict({ verdict: 'refutes' })] }, { standing: 'refutes', startCollapsed: true })
+    expect(screen.queryByText(/^also /)).not.toBeInTheDocument()
+  })
+})
+
+describe('the two quotes of an open card', () => {
+  it('sets both upright when either is long, so one card never mixes italic and upright', () => {
+    card({ sentence: 'Short sentence.', verdicts: [verdict({ verdict: 'refutes', quote: 'x'.repeat(250) })] }, { standing: 'refutes' })
+    const quotes = document.querySelectorAll('blockquote')
+    expect(quotes).toHaveLength(2)
+    for (const quote of quotes) expect(quote).not.toHaveClass('italic')
+  })
+
+  it('sets both in italic when both are short', () => {
+    card({ sentence: 'Short sentence.', verdicts: [verdict({ verdict: 'refutes', quote: 'Short quote.' })] }, { standing: 'refutes' })
+    for (const quote of document.querySelectorAll('blockquote')) expect(quote).toHaveClass('italic')
+  })
+})
+
 describe('the collapsed row', () => {
   it('starts collapsed for a claim that needs no reading and shows what it cites', () => {
     card({ verdicts: [verdict()] })
@@ -117,6 +188,11 @@ describe('the open card', () => {
     expect(screen.getByText('This paper · page 4')).toBeInTheDocument()
   })
 
+  it('says the sentence was not found when the claim has no section and no place', () => {
+    card({ sentence: 'Batch norm trains networks much faster.' })
+    expect(screen.getByText('Not found in the paper’s pages')).toBeInTheDocument()
+  })
+
   it('leaves the claim out when it is the sentence word for word', () => {
     card({ claim: 'Training is faster!', sentence: 'training is   faster' })
     expect(screen.queryByText('Training is faster!')).not.toBeInTheDocument()
@@ -161,6 +237,7 @@ describe('the open card', () => {
       label: 'Claim 1 in this paper',
       quote: 'It is faster.',
       source: location,
+      claim: 0,
     })
   })
 
@@ -189,7 +266,22 @@ describe('the sentence and its figures', () => {
   it('shows each named figure once, with its caption', () => {
     card({ sentence }, { paper: 'mine.pdf', figures, onShow: vi.fn() })
     expect(screen.getAllByRole('img')).toHaveLength(1)
-    expect(screen.getByTitle('Figure 2: Accuracy.')).toBeInTheDocument()
+    expect(screen.getByText('Figure 2: Accuracy.')).toBeInTheDocument()
+  })
+
+  it('folds a long caption behind Read all and shows it whole on request', () => {
+    const long = { ...figures[0], caption: `Figure 2: ${'Accuracy by layer. '.repeat(10)}` }
+    card({ sentence: 'See Figure 2.' }, { paper: 'mine.pdf', figures: [long], onShow: vi.fn() })
+    fireEvent.click(screen.getByRole('button', { name: 'Read the full caption' }))
+    expect(screen.getByRole('button', { name: 'Hide the full caption' })).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the full caption' }))
+    expect(screen.getByRole('button', { name: 'Read the full caption' })).toBeInTheDocument()
+  })
+
+  it('offers no Read all for a short caption', () => {
+    card({ sentence: 'See Figure 2.' }, { paper: 'mine.pdf', figures, onShow: vi.fn() })
+    expect(screen.queryByRole('button', { name: 'Read the full caption' })).not.toBeInTheDocument()
+    expect(screen.getByText('Figure 2: Accuracy.')).not.toHaveClass('line-clamp-3')
   })
 
   it('opens the figure from its picture', () => {
@@ -234,7 +326,13 @@ describe('the answer a claim leads with', () => {
     await waitFor(() => expect(onShow).toHaveBeenCalled())
     expect(gateway.findInPaper).toHaveBeenCalledWith('bn.pdf', 'Normalisation hurts.', 7)
     expect(onShow).toHaveBeenCalledWith(
-      expect.objectContaining({ paper: 'bn.pdf', page: 7, verdict: 'refutes', source: expect.objectContaining({ page: 7 }) }),
+      expect.objectContaining({
+        paper: 'bn.pdf',
+        page: 7,
+        verdict: 'refutes',
+        label: 'Claim 1 · Deciding quote in Ioffe et al. 2015',
+        source: expect.objectContaining({ page: 7 }),
+      }),
     )
   })
 
@@ -289,18 +387,26 @@ describe('the answer a claim leads with', () => {
     expect(screen.getByText('Why it isn’t settled')).toBeInTheDocument()
   })
 
-  it('names the source by its file when the claim holds no matching citation', () => {
+  it('calls the source the cited paper, not by its file, when the claim holds no matching citation', () => {
     card({ citations: [], verdicts: [verdict({ verdict: 'insufficient', cited: undefined })] })
-    expect(screen.getAllByText(/bn\.pdf/).length).toBeGreaterThan(0)
+    expect(screen.getByText('Cited paper')).toBeInTheDocument()
+    expect(screen.queryByText(/bn\.pdf/)).not.toBeInTheDocument()
+  })
+
+  it('opens the deciding quote of an unmatched source under the cited paper, numbered by its claim', async () => {
+    const onShow = vi.fn<(target: Target) => void>()
+    card({ citations: [], verdicts: [verdict({ quote: 'q', cited: undefined })] }, { onShow, index: 4, startCollapsed: false, standing: 'insufficient' })
+    fireEvent.click(screen.getByRole('button', { name: /Show in cited paper/ }))
+    await waitFor(() => expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ label: 'Claim 5 · Deciding quote in Cited paper' })))
   })
 
   it('folds a long explanation behind Read all', () => {
     card({ verdicts: [verdict({ verdict: 'insufficient', reasoning: 'long '.repeat(80) })] })
-    const toggle = screen.getByRole('button', { name: 'Read all' })
+    const toggle = screen.getByRole('button', { name: 'Read the full reasoning' })
     fireEvent.click(toggle)
-    expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true')
-    fireEvent.click(screen.getByRole('button', { name: 'Show less' }))
-    expect(screen.getByRole('button', { name: 'Read all' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide the full reasoning' })).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the full reasoning' }))
+    expect(screen.getByRole('button', { name: 'Read the full reasoning' })).toBeInTheDocument()
   })
 
   it('says when the verdict was read off the arXiv copy', () => {
@@ -344,25 +450,27 @@ describe('pages, crops and passages of the leading answer', () => {
   it('opens a page chip at its page with the located crop box', () => {
     card({ verdicts: [verdict({ pages, page_model: 'vidore/colqwen2-v1.0' })] }, { onShow, standing: 'supports', startCollapsed: false })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
-    fireEvent.click(screen.getByRole('button', { name: 'Page 8 in the cited paper' }))
-    expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ page: 8, source: location, label: 'page 8 of bn.pdf' }))
-    expect(screen.getByRole('button', { name: 'Figure 4 in the cited paper' })).toHaveAttribute(
+    // The figures and tables with a crop show as pictures, so only the plain page has a chip.
+    expect(screen.queryByRole('button', { name: 'Page 8 in the cited paper' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Page 3 in the cited paper' }))
+    expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ page: 3, label: 'Claim 1 · page 3 of Batch Normalization' }))
+    expect(screen.getByRole('button', { name: 'Page 3 in the cited paper' })).toHaveAttribute(
       'title',
-      'Found by searching page images with ColQwen2 v1.0',
+      'Found by searching the pages as images',
     )
   })
 
-  it('names the model by its checkpoint when it has no repo path', () => {
-    card({ verdicts: [verdict({ pages, page_model: 'colpali' })] }, { onShow })
+  it('gives a page chip no title when no page search found it', () => {
+    card({ verdicts: [verdict({ pages })] }, { onShow })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
-    expect(screen.getByRole('button', { name: 'Figure 4 in the cited paper' })).toHaveAttribute('title', 'Found by searching page images with ColPali')
+    expect(screen.getByRole('button', { name: 'Page 3 in the cited paper' })).not.toHaveAttribute('title')
   })
 
   it('shows chips as plain labels without a viewer', () => {
     card({ verdicts: [verdict({ pages })] })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
-    expect(screen.getByText('Figure 4 in the cited paper')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Figure 4 in the cited paper' })).not.toBeInTheDocument()
+    expect(screen.getByText('Page 3 in the cited paper')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Page 3 in the cited paper' })).not.toBeInTheDocument()
   })
 
   it('shows the crops of figures and tables, not of whole pages, with a stutter-free caption', () => {
@@ -373,8 +481,8 @@ describe('pages, crops and passages of the leading answer', () => {
     expect(screen.getByText('Figure 5: A graph of loss.')).toBeInTheDocument()
     expect(screen.getByText('Figure 6')).toBeInTheDocument()
     expect(screen.getByText('page 8')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Show Figure 4 on its page in bn.pdf' }))
-    expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ page: 9 }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show Figure 4 on its page in Batch Normalization' }))
+    expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ page: 9, label: 'Claim 1 · Figure 4 of Batch Normalization' }))
   })
 
   it('shows crops without buttons when there is no viewer', () => {
@@ -408,31 +516,144 @@ describe('pages, crops and passages of the leading answer', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 
-  it('lists the retrieved passages on request and opens one in the cited paper', async () => {
+  it('lists the retrieved passages under More evidence and opens one in the cited paper', async () => {
     gateway.findInPaper.mockResolvedValue({ ...location, page: 2 })
     card({ verdicts: [verdict({ evidence })] }, { onShow })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
-    const toggle = screen.getByRole('button', { name: '1 more passages' })
-    fireEvent.click(toggle)
     fireEvent.click(screen.getByRole('button', { name: 'p. 2' }))
     await waitFor(() => expect(onShow).toHaveBeenCalled())
-    expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ label: 'Passage in bn.pdf', quote: 'A passage.' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Hide passages' }))
-    expect(screen.queryByText('A passage.')).not.toBeInTheDocument()
+    expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ label: 'Claim 1 · Passage in Batch Normalization', quote: 'A passage.' }))
+  })
+
+  it('opens the viewer at once with the passage being located, then again with where it was found', async () => {
+    gateway.findInPaper.mockResolvedValue({ ...location, page: 2 })
+    card({ verdicts: [verdict({ evidence })] }, { onShow })
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'p. 2' }))
+    expect(onShow).toHaveBeenNthCalledWith(1, expect.objectContaining({ source: null, locating: true }))
+    await waitFor(() => expect(onShow).toHaveBeenCalledTimes(2))
+    expect(onShow).toHaveBeenLastCalledWith(expect.not.objectContaining({ locating: true }))
+  })
+
+  it('ignores a slow lookup once the reader has clicked again', async () => {
+    const lookups: ((found: object) => void)[] = []
+    gateway.findInPaper.mockImplementation(() => new Promise((resolve) => lookups.push(resolve)))
+    card({ verdicts: [verdict({ evidence })] }, { onShow })
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'p. 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'p. 2' }))
+    await waitFor(() => expect(lookups).toHaveLength(2))
+    lookups[1]({ ...location, page: 2, coverage: 1, page_width: 777 })
+    await waitFor(() => expect(onShow).toHaveBeenLastCalledWith(expect.objectContaining({ source: expect.objectContaining({ page_width: 777 }) })))
+    lookups[0]({ ...location, page: 2, coverage: 1, page_width: 555 })
+    await new Promise((resolve) => setTimeout(resolve))
+    // Two "looking" calls and the second click's answer; the first click's late answer is dropped.
+    expect(onShow).toHaveBeenCalledTimes(3)
+    expect(onShow).not.toHaveBeenCalledWith(expect.objectContaining({ source: expect.objectContaining({ page_width: 555 }) }))
+  })
+
+  it('counts the preprint note, the page chips, the crops and the passages in More evidence', () => {
+    // 1 note + 1 page chip + 4 crops (each figure or table once, as its picture) + 1 passage.
+    card({ verdicts: [verdict({ pages, evidence, source_version: 'preprint', arxiv: '1502.03167' })] })
+    open()
+    const details = screen.getByText('More evidence (7)').closest('details') as HTMLElement
+    expect(details).not.toHaveAttribute('open')
+    expect(within(details).getByText(/Checked against the arXiv preprint 1502\.03167/)).toBeInTheDocument()
+    expect(within(details).getByText('Page 3 in the cited paper')).toBeInTheDocument()
+    expect(within(details).getByText('“A passage.”')).toBeInTheDocument()
+  })
+
+  it('counts only the passages when nothing else is behind the verdict', () => {
+    card({ verdicts: [verdict({ evidence })] })
+    open()
+    expect(screen.getByText('More evidence (1)')).toBeInTheDocument()
+  })
+
+  it('has no More evidence when there is nothing behind the verdict', () => {
+    card({ verdicts: [verdict()] })
+    open()
+    expect(screen.queryByText(/More evidence/)).not.toBeInTheDocument()
+  })
+
+  it('turns the More evidence chevron down when it opens and back when it closes', () => {
+    card({ verdicts: [verdict({ evidence })] })
+    open()
+    const summary = screen.getByText('More evidence (1)')
+    const details = summary.closest('details') as HTMLDetailsElement
+    details.open = true
+    fireEvent(details, new Event('toggle'))
+    expect(summary.querySelector('svg')?.getAttribute('class')).toContain('lucide-chevron-down')
+    details.open = false
+    fireEvent(details, new Event('toggle'))
+    expect(summary.querySelector('svg')?.getAttribute('class')).toContain('lucide-chevron-right')
+  })
+
+  it('names a passage by the cited paper when no citation of the claim matches the source', async () => {
+    gateway.findInPaper.mockResolvedValue({ ...location, page: 2 })
+    card({ citations: [], verdicts: [verdict({ evidence })] }, { onShow })
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'p. 2' }))
+    await waitFor(() => expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ label: 'Claim 1 · Passage in the cited paper' })))
   })
 
   it('lists passages with a plain page number when there is no viewer', () => {
     card({ verdicts: [verdict({ evidence })] })
     fireEvent.click(screen.getByRole('button', { expanded: false }))
-    fireEvent.click(screen.getByRole('button', { name: '1 more passages' }))
     expect(screen.getByText('p. 2')).toBeInTheDocument()
-    expect(screen.getByText('A passage.')).toBeInTheDocument()
+    expect(screen.getByText('“A passage.”')).toBeInTheDocument()
   })
+
+  it('cuts a long passage at three lines until the reader asks for all of it', () => {
+    const long = 'Normalizing each layer. '.repeat(20)
+    card({ verdicts: [verdict({ evidence: [{ ...evidence[0], text: long }] })] })
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    const quote = screen.getByText(`“${long}”`)
+    expect(quote.className).toContain('line-clamp-3')
+    fireEvent.click(screen.getByRole('button', { name: 'Read the full passage' }))
+    expect(quote.className).not.toContain('line-clamp-3')
+    expect(screen.getByRole('button', { name: 'Hide the full passage' })).toBeInTheDocument()
+  })
+
+  it('has no Read the full passage button for a short passage', () => {
+    card({ verdicts: [verdict({ evidence })] })
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    expect(screen.queryByRole('button', { name: 'Read the full passage' })).not.toBeInTheDocument()
+    expect(screen.getByText('“A passage.”')).not.toHaveClass('line-clamp-3')
+  })
+})
+
+it('links and numbers the deciding citation without duplicating its answer', () => {
+  card({ citations: [cite({ label: '13' })], verdicts: [verdict()] })
+  fireEvent.click(screen.getByRole('button', { expanded: false }))
+  expect(screen.getByRole('link', { name: /Ioffe et al/ })).toHaveAttribute('href', 'https://doi.org/10.1/bn')
+  expect(screen.getByText('[13]')).toBeInTheDocument()
+  expect(screen.queryByText(/Other cited works/)).not.toBeInTheDocument()
 })
 
 describe('the other cited works', () => {
   const second = cite({ title: 'Layer Norm', doi: '10.1/ln', authors: ['Ba'], year: '2016', label: '7', url: '' })
   const third = cite({ title: 'Web page', doi: '', arxiv: '', url: 'https://example.org/p', authors: [], year: '' })
+
+  it('folds the other cited works behind a count of them, with a badge for how each came out', () => {
+    card(
+      { citations: [cite(), second, third], verdicts: [verdict({ verdict: 'refutes' }), verdict({ cited: '10.1/ln', source: 'ln.pdf' })] },
+      { standing: 'refutes' },
+    )
+    const summary = screen.getByText(/2 other cited works/)
+    expect(summary).toHaveTextContent('Source backs it: 1')
+    expect(summary).toHaveTextContent('Not checked: 1')
+    expect(screen.queryByRole('heading', { name: 'Cited works' })).not.toBeInTheDocument()
+  })
+
+  it('counts a single other cited work in the singular, and opens and closes the fold', () => {
+    card({ citations: [cite(), second], verdicts: [verdict({ verdict: 'refutes' })] }, { standing: 'refutes' })
+    const details = screen.getByText(/1 other cited work$/).closest('details') as HTMLDetailsElement
+    details.open = true
+    fireEvent(details, new Event('toggle'))
+    details.open = false
+    fireEvent(details, new Event('toggle'))
+    expect(details).not.toHaveAttribute('open')
+  })
 
   it('shows a one-line answer that opens to the quote, the reasoning and the pages', () => {
     const onShow = vi.fn<(target: Target) => void>()
@@ -459,7 +680,7 @@ describe('the other cited works', () => {
     expect(screen.getByText('What the cited paper says · page 5')).toBeInTheDocument()
     expect(screen.getByText('Second reasoning.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Page 5 in the cited paper' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '1 more passages' }))
+    expect(screen.getByText('More evidence (2)')).toBeInTheDocument()
     expect(screen.getByText('p. 5')).toBeInTheDocument()
     fireEvent.click(screen.getAllByRole('button', { expanded: true })[1])
     expect(screen.getByRole('button', { name: /Layer norm helps\./ })).toBeInTheDocument()
@@ -484,7 +705,10 @@ describe('the other cited works', () => {
     const { unmount } = card(claim, { onShow })
     fireEvent.click(screen.getByRole('button', { name: /qq/ }))
     fireEvent.click(screen.getByRole('button', { name: /Show in cited paper/ }))
-    await waitFor(() => expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ paper: 'ln.pdf', quote: 'qq' })))
+    // Not the deciding work: the viewer names the quote by its own verdict.
+    await waitFor(() =>
+      expect(onShow).toHaveBeenCalledWith(expect.objectContaining({ paper: 'ln.pdf', quote: 'qq', label: 'Claim 1 · Supporting quote in Layer Norm' })),
+    )
     unmount()
     card(claim)
     fireEvent.click(screen.getByRole('button', { name: /qq/ }))
@@ -500,7 +724,9 @@ describe('the other cited works', () => {
       ],
     })
     expect(screen.getByText('— withdrawn by its authors on arXiv')).toBeInTheDocument()
-    expect(screen.getByText('HTTP 403')).toBeInTheDocument()
+    const details = screen.getByText('Technical details').closest('details')
+    expect(details).toHaveTextContent('HTTP 403')
+    expect(screen.getAllByText('Technical details')).toHaveLength(1)
   })
 
   it('links a work by its DOI, or by its url, or not at all', () => {
@@ -522,9 +748,17 @@ describe('the other cited works', () => {
       verdicts: [verdict({ verdict: 'refutes' }), verdict({ verdict: 'insufficient', cited: 'stray', source: 'stray.pdf', reasoning: 'Stray reasoning.' })],
       unchecked: [{ source: 'lost', reason: 'failed', message: '' }],
     })
-    const loose = screen.getByTitle('stray.pdf').parentElement as HTMLElement
+    const loose = screen.getByTitle('stray').parentElement as HTMLElement
     fireEvent.click(within(loose).getByRole('button'))
     expect(screen.getByText('Stray reasoning.')).toBeInTheDocument()
     expect(screen.getByTitle('lost')).toBeInTheDocument()
+  })
+
+  it('names a loose answer by its file when it has no citation text', () => {
+    card({
+      citations: [cite()],
+      verdicts: [verdict({ verdict: 'refutes' }), verdict({ verdict: 'insufficient', cited: '', source: 'stray.pdf', reasoning: 'Stray reasoning.' })],
+    })
+    expect(screen.getByTitle('stray.pdf')).toHaveTextContent('stray.pdf')
   })
 })

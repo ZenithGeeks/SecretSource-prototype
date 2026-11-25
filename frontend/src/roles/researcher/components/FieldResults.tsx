@@ -37,19 +37,19 @@ export function FieldCountTiles({ consensus }: { consensus: FieldConsensus }) {
 function Row({ row, onOpenAnalysis }: { row: ConsensusRow; onOpenAnalysis: (id: string) => void }) {
   return (
     <div data-testid="consensus-row" className="flex flex-col gap-2 border-t border-border-subtle px-4 py-3.5 sm:flex-row sm:gap-5 sm:px-5">
-      <div className="flex flex-col gap-0.5 sm:w-[220px] sm:shrink-0">
-        <p className="text-[13px] leading-[18px] font-medium text-ink">{row.paper}</p>
+      <div className="flex flex-col gap-0.5 sm:w-55 sm:shrink-0">
+        <p className="text-ui leading-4.5 font-medium text-ink">{row.paper}</p>
         <p className="text-xs leading-4 text-ink-muted">{row.cite}</p>
       </div>
-      <div className="sm:w-[150px] sm:shrink-0">
+      <div className="sm:w-37.5 sm:shrink-0">
         <VerdictBadge verdict={row.verdict} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        {row.quote && <p className="font-serif text-[15px] leading-[22px] italic text-ink">“{row.quote}”</p>}
+        {row.quote && <p className="font-serif text-reading leading-5.5 italic text-ink">“{row.quote}”</p>}
         <p className="text-xs leading-4 text-ink-muted">On the claim: {row.claim}</p>
         <TextButton
           onClick={() => onOpenAnalysis(row.analysis)}
-          className="self-start text-[13px] leading-[18px]"
+          className="self-start text-ui leading-4.5"
         >
           Open the analysis <span className="sr-only">of {row.paper}</span>
         </TextButton>
@@ -75,15 +75,15 @@ export function FieldVerdictTable({
   return (
     <div className="overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-card">
       <div className="hidden gap-5 px-5 py-3 sm:flex">
-        <span className="type-label w-[220px] shrink-0 text-ink-muted">Paper</span>
-        <span className="type-label w-[150px] shrink-0 text-ink-muted">Verdict</span>
+        <span className="type-label w-55 shrink-0 text-ink-muted">Paper</span>
+        <span className="type-label w-37.5 shrink-0 text-ink-muted">Verdict</span>
         <span className="type-label flex-1 text-ink-muted">Deciding passage</span>
       </div>
       {shown.map((row) => (
         <Row key={`${row.analysis}-${row.claimIndex}-${row.paper}-${row.verdict}`} row={row} onOpenAnalysis={onOpenAnalysis} />
       ))}
       {decisive.length > 0 && silent.length > 0 && (
-        <div className="flex items-center gap-1.5 border-t border-border-subtle px-5 py-3 text-[13px] leading-[18px]">
+        <div className="flex items-center gap-1.5 border-t border-border-subtle px-5 py-3 text-ui leading-4.5">
           <span className="text-ink-muted">
             {silent.length} {silent.length === 1 ? 'paper is' : 'papers are'} silent or not checked
           </span>

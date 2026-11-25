@@ -59,7 +59,7 @@ function CompareTable({ checkId, onClose }: { checkId: string; onClose: () => vo
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+        <p className="text-caption font-medium uppercase tracking-wide text-ink-muted">
           v{current.version} vs v{previous.version} · {changed.length} change{changed.length === 1 ? '' : 's'}
         </p>
         <TextLink onClick={onClose}>close</TextLink>
@@ -124,7 +124,7 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
               <div data-ask-target={askTarget({ kind: 'check', id: run.id })} className="flex items-center gap-3 border-b border-border-subtle py-2">
                 <Clock className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium text-ink">
+                  <p className="text-ui font-medium text-ink">
                     v{run.version} · <CheckedAt iso={run.finishedAt} />
                   </p>
                   <p className="text-xs text-ink-muted">{countsLine(run)}</p>
@@ -135,7 +135,7 @@ function CheckHistory({ draft, runs, onOpenEditor }: { draft: Draft; runs: Check
               </div>
               {run.sinceLastCheck && run.previousVersion !== null && (
                 <div className="my-2 flex flex-col gap-1 rounded-lg bg-canvas px-3 py-2.5">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Since v{run.previousVersion}</p>
+                  <p className="text-caption font-medium uppercase tracking-wide text-ink-muted">Since v{run.previousVersion}</p>
                   <p className="text-xs text-ink">
                     {run.sinceLastCheck.addedCitations >= 0 ? '+' : ''}
                     {run.sinceLastCheck.addedCitations} citation{Math.abs(run.sinceLastCheck.addedCitations) === 1 ? '' : 's'} ·{' '}
@@ -173,7 +173,7 @@ function UnsortedSources({ sources }: { sources: SavedSource[] }) {
           {sources.map((source) => (
             <li key={source.id} data-ask-target={askTarget({ kind: 'source', id: source.id })} className="flex items-center gap-3 border-b border-border-subtle py-2">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-medium text-ink">
+                <p className="truncate text-ui font-medium text-ink">
                   {source.authors}
                   {source.year ? ` (${source.year})` : ''} · {source.title}
                 </p>
@@ -188,7 +188,7 @@ function UnsortedSources({ sources }: { sources: SavedSource[] }) {
                 type="button"
                 aria-label={`Delete ${source.title}`}
                 onClick={() => setDeleting(source)}
-                className={`rounded text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
+                className={`rounded-sm text-ink-muted hover:text-refutes ${HIGHLIGHT}`}
               >
                 <Trash2 className="size-4" aria-hidden="true" />
               </button>
@@ -439,11 +439,11 @@ function DraftList({
                 onDoubleClick={() => onOpenEditor(draft.id)}
                 aria-current={draft.id === selected ? 'true' : undefined}
                 data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
-                className={cn('flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40', FOCUS, draft.id === selected && 'bg-accent-soft/60')}
+                className={cn('flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 py-2 text-left hover:bg-accent-soft/40', FOCUS, draft.id === selected && 'bg-accent-soft/60')}
               >
                 <FileText className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate text-[13px] font-medium text-ink">{draft.title}</span>
+                  <span className="truncate text-ui font-medium text-ink">{draft.title}</span>
                   <span className="text-xs text-ink-muted">
                     v{draft.version} · {editedLabel(draft.edited ?? draft.updated)} · {checkedLabel(draft.lastCheckedAt)}
                   </span>

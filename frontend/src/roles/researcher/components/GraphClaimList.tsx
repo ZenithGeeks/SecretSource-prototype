@@ -4,15 +4,12 @@
  * as tapping its dot, so the detail panel opens beside the graph.
  */
 
-import type { Standing } from '../../../lib/claims'
+import { STANDINGS, type Standing } from '../../../lib/claims'
 import { stepRows } from '../../../lib/stepRows'
 import { VerdictBadge } from '../../../components/ui'
 import { cn } from '../../../lib/utils'
 
 export type ClaimRow = { id: string; label: string; standing: Standing }
-
-/** Contradicted claims first, then silent, backed and not yet checked. */
-const ORDER: Standing[] = ['refutes', 'insufficient', 'supports', 'unchecked']
 
 export function GraphClaimList({
   rows,
@@ -27,14 +24,15 @@ export function GraphClaimList({
   selectedId: string | null
   onSelect: (id: string) => void
 }) {
-  const ordered = [...rows].sort((a, b) => ORDER.indexOf(a.standing) - ORDER.indexOf(b.standing))
+  // Worst first, in the one order every list of standings uses.
+  const ordered = [...rows].sort((a, b) => STANDINGS.indexOf(a.standing) - STANDINGS.indexOf(b.standing))
   return (
     <details className="rounded-xl border border-border-subtle bg-surface">
-      <summary className="cursor-pointer rounded-xl px-4 py-3 text-[13px] font-medium text-ink pointer-coarse:min-h-11">
+      <summary className="cursor-pointer rounded-xl px-4 py-3 text-ui font-medium text-ink pointer-coarse:min-h-11">
         Claims as a list · {rows.length === total ? total : `${rows.length} of ${total}`}
       </summary>
       {rows.length === 0 && (
-        <p className="border-t border-border-subtle px-4 py-3 text-[13px] text-ink-muted">No claim matches the filter.</p>
+        <p className="border-t border-border-subtle px-4 py-3 text-ui text-ink-muted">No claim matches the filter.</p>
       )}
       <ul onKeyDown={stepRows} className="max-h-80 overflow-y-auto border-t border-border-subtle">
         {ordered.map((row) => (
@@ -48,7 +46,7 @@ export function GraphClaimList({
                 selectedId === row.id && 'bg-accent-soft',
               )}
             >
-              <span className="line-clamp-2 text-[13px] leading-5 text-ink">{row.label}</span>
+              <span className="line-clamp-2 text-ui leading-5 text-ink">{row.label}</span>
               <VerdictBadge verdict={row.standing} />
             </button>
           </li>

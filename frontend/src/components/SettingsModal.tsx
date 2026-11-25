@@ -26,7 +26,7 @@ const GROUP_ORDER: SettingsTabDef['group'][] = ['general', 'role', 'viewing']
 
 function GroupLabel({ children }: { children: string }) {
   return (
-    <p role="presentation" className="px-2.5 pb-1.5 pt-3.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-muted">
+    <p role="presentation" className="px-2.5 pb-1.5 pt-3.5 text-caption font-semibold uppercase tracking-[0.04em] text-ink-muted">
       {children}
     </p>
   )
@@ -54,7 +54,7 @@ function NavButton({
       tabIndex={active ? 0 : -1}
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-[13px] leading-[18px] outline-none',
+        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.75 text-left text-ui leading-4.5 outline-none',
         'focus-visible:ring-2 focus-visible:ring-accent',
         active ? 'bg-accent-soft font-semibold text-accent' : 'font-medium text-ink hover:bg-accent-soft',
       )}
@@ -193,9 +193,9 @@ export function SettingsModal({
         aria-modal="true"
         aria-label="Settings"
         tabIndex={-1}
-        className="relative flex h-full w-full flex-col overflow-hidden border border-border-subtle bg-surface shadow-2xl outline-none sm:h-[620px] sm:max-h-full sm:max-w-[900px] sm:flex-row sm:rounded-[20px]"
+        className="relative flex size-full flex-col overflow-hidden border border-border-subtle bg-surface shadow-2xl outline-none sm:h-155 sm:max-h-full sm:max-w-4xl sm:flex-row sm:rounded-[20px]"
       >
-        <aside className="flex max-h-[40vh] w-full shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-border-subtle bg-canvas px-3 py-4 sm:h-full sm:max-h-none sm:w-[240px] sm:border-b-0 sm:border-r">
+        <aside className="flex max-h-[40vh] w-full shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-border-subtle bg-canvas px-3 py-4 sm:h-full sm:max-h-none sm:w-60 sm:border-b-0 sm:border-r">
           <div className="relative">
             <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
             <input
@@ -203,7 +203,7 @@ export function SettingsModal({
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search settings"
               aria-label="Search settings"
-              className="h-9 w-full rounded-[9px] border border-border-subtle bg-surface pl-8 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-muted focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+              className="h-9 w-full rounded-lg border border-border-subtle bg-surface pl-8 pr-3 text-ui text-ink outline-none placeholder:text-ink-muted focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent"
             />
           </div>
           {visibleTabs.length > 0 && (
@@ -262,7 +262,7 @@ export function SettingsModal({
             <h1 className="sr-only">Settings</h1>
             {activeVisible ? active.content : <p className="text-sm text-ink-muted">No settings match "{search}".</p>}
           </div>
-          <p className="flex shrink-0 items-center gap-1.5 px-4 py-4 text-xs leading-4 text-ink-muted sm:px-7">
+          <p className="flex shrink-0 items-center gap-1.5 p-4 text-xs leading-4 text-ink-muted sm:px-7">
             <CircleCheck aria-hidden className="size-4 shrink-0 text-supports" />
             Changes save as you go. They apply to new checks; nothing already checked is re-run.
           </p>
@@ -272,7 +272,7 @@ export function SettingsModal({
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="absolute right-5 top-5 flex size-8 items-center justify-center rounded-[9px] text-ink-muted outline-none hover:bg-accent-soft hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
+          className="absolute right-5 top-5 flex size-8 items-center justify-center rounded-lg text-ink-muted outline-none hover:bg-accent-soft hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
         >
           <X aria-hidden className="size-4" />
         </button>

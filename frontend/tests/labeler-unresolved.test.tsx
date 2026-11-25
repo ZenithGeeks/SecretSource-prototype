@@ -171,11 +171,11 @@ describe('UnresolvedReferences', () => {
   })
 
   it('shows a card with the marker, title, year, reason and a link that opens in a new tab', () => {
-    render(<UnresolvedReferences citations={[card()]} />)
-    const pane = within(screen.getByRole('region', { name: 'Reference not found' }))
-    expect(pane.getByText('This claim cites 1 work we could not read.')).toBeInTheDocument()
+    render(<UnresolvedReferences citations={[card()]} markers={[{ ref: 'b23', text: '7' }]} />)
+    const pane = within(screen.getByRole('region', { name: /^No reference to read/ }))
+    expect(pane.getByText('No reference to read (1 cited work)')).toBeInTheDocument()
     const item = pane.getByRole('listitem')
-    expect(item).toHaveTextContent('[b23] Top500 (2021)')
+    expect(item).toHaveTextContent('[7] Top500 (2021)')
     expect(item).toHaveTextContent('Not read: the PDF would not download')
     const link = within(item).getByRole('link', { name: /https:\/\/www\.top500\.org\// })
     expect(link).toHaveAttribute('href', 'https://www.top500.org/')
@@ -183,6 +183,12 @@ describe('UnresolvedReferences', () => {
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     expect(link).toHaveAccessibleName(/opens in a new tab/)
     expect(screen.queryByText('No reference paper')).toBeNull()
+  })
+
+  it('shows no number for a card the paper prints none for, never the extractor key', () => {
+    render(<UnresolvedReferences citations={[card()]} />)
+    expect(screen.getByRole('listitem')).toHaveTextContent(/^Top500 \(2021\)/)
+    expect(screen.queryByText(/b23/)).toBeNull()
   })
 
   it('links the DOI and the URL when the reference has both', () => {
@@ -227,20 +233,27 @@ describe('UnresolvedReferences', () => {
     expect(screen.getByText(/HTTP 503/)).toBeInTheDocument()
   })
 
-  it('shows one card for each work, and one with no marker, year or link as just its title and reason', () => {
+  it('shows one card for each work, and offers a Google Scholar search for one with no link', () => {
     const bare = card({ ref: '', label: 'A talk', year: '', reason: 'the paper only names it, so it was not checked', links: [] })
     render(<UnresolvedReferences citations={[card(), bare]} />)
-    expect(screen.getByText('This claim cites 2 works we could not read.')).toBeInTheDocument()
+    expect(screen.getByText('No reference to read (2 cited works)')).toBeInTheDocument()
     const [, second] = screen.getAllByRole('listitem')
     expect(second.querySelector('p')).toHaveTextContent(/^A talk$/)
     expect(second).toHaveTextContent('Not read: the paper only names it, so it was not checked')
-    expect(within(second).queryByRole('link')).toBeNull()
+    // Never a dead end: with no link of its own, the card searches for the title.
+    expect(within(second).getByRole('link', { name: /Search for it on Google Scholar/ }))
+      .toHaveAttribute('href', 'https://scholar.google.com/scholar?q=A%20talk')
+  })
+
+  it('offers no search for a work with no title to search for', () => {
+    render(<UnresolvedReferences citations={[card({ label: '', links: [] })]} />)
+    expect(screen.queryByRole('link')).toBeNull()
   })
 
   it('says "No reference paper" only for a claim that cites nothing', () => {
     render(<UnresolvedReferences citations={[]} />)
     expect(screen.getByText('No reference paper')).toBeInTheDocument()
     expect(screen.getByText('This claim cites no paper.')).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Reference not found' })).toBeNull()
+    expect(screen.queryByRole('region', { name: /^No reference to read/ })).toBeNull()
   })
 })

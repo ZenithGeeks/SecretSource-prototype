@@ -21,8 +21,8 @@ export function CheckProgress({ check }: { check: CheckRun }) {
         {seconds !== null && seconds > 0 && <span className="text-xs text-ink-muted">{seconds} s so far</span>}
       </div>
       {planned > 0 && (
-        <div className="h-1.5 w-full overflow-hidden rounded bg-border-subtle">
-          <div className="h-full rounded bg-accent transition-[width]" style={{ width: `${Math.round((Math.min(done, planned) / planned) * 100)}%` }} />
+        <div className="h-1.5 w-full overflow-hidden rounded-sm bg-border-subtle">
+          <div className="h-full rounded-sm bg-accent transition-[width]" style={{ width: `${Math.round((Math.min(done, planned) / planned) * 100)}%` }} />
         </div>
       )}
       {current?.key && (

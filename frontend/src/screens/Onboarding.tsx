@@ -102,7 +102,7 @@ export function Onboarding({
 
   return (
     <div className="onboarding-app flex min-h-screen flex-col items-center justify-center bg-canvas px-4 py-12 sm:px-6">
-      <div className="w-full max-w-5xl">
+      <div className="w-full max-w-250">
         <header className="flex flex-col items-center text-center">
           <Brand hero />
           <h1 className="type-display mt-8 text-balance text-ink">What do you mostly do?</h1>
@@ -206,7 +206,7 @@ function RoleOption({
           <span className="font-serif text-lg font-semibold tracking-tight text-ink">{label}</span>
           {isLastUsed && <Badge tone="accent">Last used</Badge>}
         </span>
-        <span className="text-[13px] leading-snug text-ink-muted">{desc}</span>
+        <span className="text-ui leading-snug text-ink-muted">{desc}</span>
       </span>
     </button>
   )
@@ -234,14 +234,14 @@ function HowItWorks({ story }: { story: RoleStory }) {
       aria-label={`How it works for a ${ROLE_INFO[story.id].label}`}
       className="flex flex-col overflow-hidden rounded-2xl border border-border-subtle bg-surface"
     >
-      <div className="grid flex-1 grid-cols-[1fr_auto_1fr] items-center gap-3 px-5 py-5 sm:px-6">
+      <div className="grid flex-1 grid-cols-[1fr_auto_1fr] items-center gap-3 p-5 sm:px-6">
         <div className="flex flex-col gap-2 rounded-lg border border-border-subtle bg-canvas p-3">
-          <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-muted">
+          <span className="flex items-center gap-1.5 text-caption font-medium text-ink-muted">
             <FileText className="size-3.5" /> Your paper
           </span>
           <Line width="90%" />
           <m.span
-            className="rounded bg-accent-soft px-1 py-0.5 text-[11px] leading-snug text-ink"
+            className="rounded-sm bg-accent-soft px-1 py-0.5 text-caption leading-snug text-ink"
             initial={false}
             animate={{ boxShadow: linked ? 'inset 0 0 0 1px var(--color-accent)' : 'inset 0 0 0 1px rgba(0,0,0,0)' }}
             transition={{ duration: 0.3 }}
@@ -272,7 +272,7 @@ function HowItWorks({ story }: { story: RoleStory }) {
           animate={{ opacity: linked ? 1 : 0.45, y: linked ? 0 : 4 }}
           transition={{ duration: 0.4, ease: EASE_OUT }}
         >
-          <span className="text-[11px] font-medium text-ink-muted">Cited source</span>
+          <span className="text-caption font-medium text-ink-muted">Cited source</span>
           <Line width="80%" />
           <Line width="95%" />
           <div className="h-6">
@@ -301,7 +301,7 @@ function HowItWorks({ story }: { story: RoleStory }) {
             <li key={`${story.id}-${index}`} className="flex items-center gap-3 py-1">
               <span
                 className={cn(
-                  'flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums transition-colors duration-200',
+                  'flex size-6 shrink-0 items-center justify-center rounded-full text-caption font-semibold tabular-nums transition-colors duration-200',
                   lit ? 'bg-accent text-canvas' : 'bg-accent-soft text-accent',
                 )}
               >

@@ -59,7 +59,7 @@ describe('the passages of a claim', () => {
   it('lists each passage under its reference with page and the grade form', () => {
     setup()
     const section = screen.getByRole('region', { name: 'Ref B' })
-    expect(within(section).getByRole('button', { name: /text of c1/ })).toHaveTextContent(/p\.\s*4/)
+    expect(within(section).getByRole('button', { name: /text of c1/ })).toHaveTextContent(/page\s*4/)
     expect(within(section).getAllByRole('button', { name: /text of c[12]/ })).toHaveLength(2)
     expect(within(section).getByText('grade for refB')).toBeInTheDocument()
   })
@@ -70,8 +70,8 @@ describe('the passages of a claim', () => {
       claim: claim([cand('c1', { passage: long }), cand('c2', { rank: 2, page: null, passage: long })]),
       focus: { file: 'refB.pdf', passage: long, page: 4, key: 'c1' },
     })
-    const open = screen.getByRole('button', { name: /#1/ })
-    const shut = screen.getByRole('button', { name: /#2/ })
+    const open = screen.getByRole('button', { name: /Passage 1/ })
+    const shut = screen.getByRole('button', { name: /Passage 2/ })
     expect(open).toHaveAttribute('aria-expanded', 'true')
     expect(shut).toHaveAttribute('aria-expanded', 'false')
     const openText = within(open).getByText(long)
@@ -87,23 +87,25 @@ describe('the passages of a claim', () => {
     expect(props.onFocus).toHaveBeenCalledWith({ file: 'refB.pdf', passage: long, page: null, key: 'c2' })
   })
 
-  it('puts the level form directly after the passage in focus', () => {
-    setup({ focus: { file: 'refB.pdf', passage: 'text of c2', page: null, key: 'c2' } })
-    const focused = screen.getByRole('button', { name: /text of c2/ }).closest('li')
-    const other = screen.getByRole('button', { name: /text of c1/ }).closest('li')
-    const form = focused?.nextElementSibling
-    expect(form).toHaveAttribute('data-level-form')
+  it('puts the level form after every passage of the reference, wherever the focus is', () => {
+    setup({ focus: { file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1' } })
+    const form = document.querySelector('[data-level-form]') as HTMLElement
     expect(form).toHaveTextContent('grade for refB')
-    expect(other?.nextElementSibling).toBe(focused)
+    for (const name of [/text of c1/, /text of c2/]) {
+      const card = screen.getByRole('button', { name }).closest('li') as HTMLElement
+      expect(card.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    expect(document.querySelectorAll('[data-level-form]')).toHaveLength(1)
   })
 
-  it('puts the level form directly after a focused passage the person added', () => {
+  it('puts the level form after the passages the person added, even when one of them is in focus', () => {
     setup({
       draft: { ...emptyDraft(), added: [{ reference_id: 'refB', page: 9, passage: 'mine' }] },
       focus: { file: 'refB.pdf', passage: 'mine', page: 9, key: 'added:refB:mine' },
     })
-    const focused = screen.getByRole('button', { name: /mine/ }).closest('li')
-    expect(focused?.nextElementSibling).toHaveAttribute('data-level-form')
+    const form = document.querySelector('[data-level-form]') as HTMLElement
+    const added = screen.getByRole('button', { name: /mine/ }).closest('li') as HTMLElement
+    expect(added.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('opens an added passage from the keyboard, and leaves the open one as it is', () => {
@@ -148,12 +150,35 @@ describe('the passages of a claim', () => {
       },
     })
     const tabs = screen.getByRole('tablist', { name: 'References for this claim' })
-    const refBTab = within(tabs).getByRole('tab', { name: /1\/2 relevant/ })
-    const refCTab = within(tabs).getByRole('tab', { name: /\[b2\] Ref C/ })
+    const refBTab = within(tabs).getByRole('tab', { name: /1 of 2 relevant/ })
+    const refCTab = within(tabs).getByRole('tab', { name: /Ref C/ })
     expect(refCTab).toHaveAttribute('aria-selected', 'true')
+    expect(refBTab).toHaveAttribute('title', refBTab.textContent ?? '')
     expect(refBTab).toHaveAttribute('aria-selected', 'false')
     fireEvent.click(refBTab)
     expect(props.onFocus).toHaveBeenCalledWith({ file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1' })
+  })
+
+  it('tags a reference tab with the number the paper prints, when the markers give one', () => {
+    const second = { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C', ref: 'b2', authors: [], year: '2022' }
+    setup({
+      claim: claim([cand('c1'), cand('c3', { reference_id: 'refC', reference_file: 'refC.pdf' })]),
+      references: [refs[0], second],
+      markers: [{ ref: 'b2', text: '7' }],
+    })
+    expect(screen.getByRole('tab', { name: /\[7\] Ref C/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Ref B/ })).not.toHaveAccessibleName(/\[/)
+  })
+
+  it('names the cited paper in the heading for one reference, and the cited papers for several', () => {
+    const second = { reference_id: 'refC', file: 'refC.pdf', label: 'Ref C', ref: 'b2', authors: [], year: '2022' }
+    const one = setup()
+    expect(screen.getByText('Passages found in Ref B')).toBeInTheDocument()
+    one.rerender({
+      claim: claim([cand('c1'), cand('c3', { reference_id: 'refC', reference_file: 'refC.pdf' })]),
+      references: [refs[0], second],
+    })
+    expect(screen.getByText('Passages found in the cited papers')).toBeInTheDocument()
   })
 
   it('focuses an added passage or the reference file when switching to a tab with no candidates', () => {
@@ -163,7 +188,7 @@ describe('the passages of a claim', () => {
       references: [refs[0], second],
       draft: { ...emptyDraft(), added: [{ reference_id: 'refC', page: 2, passage: 'added note' }] },
     })
-    fireEvent.click(screen.getByRole('tab', { name: /\[b2\] Ref C/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /Ref C/ }))
     expect(props.onFocus).toHaveBeenCalledWith({
       file: 'refC.pdf',
       passage: 'added note',
@@ -254,28 +279,16 @@ describe('the passages of a claim', () => {
     expect(screen.queryByRole('list', { name: 'Citations that were not checked' })).not.toBeInTheDocument()
   })
 
-  it('lists why each citation was not checked', () => {
-    const reasons: [string, string][] = [
-      ['named', 'not checked, the paper only names it'],
-      ['no-open-access', 'no open-access PDF'],
-      ['not-downloadable', 'the PDF could not be downloaded'],
-      ['unresolvable', 'no matching work was found'],
-      ['lookup-unavailable', 'the lookup service did not answer'],
-      ['web-source', 'a web page, not a paper'],
-      ['withdrawn', 'the paper was withdrawn'],
-      ['failed', 'the check failed'],
-      ['mystery', 'checking it failed'],
+  it('shows one line, not a list of citations, when a claim has no passages', () => {
+    const unchecked: UncheckedCitation[] = [
+      { ref: 'b0', label: 'Work named', reason: 'named' },
+      { ref: 'b1', label: 'Work failed', reason: 'failed' },
     ]
-    const unchecked: UncheckedCitation[] = reasons.map(([reason], index) => ({
-      ref: `b${index}`,
-      label: `Work ${reason}`,
-      reason,
-    }))
     setup({ claim: claim([], { unchecked }) })
-    const list = screen.getByRole('list', { name: 'Citations that were not checked' })
-    for (const [reason, words] of reasons) {
-      expect(within(list).getByText(`Work ${reason}: ${words}`)).toBeInTheDocument()
-    }
+    expect(screen.getByText('No passages were stored for this claim. Add what supports it below.')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Citations that were not checked' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Citations that were not checked/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Work named/)).not.toBeInTheDocument()
   })
 
   it('says a search is running', () => {
@@ -293,6 +306,39 @@ describe('the passages of a claim', () => {
   })
 })
 
+describe('which passage the keys mark', () => {
+  it('shows R and N on every passage, says which one they mark, and outlines that one', () => {
+    setup({ focus: { file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1' } })
+    expect(screen.getByText('R relevant · N not relevant · J/U or ↓/↑ next/previous')).toBeInTheDocument()
+    const [first, second] = screen.getAllByRole('listitem')
+    expect(within(first).getAllByText('R')).toHaveLength(1)
+    expect(within(second).getAllByText('R')).toHaveLength(1)
+    expect(within(first).getByText('R').parentElement).not.toHaveClass('opacity-50')
+    expect(within(second).getByText('R').parentElement).toHaveClass('opacity-50')
+    expect(first).toHaveClass('ring-2', 'bg-surface')
+    expect(second).not.toHaveClass('ring-2')
+  })
+
+  it('puts no interactive element inside the button that opens a passage', () => {
+    const { container } = render(
+      <PassageList
+        claim={claim([cand('c1'), cand('c2', { rank: 2 })])}
+        draft={{ ...emptyDraft(), added: [{ reference_id: 'refB', page: 2, passage: 'mine' }] }}
+        references={refs}
+        focus={{ file: 'refB.pdf', passage: 'text of c1', page: 4, key: 'c1' }}
+        onFocus={vi.fn()}
+        onJudge={vi.fn()}
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        onAsk={vi.fn()}
+        grade={() => null}
+      />,
+    )
+    const inner = 'button, a[href], input, select, textarea, [role="radio"], [role="radiogroup"], [tabindex]'
+    for (const button of container.querySelectorAll('button')) expect(button.querySelector(inner)).toBeNull()
+  })
+})
+
 describe('asking about a passage', () => {
   it('has no Ask button unless the screen can ask', () => {
     setup()
@@ -305,7 +351,7 @@ describe('asking about a passage', () => {
     const asks = screen.getAllByRole('button', { name: 'Ask AI about this passage' })
     expect(asks).toHaveLength(3)
     fireEvent.click(asks[0])
-    expect(onAsk).toHaveBeenLastCalledWith({ referenceId: 'refB', name: '#1 Ref B', page: 4, text: 'text of c1' })
+    expect(onAsk).toHaveBeenLastCalledWith({ referenceId: 'refB', name: 'Passage 1 · Ref B', page: 4, text: 'text of c1' })
     fireEvent.click(asks[2])
     expect(onAsk).toHaveBeenLastCalledWith({ referenceId: 'refB', name: 'Yours · Ref B', page: 9, text: 'mine' })
   })
@@ -321,8 +367,8 @@ describe('passages the person added', () => {
 
   it('focuses and removes them, and marks the focused one', () => {
     const props = setup({ draft: { ...emptyDraft(), added: [added] }, focus: { file: 'refB.pdf', passage: 'mine', page: 9, key: 'added:refB:mine' } })
-    expect(screen.getByRole('button', { name: /p\.9/ })).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(screen.getByRole('button', { name: /p\.9/ }))
+    expect(screen.getByRole('button', { name: /page 9/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: /page 9/ }))
     expect(props.onFocus).toHaveBeenCalledWith({ file: 'refB.pdf', passage: 'mine', page: 9, key: 'added:refB:mine' })
     fireEvent.click(screen.getByRole('button', { name: 'Remove this passage' }))
     expect(props.onRemove).toHaveBeenCalledWith(added)
@@ -352,12 +398,12 @@ describe('passages the person added', () => {
 describe('adding a passage retrieval missed', () => {
   it('offers nothing when the paper has no references', () => {
     setup({ references: [] })
-    expect(screen.queryByRole('button', { name: 'Add a passage retrieval missed' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add a missed passage' })).not.toBeInTheDocument()
   })
 
   it('adds a passage under the first reference, ignoring a blank one', () => {
     const props = setup()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     const form = screen.getByLabelText('The passage').closest('form') as HTMLFormElement
     fireEvent.submit(form)
     expect(props.onAdd).not.toHaveBeenCalled()
@@ -370,7 +416,7 @@ describe('adding a passage retrieval missed', () => {
 
   it('adds a passage under the chosen reference and page, and marks a reference with no PDF', () => {
     const props = setup()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     expect(screen.getByRole('option', { name: 'Ref C (no PDF)' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Reference paper'), { target: { value: 'refC' } })
     fireEvent.change(screen.getByLabelText('Page'), { target: { value: '12' } })
@@ -381,8 +427,8 @@ describe('adding a passage retrieval missed', () => {
 
   it('closes the form with Cancel', () => {
     setup()
-    fireEvent.click(screen.getByRole('button', { name: 'Add a passage retrieval missed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a missed passage' }))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.getByRole('button', { name: 'Add a passage retrieval missed' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add a missed passage' })).toBeInTheDocument()
   })
 })

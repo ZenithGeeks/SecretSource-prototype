@@ -64,7 +64,7 @@ const CAN_CONNECT: Role[] = ['researcher', 'labeler']
 export function AgentsSection({ role }: { role: Role }) {
   return (
     <Section title="Agents">
-      <div className="flex w-full flex-col gap-5 border-t border-border-subtle py-3.5 text-[13px] text-ink">
+      <div className="flex w-full flex-col gap-5 border-t border-border-subtle py-3.5 text-ui text-ink">
         <p className="text-ink-muted">
           Claude Code, Codex or VS Code can work SecretSource for you from your terminal. You watch each step in
           the connected tab, with its cursor.
@@ -144,7 +144,7 @@ function AddToAgent() {
         </li>
       </ol>
       <div className="relative">
-        <pre className="rounded-lg bg-neutral-soft p-2.5 pt-10 font-mono text-xs whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">
+        <pre className="rounded-lg bg-neutral-soft p-2.5 pt-10 font-mono text-xs whitespace-pre-wrap text-ink wrap-anywhere">
           {config}
         </pre>
         <button
@@ -165,7 +165,7 @@ function Step({ number, title, children }: { number: number; title: string; chil
     <div>
       <p className="mb-2 flex items-center gap-2 font-medium">
         <span
-          className="flex size-5 items-center justify-center rounded-full bg-accent-soft text-[11px] font-semibold text-accent"
+          className="flex size-5 items-center justify-center rounded-full bg-accent-soft text-caption font-semibold text-accent"
           aria-hidden="true"
         >
           {number}

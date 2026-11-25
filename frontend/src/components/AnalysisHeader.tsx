@@ -1,13 +1,25 @@
-/** The top of an analysis (Figma "Running" and "Results"): a small status label, the paper's title, one meta line. */
+/** The top of an analysis (Figma "Running" and "Results"): the paper's title, then one meta line
+ * that ends with how the run is going. */
 
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Square } from 'lucide-react'
 
 import type { Analysis } from '../lib/api'
-import { api, paperName } from '../lib/api'
+import { api } from '../lib/api'
+import { analysisLabel } from '../lib/claims'
 import { duration, summarise } from '../lib/progress'
 import { timeAgo, useNow } from '../lib/timeAgo'
-import { Button } from './ui'
+import { HELP_ID } from './StandingKey'
+import { Button, TextButton } from './ui'
+
+/** Opens the key under an analysis's tiles and moves to it. */
+function openHelp() {
+  const help = document.getElementById(HELP_ID)
+  if (!(help instanceof HTMLDetailsElement)) return
+  help.open = true
+  help.scrollIntoView({ block: 'center' })
+  help.querySelector('summary')?.focus()
+}
 
 export function AnalysisHeader({ analysis }: { analysis: Analysis }) {
   const running = analysis.status === 'running'
@@ -15,29 +27,40 @@ export function AnalysisHeader({ analysis }: { analysis: Analysis }) {
   const times = analysis.stages.map((s) => s.at).filter((at): at is number => typeof at === 'number')
   const progress = summarise(analysis.stages, analysis.claims, analysis.status, now)
 
-  const file = analysis.file ? paperName(analysis.file) : analysis.paper
-  const title = analysis.title || file
-  const claims = progress.claims
+  // A run stopped before the paper was read has no title; another run of the same paper may.
+  // The sidebar's list, read without fetching; it re-renders this when the list arrives.
+  const runs = useQuery({ queryKey: ['analyses'], queryFn: api.listAnalyses, enabled: false }).data
+  const title = analysisLabel(analysis, runs)
+  // The authors and year too, so a stopped run's meta line matches the finished run's.
+  const named = (!analysis.authors?.length && runs?.find((run) => run.authors?.length && analysisLabel(run) === title)) || analysis
+  const authors = named.authors ?? []
 
-  let label: string
-  if (running) label = progress.seconds !== null ? `Analyzing · ${duration(progress.seconds)}` : 'Analyzing'
-  else if (analysis.status === 'error') label = 'Stopped'
-  else label = times.length ? `Analyzed ${timeAgo(Math.max(0, now - times[times.length - 1]))}` : 'Analyzed'
+  // A stopped run says so in the progress line below, so it gets no status here.
+  let status = ''
+  if (running) status = progress.seconds !== null ? `Analyzing · ${duration(progress.seconds)}` : 'Analyzing'
+  else if (analysis.status === 'done') status = times.length ? `Analyzed ${timeAgo(Math.max(0, now - times[times.length - 1]))}` : 'Analyzed'
 
+  // Who wrote it, not the stored file name. The claim count is on the summary line below.
   const meta = [
-    analysis.title ? file : '',
-    // The summary line under the header has the check counts; one number per idea.
-    running ? '' : `${claims} ${claims === 1 ? 'claim' : 'claims'}`,
+    authors.length ? `${authors[0]}${authors.length > 1 ? ' et al.' : ''}` : '',
+    named.year ?? '',
+    !analysis.title && !authors.length && title !== analysis.paper ? analysis.paper : '',
+    status,
   ].filter(Boolean)
 
   return (
     <header className="flex flex-col gap-2">
-      <div className="flex min-h-8 items-center justify-between gap-3">
-        <p className="type-label text-accent" aria-live="polite">{label}</p>
-        {running && <StopButton id={analysis.id} />}
-      </div>
       <h1 className="type-display tracking-[-0.01em]">{title}</h1>
-      {meta.length > 0 && <p className="text-[15px] leading-6 text-ink-muted">{meta.join(' · ')}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {meta.length > 0 && <p className="text-reading leading-6 text-ink-muted">{meta.join(' · ')}</p>}
+        {running && <StopButton id={analysis.id} />}
+        {/* The key and "How to read this page" sit under the tiles, which a finished run with claims has. */}
+        {analysis.status === 'done' && analysis.claims.length > 0 && (
+          <TextButton onClick={openHelp} className="text-ui">
+            Help
+          </TextButton>
+        )}
+      </div>
     </header>
   )
 }

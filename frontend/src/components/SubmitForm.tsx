@@ -6,7 +6,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FileUp, Loader2, Search } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 
 import { api } from '../lib/api'
 import { OFFLINE_REASON, useFeature } from '../lib/features'
@@ -19,6 +19,8 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
   const online = useFeature('analyses')
+  // The offline reason is shown as text, and the buttons it turns off point at it.
+  const offlineId = useId()
 
   const start = useMutation({
     mutationFn: (input: string | File) =>
@@ -47,7 +49,7 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
         if (file && online && !start.isPending) start.mutate(file)
       }}
       className={cn(
-        'flex flex-col items-center gap-3.5 rounded-[18px] border-[1.5px] border-dashed bg-surface p-6 transition-colors',
+        'flex flex-col items-center gap-3.5 rounded-2xl border-[1.5px] border-dashed bg-surface p-6 transition-colors',
         dragging ? 'border-accent bg-accent-soft' : 'border-border-subtle',
       )}
     >
@@ -64,12 +66,13 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
           onChange={(event) => setReference(event.target.value)}
           placeholder="Paste a DOI, arXiv ID or link"
           aria-label="Paper to analyze"
-          className="min-w-0 flex-1 bg-transparent py-1 text-[15px] placeholder:text-ink-muted focus-visible:outline-none"
+          className="min-w-0 flex-1 bg-transparent py-1 text-reading placeholder:text-ink-muted focus-visible:outline-none"
         />
         <button
           type="submit"
           disabled={!reference.trim() || !online || start.isPending}
-          className="inline-flex items-center gap-2 rounded-[9px] bg-accent px-3 py-[7px] text-[13px] font-medium whitespace-nowrap text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+          aria-describedby={online ? undefined : offlineId}
+          className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-1.75 text-ui font-medium whitespace-nowrap text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
         >
           {start.isPending && <Loader2 className="size-4 animate-spin" />}
           Analyze
@@ -80,7 +83,8 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
         type="button"
         onClick={() => fileInput.current?.click()}
         disabled={!online || start.isPending}
-        className="inline-flex items-center gap-1.5 rounded text-[13px] text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+        aria-describedby={online ? undefined : offlineId}
+        className="inline-flex items-center gap-1.5 rounded-sm text-ui text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
       >
         <FileUp className="size-4" aria-hidden="true" />
         or drop a PDF here · up to 40 MB
@@ -113,13 +117,13 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
         >
           <span
             className={cn(
-              'absolute top-0.5 size-4 rounded-full bg-white shadow transition-[left]',
-              verify ? 'left-[18px]' : 'left-0.5',
+              'absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-[left]',
+              verify ? 'left-4.5' : 'left-0.5',
             )}
           />
         </button>
         <div className="min-w-0 flex-1">
-          <p id="compare-full-text" className="text-[13px] leading-[18px] font-medium">
+          <p id="compare-full-text" className="text-ui leading-4.5 font-medium">
             Compare full text
           </p>
           <p className="text-xs leading-4 text-ink-muted">
@@ -129,7 +133,7 @@ export function SubmitForm({ onStarted }: { onStarted: (id: string) => void }) {
       </div>
 
       {!online && (
-        <p role="status" className="w-full text-sm text-refutes">
+        <p role="status" id={offlineId} className="w-full text-sm text-refutes">
           {OFFLINE_REASON.analyses}
         </p>
       )}

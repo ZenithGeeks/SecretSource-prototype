@@ -8,7 +8,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CircleAlert, FileText, FileUp, Loader2, Search, X } from 'lucide-react'
-import { type ReactNode, type RefObject, useRef, useState } from 'react'
+import { type ReactNode, type RefObject, useId, useRef, useState } from 'react'
 
 import { Toggle } from '../../../components/settings'
 import { Button } from '../../../components/ui'
@@ -18,9 +18,9 @@ import { OFFLINE_REASON, useFeature } from '../../../lib/features'
 import { cn } from '../../../lib/utils'
 
 /** A problem line under the form: an icon with the text, so red is never the only signal. */
-function Problem({ role, children }: { role: 'status' | 'alert'; children: ReactNode }) {
+function Problem({ role, id, children }: { role: 'status' | 'alert'; id?: string; children: ReactNode }) {
   return (
-    <p role={role} className="flex items-start gap-2 text-sm text-refutes">
+    <p role={role} id={id} className="flex items-start gap-2 text-sm text-refutes">
       <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       {children}
     </p>
@@ -45,6 +45,8 @@ export function HomeAnalyzeCard({
   const fileInput = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
   const online = useFeature('analyses')
+  // The offline reason is shown as text, and the buttons it turns off point at it.
+  const offlineId = useId()
 
   const start = useMutation({
     mutationFn: (input: string | File) =>
@@ -118,7 +120,7 @@ export function HomeAnalyzeCard({
             placeholder="Paste a DOI, arXiv ID or link, or drop a PDF here"
             aria-label="Paper to analyze"
             aria-keyshortcuts="/"
-            className="min-w-0 flex-1 bg-transparent py-1 text-[15px] text-ink placeholder:text-ink-muted focus:outline-none"
+            className="min-w-0 flex-1 bg-transparent py-1 text-reading text-ink placeholder:text-ink-muted focus:outline-none"
           />
         </span>
         <span className="ml-auto flex items-center gap-1.5">
@@ -126,15 +128,17 @@ export function HomeAnalyzeCard({
             type="button"
             onClick={() => fileInput.current?.click()}
             disabled={!online || start.isPending}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50 pointer-coarse:min-h-11"
+            aria-describedby={online ? undefined : offlineId}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-ui font-medium text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50 pointer-coarse:min-h-11"
           >
             <FileUp aria-hidden="true" className="size-4" />
             Upload PDF
           </button>
           <Button
             type="submit"
-            className="rounded-[9px] px-4 py-[7px] text-sm pointer-coarse:min-h-11"
+            className="rounded-lg px-4 py-1.75 text-sm pointer-coarse:min-h-11"
             disabled={(!typed && !heldFile) || !online || start.isPending}
+            aria-describedby={online ? undefined : offlineId}
           >
             {start.isPending && <Loader2 className="size-4 animate-spin" />}
             Analyze
@@ -152,7 +156,7 @@ export function HomeAnalyzeCard({
         />
       </form>
       {heldFile && (
-        <p className="flex min-w-0 items-center gap-2 text-[13px] text-ink">
+        <p className="flex min-w-0 items-center gap-2 text-ui text-ink">
           <FileText aria-hidden="true" className="size-4 shrink-0 text-ink-muted" />
           <span title={heldFile.name} className="min-w-0 truncate">
             {heldFile.name}
@@ -168,7 +172,7 @@ export function HomeAnalyzeCard({
           </button>
         </p>
       )}
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px]">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-ui">
         <Toggle on={verify} onChange={setVerify} aria-labelledby="home-deep-check home-deep-check-time" />
         <span id="home-deep-check" className="text-ink">
           Compare each claim with the full text of the cited work
@@ -177,7 +181,11 @@ export function HomeAnalyzeCard({
           · about 4 min
         </span>
       </div>
-      {!online && <Problem role="status">{OFFLINE_REASON.analyses}</Problem>}
+      {!online && (
+        <Problem role="status" id={offlineId}>
+          {OFFLINE_REASON.analyses}
+        </Problem>
+      )}
       {notPdf && (
         <Problem role="alert">Only PDF files can be analyzed. Paste a DOI, arXiv ID or link for anything else.</Problem>
       )}

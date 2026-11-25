@@ -107,14 +107,14 @@ export function FileTabs({
             }}
             onKeyDown={(event) => event.key === 'Escape' && setAdding(false)}
             placeholder="chapter.tex"
-            className="w-36 rounded border border-border-subtle bg-surface px-2 py-0.5 font-mono text-xs"
+            className="w-36 rounded-sm border border-border-subtle bg-surface px-2 py-0.5 font-mono text-xs"
           />
           {error && (
             <span id="new-file-error" className="text-xs text-refutes">
               {error}
             </span>
           )}
-          <button type="submit" className={`rounded px-1.5 py-0.5 text-xs text-accent ${HIGHLIGHT}`}>
+          <button type="submit" className={`rounded-sm px-1.5 py-0.5 text-xs text-accent ${HIGHLIGHT}`}>
             Add
           </button>
         </form>

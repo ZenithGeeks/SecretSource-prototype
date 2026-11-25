@@ -1,5 +1,9 @@
 import { clsx, type ClassValue } from 'clsx'
-import { twMerge } from 'tailwind-merge'
+import { extendTailwindMerge } from 'tailwind-merge'
+
+// The theme's own type sizes (index.css). Without them tailwind-merge reads `text-ui` as a
+// colour and drops the `text-accent` before it.
+const twMerge = extendTailwindMerge({ extend: { theme: { text: ['micro', 'caption', 'ui', 'reading'] } } })
 
 /** Merge conditional class names, letting later Tailwind utilities win. */
 export function cn(...inputs: ClassValue[]) {

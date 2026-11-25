@@ -17,7 +17,7 @@ const STATUS_STYLES: Record<StatusTone, string> = {
 
 export function StatusPill({ label, tone = 'neutral' }: { label: string; tone?: StatusTone }) {
   return (
-    <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em]', STATUS_STYLES[tone])}>
+    <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-caption font-semibold uppercase tracking-widest', STATUS_STYLES[tone])}>
       {label}
     </span>
   )
@@ -98,7 +98,7 @@ const WORKSPACE_TABS: { key: WorkspaceTab; label: string }[] = [
 
 export function WorkspaceTabs({ active, onChange }: { active: WorkspaceTab; onChange: (tab: WorkspaceTab) => void }) {
   return (
-    <div role="tablist" aria-label="Class workspace" className="flex min-h-11 gap-1.5 overflow-x-auto border-b border-border-subtle py-[5px]">
+    <div role="tablist" aria-label="Class workspace" className="flex min-h-11 gap-1.5 overflow-x-auto border-b border-border-subtle py-1.25">
       {WORKSPACE_TABS.map((tab) => (
         <button
           key={tab.key}
@@ -107,7 +107,7 @@ export function WorkspaceTabs({ active, onChange }: { active: WorkspaceTab; onCh
           aria-selected={active === tab.key}
           onClick={() => onChange(tab.key)}
           className={cn(
-            'whitespace-nowrap rounded-lg px-3 py-2 text-[11px] font-medium transition-colors',
+            'whitespace-nowrap rounded-lg px-3 py-2 text-caption font-medium transition-colors',
             active === tab.key ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-accent-soft hover:text-ink',
           )}
         >
@@ -127,7 +127,7 @@ export function PageHeading({ eyebrow, title, description, actions }: {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
-        {eyebrow && <p className="mb-2 text-xs font-semibold uppercase tracking-[0.1em] text-accent">{eyebrow}</p>}
+        {eyebrow && <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-accent">{eyebrow}</p>}
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-ink sm:text-4xl">{title}</h1>
         {description && <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-muted">{description}</p>}
       </div>
@@ -144,7 +144,7 @@ export function MetricCard({ label, value, detail, tone = 'neutral' }: {
 }) {
   return (
     <div className="rounded-xl border border-border-subtle bg-surface p-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-muted">{label}</p>
+      <p className="text-caption font-semibold uppercase tracking-widest text-ink-muted">{label}</p>
       <p className={cn('mt-2 font-serif text-2xl font-semibold', tone === 'neutral' ? 'text-ink' : STATUS_STYLES[tone].split(' ')[1])}>{value}</p>
       {detail && <p className="mt-1 text-xs text-ink-muted">{detail}</p>}
     </div>

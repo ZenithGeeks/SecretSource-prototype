@@ -11,7 +11,7 @@ export function TeacherSidebar({ onOpen }: { onOpen: (route: TeacherRoute) => vo
   return (
     <div className="mt-5 space-y-5">
       <section aria-labelledby="teacher-sidebar-classes">
-        <h2 id="teacher-sidebar-classes" className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Your classes</h2>
+        <h2 id="teacher-sidebar-classes" className="mb-2 px-2 text-micro font-semibold uppercase tracking-widest text-ink-muted">Your classes</h2>
         {classes.data?.length ? (
           <nav aria-label="Your classes" className="space-y-0.5">
             {classes.data.map((course) => (
@@ -20,23 +20,23 @@ export function TeacherSidebar({ onOpen }: { onOpen: (route: TeacherRoute) => vo
                 type="button"
                 data-closes-menu
                 onClick={() => onOpen({ screen: 'class-overview', courseId: course.id })}
-                className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[11px] text-ink hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent"
+                className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-caption text-ink hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent"
               >
                 <span className="size-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
                 <span className="min-w-0 flex-1 truncate">{course.name}{course.section ? ` · ${course.section}` : ''}</span>
-                <span className="shrink-0 text-[10px] text-ink-muted">{course.studentCount}</span>
+                <span className="shrink-0 text-micro text-ink-muted">{course.studentCount}</span>
               </button>
             ))}
           </nav>
         ) : classes.isPending ? (
-          <p className="px-2 text-[11px] text-ink-muted">Loading classes…</p>
+          <p className="px-2 text-caption text-ink-muted">Loading classes…</p>
         ) : (
-          <p className="px-2 text-[11px] text-ink-muted">No classes yet</p>
+          <p className="px-2 text-caption text-ink-muted">No classes yet</p>
         )}
       </section>
 
       <section aria-labelledby="teacher-sidebar-recent">
-        <h2 id="teacher-sidebar-recent" className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-muted">Recently viewed</h2>
+        <h2 id="teacher-sidebar-recent" className="mb-2 px-2 text-micro font-semibold uppercase tracking-widest text-ink-muted">Recently viewed</h2>
         {history.data?.length ? (
           <nav aria-label="Recently viewed" className="space-y-0.5">
             {history.data.slice(0, 3).map((entry) => (
@@ -50,29 +50,29 @@ export function TeacherSidebar({ onOpen }: { onOpen: (route: TeacherRoute) => vo
                   assignmentId: entry.assignmentId,
                   studentId: entry.studentId,
                 })}
-                className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[11px] text-ink hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent"
+                className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-caption text-ink hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent"
               >
                 <span className="size-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{entry.studentName} · {entry.assignmentTitle}</span>
                 </span>
-                <span className="shrink-0 text-[10px] text-ink-muted">{relativeDay(entry.checkedAt)}</span>
+                <span className="shrink-0 text-micro text-ink-muted">{relativeDay(entry.checkedAt)}</span>
                 <ChevronRight className="size-3 shrink-0 text-ink-muted" />
               </button>
             ))}
           </nav>
         ) : history.isPending ? (
-          <p className="px-2 text-[11px] text-ink-muted">Loading recent work…</p>
+          <p className="px-2 text-caption text-ink-muted">Loading recent work…</p>
         ) : history.isError ? (
-          <p className="px-2 text-[11px] text-ink-muted">Recent work is unavailable</p>
+          <p className="px-2 text-caption text-ink-muted">Recent work is unavailable</p>
         ) : (
-          <p className="px-2 text-[11px] text-ink-muted">No recent work yet</p>
+          <p className="px-2 text-caption text-ink-muted">No recent work yet</p>
         )}
         {history.data && history.data.length > 3 && (
           <TextButton
             data-closes-menu
             onClick={() => onOpen({ screen: 'history' })}
-            className="mt-1 px-2 text-[10px]"
+            className="mt-1 px-2 text-micro"
           >
             View all recently checked
           </TextButton>

@@ -4,12 +4,33 @@
  */
 
 import { request } from './api'
-import type { Standing } from './claims'
+import { STANDINGS, type Standing } from './claims'
 
 export type ClaimStanding = 'backed' | 'silent' | 'contradicted' | 'unchecked'
 
-/** Per-standing claim counts; drives the stacked bar and its legend. */
-export type ClaimTally = Record<ClaimStanding, number>
+/** Per-standing claim counts; drives the stacked bar and its legend. The gateway always sends
+ * the four checked standings; it may add the two with nothing to check. */
+export type ClaimTally = Record<ClaimStanding, number> & Partial<Record<'named' | 'uncited', number>>
+
+const TALLY_KEYS: Record<Standing, keyof ClaimTally> = {
+  refutes: 'contradicted',
+  insufficient: 'silent',
+  unchecked: 'unchecked',
+  supports: 'backed',
+  named: 'named',
+  uncited: 'uncited',
+}
+
+/** A tally's standings in STANDINGS order, like every other bar and key, each with its count.
+ * As on an analysis's tiles, the four checked standings always show and the other two only
+ * when a claim has them. */
+export function tallyEntries(tally: ClaimTally) {
+  return STANDINGS.flatMap((kind) => {
+    const key = TALLY_KEYS[kind]
+    const count = tally[key] ?? 0
+    return count > 0 || (kind !== 'named' && kind !== 'uncited') ? [{ kind, key, count }] : []
+  })
+}
 
 export type Conflict = {
   claim: string
@@ -34,10 +55,10 @@ export type LibrarySummary = {
   tally: ClaimTally
 }
 
+// The gateway also sends `alert` and `conflictsTotal`. Home counts them from the analyses list
+// instead, the runs its library bar uses, so the numbers on the screen agree.
 export type ResearcherHome = {
-  alert: string // the one-line "what changed" under the greeting
   conflicts: Conflict[] // the newest few
-  conflictsTotal?: number // all of them; older gateways leave it out
   queue: QueueEntry[]
   library: LibrarySummary
 }

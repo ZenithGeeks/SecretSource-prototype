@@ -27,7 +27,7 @@ export function ConnectAgent({ email, onAllow, onCancel }: { email: string | nul
   }, [onCancel])
 
   return (
-    <div className="fixed inset-0 z-[60] flex overflow-y-auto bg-ink/45 p-4">
+    <div className="fixed inset-0 z-60 flex overflow-y-auto bg-ink/45 p-4">
       <div
         ref={dialog}
         role="dialog"
@@ -124,7 +124,7 @@ export function AgentStatus({ bridge }: { bridge: AgentBridge }) {
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={shown}
-        className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border-subtle bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-9"
+        className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border-subtle bg-surface px-3 text-ui font-medium text-ink transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-9"
       >
         <span className="relative flex size-2">
           {bridge.working && <span className="absolute inset-0 animate-pulse rounded-full bg-accent motion-reduce:animate-none" />}

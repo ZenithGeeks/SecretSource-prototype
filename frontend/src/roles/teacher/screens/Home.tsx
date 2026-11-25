@@ -54,7 +54,7 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
           <AlertCircle className="mt-0.5 size-5 shrink-0 text-refutes" />
           <div>
             <h1 className="text-[14px] font-semibold">Your overview could not load</h1>
-            <p className="mt-1 text-[12px] leading-[18px] text-ink-muted">The teacher dashboard could not reach its data service.</p>
+            <p className="mt-1 text-[12px] leading-4.5 text-ink-muted">The teacher dashboard could not reach its data service.</p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -109,12 +109,12 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
   }
 
   return (
-    <div className="space-y-[22px]">
+    <div className="space-y-5.5">
       <header className="flex items-center gap-4">
         <Mascot role="teacher" size={64} className="hidden shrink-0 sm:block" />
         <div className="space-y-1">
-          <h1 className="font-serif text-[30px] font-semibold leading-[40px] tracking-tight text-ink">Good morning, {teacherName}</h1>
-          <p className="text-[13px] leading-5 text-ink-muted">
+          <h1 className="font-serif text-[30px] leading-10 font-semibold tracking-tight text-ink">Good morning, {teacherName}</h1>
+          <p className="text-ui leading-5 text-ink-muted">
             {reviewCount} {reviewCount === 1 ? 'essay' : 'essays'} awaiting review · {assignments.length} {assignments.length === 1 ? 'assignment' : 'assignments'} due soon
           </p>
         </div>
@@ -135,7 +135,7 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
       <section className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.75fr)_minmax(260px,1fr)]" aria-label="Essay to review">
         <div className={reviewCount === 0 && connection.data?.connected ? 'space-y-3 rounded-xl border border-border-subtle bg-surface p-3' : 'space-y-3'}>
           {reviewCount === 0 && connection.data?.connected && (
-            <p className="px-1 py-1 text-sm font-medium text-ink">You have nothing to review. Good job!</p>
+            <p className="p-1 text-sm font-medium text-ink">You have nothing to review. Good job!</p>
           )}
           {reviewGroups.length === 0 ? (
             <Card className="overflow-hidden p-0">
@@ -168,13 +168,13 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
                       aria-expanded={expanded}
                       aria-controls={listId}
                       onClick={() => toggleCourse(group.id, !expanded)}
-                      className="inline-flex shrink-0 items-center gap-1 text-[11px] focus-visible:outline-offset-2"
+                      className="inline-flex shrink-0 items-center gap-1 text-caption focus-visible:outline-offset-2"
                     >
                       {expanded ? 'Show less' : `See all ${group.submissions.length}`}
                       {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
                     </TextButton>
                   ) : (
-                    <span className="shrink-0 text-[11px] text-accent">
+                    <span className="shrink-0 text-caption text-accent">
                       {group.submissions.length} {group.submissions.length === 1 ? 'submission' : 'submissions'}
                     </span>
                   )}
@@ -198,7 +198,7 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
                 </div>
                 {expanded && pageCount > 1 && (
                   <nav aria-label={`${group.courseName} submission pages`} className="flex flex-col gap-3 border-t border-border-subtle px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-[11px] text-ink-muted">
+                    <p className="text-caption text-ink-muted">
                       Showing {first + 1}–{Math.min(first + REVIEWS_PER_PAGE, group.submissions.length)} of {group.submissions.length} · {REVIEWS_PER_PAGE} per page
                     </p>
                     <div className="flex items-center gap-1">
@@ -218,7 +218,7 @@ export function Home({ onOpen }: { onOpen: (route: TeacherRoute) => void }) {
                           aria-label={`Page ${pageNumber + 1}`}
                           aria-current={page === pageNumber ? 'page' : undefined}
                           onClick={() => setCoursePages((current) => ({ ...current, [group.id]: pageNumber }))}
-                          className={`flex size-8 items-center justify-center rounded-lg border text-[11px] font-medium ${page === pageNumber ? 'border-accent bg-accent-soft text-accent' : 'border-border-subtle text-ink-muted hover:bg-accent-soft'}`}
+                          className={`flex size-8 items-center justify-center rounded-lg border text-caption font-medium ${page === pageNumber ? 'border-accent bg-accent-soft text-accent' : 'border-border-subtle text-ink-muted hover:bg-accent-soft'}`}
                         >
                           {pageNumber + 1}
                         </button>
@@ -350,10 +350,10 @@ function QuickAction({ icon: Icon, title, detail, onClick }: {
   onClick: () => void
 }) {
   return (
-    <button type="button" onClick={onClick} className="min-h-[126px] rounded-[14px] border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+    <button type="button" onClick={onClick} className="min-h-31.5 rounded-xl border border-border-subtle bg-surface p-5 text-left transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
       <Icon className="size-5 text-accent" />
-      <span className="mt-3 block text-[15px] font-medium text-ink">{title}</span>
-      <span className="mt-2 block text-[12px] leading-[18px] text-ink-muted">{detail}</span>
+      <span className="mt-3 block text-reading font-medium text-ink">{title}</span>
+      <span className="mt-2 block text-[12px] leading-4.5 text-ink-muted">{detail}</span>
     </button>
   )
 }
@@ -375,11 +375,11 @@ function ReviewRow({ submission, dueAt, onOpen }: {
   const details = dates || submission.assignmentTitle || 'Submission details unavailable'
 
   return (
-    <button type="button" onClick={onOpen} className="flex min-h-[56px] w-full items-center gap-2.5 px-4 py-2.5 text-left hover:bg-canvas focus-visible:outline-2 focus-visible:outline-accent">
-      <InitialAvatar initials={submission.initial} className="size-7 text-[10px]" />
+    <button type="button" onClick={onOpen} className="flex min-h-14 w-full items-center gap-2.5 px-4 py-2.5 text-left hover:bg-canvas focus-visible:outline-2 focus-visible:outline-accent">
+      <InitialAvatar initials={submission.initial} className="size-7 text-micro" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[12px] font-medium text-ink">{submission.studentName}</span>
-        <span className="mt-0.5 block truncate text-[11px] text-ink-muted">{details}</span>
+        <span className="mt-0.5 block truncate text-caption text-ink-muted">{details}</span>
       </span>
       <span><StatusPill label={label} tone={tone} /></span>
       <ChevronRight className="size-3.5 shrink-0 text-ink-muted" />
@@ -390,18 +390,18 @@ function ReviewRow({ submission, dueAt, onOpen }: {
 function MostMisusedSourceCard({ sources }: { sources: MostMisusedSource[] }) {
   return (
     <Card className="space-y-2.5">
-      <h2 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-refutes">Most misused sources</h2>
+      <h2 className="text-micro font-semibold uppercase tracking-widest text-refutes">Most misused sources</h2>
       {sources.length ? (
         <ol className="space-y-3">
           {sources.map((source, index) => <li key={`${source.title}-${index}`} className="flex items-start gap-3">
             <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-refutes-soft text-xs font-semibold text-refutes">{index + 1}</span>
-            <div className="min-w-0"><h3 className="break-words text-[13px] font-semibold text-ink">{source.title}</h3><p className="mt-1 text-[12px] leading-[18px] text-ink-muted">{source.count != null ? `${source.count} ${source.count === 1 ? 'essay' : 'essays'} flagged` : source.detail}</p></div>
+            <div className="min-w-0"><h3 className="wrap-break-word text-ui font-semibold text-ink">{source.title}</h3><p className="mt-1 text-[12px] leading-4.5 text-ink-muted">{source.count != null ? `${source.count} ${source.count === 1 ? 'essay' : 'essays'} flagged` : source.detail}</p></div>
           </li>)}
         </ol>
       ) : (
-        <p className="text-[12px] leading-[18px] text-ink-muted">A frequently misused source will appear here when review data is available.</p>
+        <p className="text-[12px] leading-4.5 text-ink-muted">A frequently misused source will appear here when review data is available.</p>
       )}
-      {sources.length > 0 && <p className="text-[11px] leading-4 text-ink-muted">Based on teacher decisions where available and automated findings otherwise.</p>}
+      {sources.length > 0 && <p className="text-caption leading-4 text-ink-muted">Based on teacher decisions where available and automated findings otherwise.</p>}
     </Card>
   )
 }
@@ -434,7 +434,7 @@ function ClassroomSync({
             <h2 className="text-[14px] font-semibold">Google Classroom sync</h2>
             {connected && <StatusPill label="Connected" tone="success" />}
           </div>
-          <p className="mt-1 text-[12px] leading-[18px] text-ink-muted">
+          <p className="mt-1 text-[12px] leading-4.5 text-ink-muted">
             {loading ? 'Checking your Classroom connection…'
               : failed ? 'Connection status could not load.'
                 : connected ? [email, lastSyncedAt ? `Last synced ${formatSyncTime(lastSyncedAt)}` : 'No sync recorded yet', syncError ? `Sync issue: ${syncError}` : ''].filter(Boolean).join(' · ')

@@ -18,7 +18,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import '../styles/pdf-annotation-layer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -26,9 +26,10 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 import { API_BASE, type Citation, type CitationMarker, type Source, type Verdict } from '../lib/api'
 import { citationLink, reference } from '../lib/citations'
+import { moveFocus } from '../lib/roving'
 import { useAuthorizedUrl } from '../lib/useAuthorizedUrl'
 import { cn } from '../lib/utils'
-import { Button } from './ui'
+import { Button, TextButton } from './ui'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 // One worker for every PDF on the page. With only workerSrc, pdf.js starts a worker (about 1 MB
@@ -51,7 +52,10 @@ export type Target = {
   verdict?: Verdict['verdict'] // colors a located passage by the result it represents
   page?: number // fall back to this when there is no source to take a page from
   error?: string // a lookup failure that should remain distinct from an unlocated passage
+  lookup?: number // identifies an asynchronous quote lookup and its result
+  locating?: boolean // the quote's place is still being looked up: the page area says so
   section?: string // the analysed paper's section this points into, for the table of contents
+  claim?: number // index of the claim whose passage this is, so the list can lead back to it
   paperRole?: PaperRole // which of two papers on screen this is: a strip at the top says so (labeler)
 }
 
@@ -65,6 +69,10 @@ const RENDERED_AROUND = 2 // pages drawn on each side of the one in view; the re
 const MAX_PAGE_WIDTH = 2400 // css px; wider than this only costs memory
 const MAX_CANVAS_WIDTH = 4096 // device px; a canvas this wide is already sharp at any zoom here
 
+const PDF_LINKS = '.annotationLayer a'
+
+const TOOLBAR_ITEMS = 'button:not(:disabled), a[href]'
+
 type Box = { x0: number; y0: number; x1: number; y1: number }
 
 /** Boxes arrive in PDF points; percentages keep them right at any rendered size. */
@@ -77,12 +85,18 @@ function boxStyle(box: Box, width: number, height: number) {
   }
 }
 
-/** pdf.js draws a PDF's links as empty boxes over the text; give each one a name to read out. */
-function nameLinks(viewer: HTMLElement) {
+/** pdf.js draws a PDF's links as empty boxes over the text; give each one a name to read out,
+ * and give them one shared Tab stop. Arrows move between links once inside the group. */
+function nameLinks(viewer: HTMLElement, focused: HTMLElement | null) {
   for (const link of viewer.querySelectorAll<HTMLAnchorElement>('.annotationLayer a:not([aria-label])')) {
     const href = link.getAttribute('href') ?? ''
     const inPaper = !href || href.startsWith('#')
     link.setAttribute('aria-label', link.title || (inPaper ? 'Go to a place in this paper' : `Open ${href}`))
+  }
+  const entry = focused && viewer.contains(focused) ? focused : viewer.querySelector(PDF_LINKS)
+  for (const stop of viewer.querySelectorAll<HTMLElement>(`${PDF_LINKS}, .annotationLayer [tabindex]`)) {
+    const index = stop === entry ? 0 : -1
+    if (stop.tabIndex !== index) stop.tabIndex = index
   }
 }
 
@@ -121,16 +135,16 @@ function ReferencePopover({ marker, citation }: { marker: CitationMarker; citati
           : { left: `${left}%`, bottom: `calc(${(1 - marker.y0 / marker.page_height) * 100}% + 6px)` }
       }
     >
-      <p className="text-[11px] leading-4 font-semibold tracking-wide text-ink-muted uppercase">
+      <p className="text-caption leading-4 font-semibold tracking-wide text-ink-muted uppercase">
         Cited paper{marker.text ? ` · ${marker.text}` : ''}
       </p>
-      <p className="text-[13px] leading-[18px] text-ink">{reference(citation)}</p>
+      <p className="text-ui leading-4.5 text-ink">{reference(citation)}</p>
       {link && (
         <a
           href={link}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 rounded text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+          className="inline-flex items-center gap-1 rounded-sm text-xs font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
         >
           Open the paper
           <ExternalLink className="size-3" />
@@ -203,10 +217,19 @@ export function PageViewer({
   compactQuote = false,
   zoomKey,
   onCitation,
-  toolbarLead,
   embedded = false,
+  onLabel,
+  notice,
+  titleOnOwnLine = false,
 }: {
   target: Target
+  /** For a paper shown as a role in a narrow pane: the role and the title get a header of their
+   * own above the toolbar, so the title is not cut to nothing beside the page controls. */
+  titleOnOwnLine?: boolean
+  /** Makes the label a link back to what opened the page, e.g. its claim in the list. */
+  onLabel?: () => void
+  /** One line under the label, e.g. that the claim shown is hidden by the list's filter. */
+  notice?: ReactNode
   /** Without it there is no close button: the viewer is part of the page, not a panel over it. */
   onClose?: () => void
   /** Height of the side panel, instead of the full-height default. */
@@ -224,8 +247,6 @@ export function PageViewer({
   references?: Record<string, Citation>
   /** Called when a citation marker is clicked, in place of the card that names the paper. */
   onCitation?: (marker: CitationMarker) => void
-  /** Extra control placed inside the viewer toolbar (for example the labeler's reference picker). */
-  toolbarLead?: React.ReactNode
   /** The caller provides a pane even below xl; keep the viewer in it until expanded. */
   embedded?: boolean
 }) {
@@ -255,7 +276,15 @@ export function PageViewer({
   const fullScreen = narrow || expanded
   const [panelWidth, setPanelWidth] = useState(0)
   const [opened, setOpened] = useState<{ marker: CitationMarker; target: Target } | null>(null)
+  // The citation markers are one Tab stop: the last one focused, else the first on the page in
+  // view. The arrow keys move between them. A paper has dozens, and the labeler reviewer had to
+  // Tab past 76 of them to reach the decision.
+  const [lastMarker, setLastMarker] = useState<CitationMarker | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
+  const lastPdfLink = useRef<HTMLElement | null>(null)
+  // The toolbar is one Tab stop too, the control last used, and the arrow keys move along it.
+  const toolbar = useRef<HTMLDivElement>(null)
+  const toolbarStop = useRef(0)
   const pageNodes = useRef(new Map<number, HTMLDivElement>())
   const pageInView = useRef(page) // for effects that must not re-run on every scroll
 
@@ -279,10 +308,20 @@ export function PageViewer({
     const node = scroller.current
     /* v8 ignore next -- the scroller is always mounted when effects run; this satisfies the type */
     if (!node) return
-    const observer = new ResizeObserver(([entry]) => setPanelWidth(entry.contentRect.width))
+    // A hidden pane measures 0. Keeping the last width keeps its document loaded until it shows again.
+    const observer = new ResizeObserver(([entry]) => setPanelWidth((width) => entry.contentRect.width || width))
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
+
+  // Runs after every render: buttons are enabled, disabled and swapped as the reader pages.
+  useEffect(() => {
+    /* v8 ignore next -- the toolbar is always mounted when effects run; this satisfies the type */
+    if (!toolbar.current) return
+    const items = [...toolbar.current.querySelectorAll<HTMLElement>(TOOLBAR_ITEMS)]
+    const stop = Math.min(toolbarStop.current, items.length - 1)
+    items.forEach((item, index) => (item.tabIndex = index === stop ? 0 : -1))
+  })
 
   // Name the PDF's links as pdf.js adds them. react-pdf's onRenderAnnotationLayerSuccess fires
   // before pdf.js has drawn them, so it cannot be used for this.
@@ -290,21 +329,46 @@ export function PageViewer({
     const node = scroller.current
     /* v8 ignore next -- the scroller is always mounted when effects run; this satisfies the type */
     if (!node) return
-    const observer = new MutationObserver(() => nameLinks(node))
-    observer.observe(node, { childList: true, subtree: true })
+    const observer = new MutationObserver(() => nameLinks(node, lastPdfLink.current))
+    // tabindex too: an element pdf.js puts back in the Tab order after adding it would otherwise stay there.
+    observer.observe(node, { childList: true, subtree: true, attributes: true, attributeFilter: ['tabindex'] })
     return () => observer.disconnect()
   }, [])
 
-  /** Scroll so page `number` is in view; with a box, so that box is. */
+  // Where the viewer was last sent. Pages above it change height as pdf.js draws them, so the
+  // spot is scrolled to again on every resize until the reader scrolls on their own.
+  const anchor = useRef<{ number: number; box?: Box; size?: Source } | null>(null)
+
+  /** Scroll so page `number` is in view; with a box, so that box is in the middle of the panel. */
   const scrollToPage = useCallback((number: number, box?: Box, size?: Source) => {
     const node = pageNodes.current.get(number)
     const container = scroller.current
     if (!node || !container) return
-    const inside = box && size ? (box.y0 / size.page_height) * node.offsetHeight - 80 : -PAGE_GAP
-    container.scrollTo({ top: node.offsetTop + Math.max(0, inside) - PAGE_GAP - TOOLBAR_HEIGHT })
+    anchor.current = { number, box, size }
+    const pageTop = node.offsetTop - PAGE_GAP - TOOLBAR_HEIGHT
+    const middle = box && size ? ((box.y0 + box.y1) / 2 / size.page_height) * node.offsetHeight : 0
+    const half = Math.max(0, container.clientHeight - TOOLBAR_HEIGHT) / 2
+    container.scrollTo({ top: middle > half ? pageTop + PAGE_GAP + middle - half : pageTop })
     pageInView.current = number
     setPage(number)
   }, [])
+
+  useEffect(() => {
+    const container = scroller.current
+    if (!container || !pageCount) return
+    const observer = new ResizeObserver(() => {
+      const spot = anchor.current
+      if (spot) scrollToPage(spot.number, spot.box, spot.size)
+    })
+    pageNodes.current.forEach((node) => observer.observe(node))
+    const release = () => (anchor.current = null)
+    const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
+    events.forEach((name) => container.addEventListener(name, release, { passive: true }))
+    return () => {
+      observer.disconnect()
+      events.forEach((name) => container.removeEventListener(name, release))
+    }
+  }, [pageCount, scrollToPage])
 
   // A new target opens at its page and its highlight. The viewer is remounted for another
   // paper (AnalysisView keys it by paper), so zoom only resets then: comparing two claims in
@@ -314,9 +378,13 @@ export function PageViewer({
     if (ready) scrollToPage(targetPage(target), target.source?.boxes[0], target.source ?? undefined)
   }, [target, ready, scrollToPage])
 
-  // Zooming keeps the reader on the page they were reading.
+  // Zooming keeps the reader on the page they were reading. Not on first load: the effect
+  // above has just scrolled to the target's highlight.
+  const shownZoom = useRef(zoom)
   useEffect(() => {
-    if (ready) scrollToPage(pageInView.current)
+    if (!ready || shownZoom.current === zoom) return
+    shownZoom.current = zoom
+    scrollToPage(pageInView.current)
   }, [zoom, ready, scrollToPage])
 
   // The page counter follows the scroll, exactly: widening this observer's own root would
@@ -368,6 +436,8 @@ export function PageViewer({
   useEffect(() => {
     if (!keyboard) return
     const onKey = (event: KeyboardEvent) => {
+      // A marker took the arrow key, or a menu or panel took Escape: one key closes one thing.
+      if (event.defaultPrevented) return
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
       if (event.key === 'Escape') {
         if (opened) setOpened(null)
@@ -385,6 +455,11 @@ export function PageViewer({
   const compactToolbar = panelWidth > 0 && panelWidth < COMPACT_TOOLBAR_BELOW
   const openMarker = opened && opened.target === target ? opened.marker : null
   const highlightPage = target.source ? target.source.page : null
+  const shownMarkers = markers.filter((marker) => references[marker.ref])
+  const markerStop =
+    (lastMarker && shownMarkers.includes(lastMarker) ? lastMarker : null) ??
+    shownMarkers.find((marker) => marker.page === page) ??
+    shownMarkers[0]
   // The gateway serves a paper only with the user's token, so pdf.js and the links below
   // get an in-memory copy fetched with it (#135).
   const pdf = useAuthorizedUrl(`${API_BASE}/api/papers/${encodeURIComponent(target.paper)}`)
@@ -395,19 +470,28 @@ export function PageViewer({
   const roleTitle = target.paperRole ? (
     <h2
       title={target.quote ? `${target.label} — “${target.quote}”` : target.label}
-      className="min-w-0 flex-1 truncate px-1 text-xs font-medium text-ink"
+      className={cn(
+        'flex min-w-0 text-xs font-medium whitespace-nowrap text-ink',
+        titleOnOwnLine ? 'shrink-0 flex-col border-b border-border-subtle px-3 py-1' : 'flex-1 gap-1 px-1',
+      )}
     >
-      <span className="sr-only">{target.paperRole === 'under-review' ? 'Paper under review: ' : 'Cited reference: '}</span>
-      {target.paperRole === 'under-review' ? 'Paper: ' : ''}
-      {target.label}
-      {target.detail && <span className="font-normal text-ink-muted"> · {target.detail}</span>}
-      <span className="font-normal text-ink-muted"> · p.{targetPage(target)}</span>
-      {target.quote && (
-        <span className="font-serif font-normal italic text-ink-muted"> · “{target.quote}”</span>
-      )}
-      {!target.error && !target.source && target.quote && (
-        <span className="font-normal text-ink-muted"> · exact place not found</span>
-      )}
+      {/* Shown, not only read out: Side by side and Stacked put the two papers in a different
+          order. The role never shrinks; the title is cut instead. */}
+      <span className="shrink-0 font-semibold">
+        {target.paperRole === 'under-review' ? 'Under review' : 'Cited reference'}
+        {!titleOnOwnLine && ':'}
+      </span>
+      <span className="min-w-0 truncate">
+        {target.label}
+        {target.detail && <span className="font-normal text-ink-muted"> · {target.detail}</span>}
+        <span className="font-normal text-ink-muted"> · page {targetPage(target)}</span>
+        {target.quote && (
+          <span className="font-serif font-normal italic text-ink-muted"> · “{target.quote}”</span>
+        )}
+        {!target.error && !target.source && !target.locating && target.quote && (
+          <span className="font-normal text-ink-muted"> · exact place not found</span>
+        )}
+      </span>
     </h2>
   ) : null
   const frameButtons = (
@@ -434,7 +518,7 @@ export function PageViewer({
         <div className="fixed inset-0 z-40 bg-ink/30" onClick={() => setExpanded(false)} aria-hidden />
       )}
       <aside
-        aria-label={`${target.paper}, page ${page}`}
+        aria-label={`${target.label}, page ${page}`}
         className={cn(
           'flex flex-col overflow-hidden border-border-subtle bg-surface',
           target.paperRole ? 'gap-0' : 'gap-3',
@@ -452,13 +536,20 @@ export function PageViewer({
             <header className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 {/* h2, so the "Quoted passage" h3 below sits under a heading of its own. */}
-                <h2 title={target.label} className="truncate text-sm font-medium">{target.label}</h2>
+                <h2 title={target.label} className="truncate text-sm font-medium">
+                  {onLabel ? <TextButton onClick={onLabel}>{target.label}</TextButton> : target.label}
+                </h2>
+                {/* Not the file name: stored PDFs are named by DOI, which means nothing to a reader. */}
                 <p className="truncate text-xs text-ink-muted">
-                  {target.detail && `${target.detail} · `}
-                  {target.paper}
-                  {/* Only when there was a passage to find: opening the paper itself has none. */}
-                  {!target.error && !target.source && target.quote && ' · exact place not found, showing the page'}
+                  {[
+                    target.detail,
+                    // Only when there was a passage to find: opening the paper itself has none.
+                    !target.error && !target.source && !target.locating && target.quote ? 'exact place not found, showing the page' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </p>
+                {notice}
               </div>
               {frameButtons}
             </header>
@@ -475,7 +566,7 @@ export function PageViewer({
                   title={compactQuote ? target.quote : undefined}
                   className={cn(
                     'font-serif italic text-ink',
-                    compactQuote ? 'line-clamp-2 text-[13px] leading-5' : 'text-[15px] leading-[22px]',
+                    compactQuote ? 'line-clamp-2 text-ui leading-5' : 'text-reading leading-5.5',
                   )}
                 >
                   “{target.quote}”
@@ -485,6 +576,7 @@ export function PageViewer({
           </>
         )}
 
+        {titleOnOwnLine && roleTitle}
         {target.error && (
           <p role="alert" className={cn('bg-refutes-soft px-3 py-2 text-sm leading-5 text-refutes', target.paperRole ? 'border-b border-border-subtle' : 'rounded-lg')}>
             {target.error}
@@ -492,9 +584,22 @@ export function PageViewer({
         )}
 
         <div className={cn('relative min-h-0 flex-1 overflow-hidden bg-canvas', !target.paperRole && 'rounded-lg border border-border-subtle')}>
+          {/* Over the page still showing, so the reader is not left reading the last claim's page. */}
+          {target.locating && (
+            <p role="status" className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-surface/80 text-sm text-ink-muted">
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              Finding the passage…
+            </p>
+          )}
           <div
+            ref={toolbar}
             role="toolbar"
             aria-label="Page controls"
+            onFocus={(event) => {
+              const items = [...event.currentTarget.querySelectorAll<HTMLElement>(TOOLBAR_ITEMS)]
+              if (items.includes(event.target)) toolbarStop.current = items.indexOf(event.target)
+            }}
+            onKeyDown={(event) => moveFocus(event, TOOLBAR_ITEMS, false)}
             className="absolute inset-x-0 top-0 z-30 flex items-center gap-1 overflow-x-auto border-b border-border-subtle bg-surface/80 px-2 backdrop-blur-md"
             style={{ height: TOOLBAR_HEIGHT }}
           >
@@ -503,7 +608,7 @@ export function PageViewer({
             </IconButton>
             <span
               className={cn(
-                'text-center font-mono text-[13px] whitespace-nowrap text-ink-muted tabular-nums',
+                'text-center font-mono text-ui whitespace-nowrap text-ink-muted tabular-nums',
                 compactToolbar ? 'min-w-12' : 'min-w-24',
               )}
               aria-live="polite"
@@ -518,8 +623,7 @@ export function PageViewer({
             >
               <ChevronRight className="size-4" />
             </IconButton>
-            {toolbarLead && <div className="min-w-0 max-w-56 flex-1">{toolbarLead}</div>}
-            {roleTitle ?? <span className="flex-1" />}
+            {(!titleOnOwnLine && roleTitle) || <span className="flex-1" />}
             <IconButton
               label="Zoom out"
               onClick={() => setZoom(ZOOMS[Math.max(0, zoomIndex - 1)])}
@@ -527,7 +631,7 @@ export function PageViewer({
             >
               <ZoomOut className="size-4" />
             </IconButton>
-            <span className="min-w-10 text-center text-[13px] text-ink-muted tabular-nums">{zoom === 1 ? 'fit' : `${zoom}×`}</span>
+            <span className="min-w-10 text-center text-ui text-ink-muted tabular-nums">{zoom === 1 ? 'fit' : `${zoom}×`}</span>
             <IconButton
               label="Zoom in"
               onClick={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, zoomIndex + 1)])}
@@ -556,11 +660,23 @@ export function PageViewer({
           </div>
           <div
             ref={scroller}
+            onFocus={(event) => {
+              if (!event.target.matches(PDF_LINKS)) return
+              lastPdfLink.current = event.target
+              nameLinks(event.currentTarget, event.target)
+            }}
+            onKeyDown={(event) => {
+              if (!(event.target instanceof HTMLElement)) return
+              if (event.target.matches('[data-marker]')) moveFocus(event, '[data-marker]', false)
+              if (event.target.matches(PDF_LINKS)) moveFocus(event, PDF_LINKS, false)
+            }}
             onMouseUp={reportSelection}
             onKeyUp={reportSelection}
             onTouchEnd={reportSelection}
             className="h-full overflow-auto"
-            style={{ paddingTop: TOOLBAR_HEIGHT }}
+            // No scroll anchoring: as pages above the target are drawn, Chrome moved the view down
+            // with whatever was on screen and left the highlight pages behind.
+            style={{ paddingTop: TOOLBAR_HEIGHT, overflowAnchor: 'none' }}
           >
           {panelWidth > 0 && !pdf.url && !pdf.failed && (
             <p className="flex items-center gap-2 p-4 text-sm text-ink-muted">
@@ -602,7 +718,7 @@ export function PageViewer({
                 const around = zoom > 1 ? 1 : RENDERED_AROUND
                 const drawn =
                   Math.abs(number - page) <= around || Math.abs(number - leadPage) <= around || number === targetPage(target)
-                const pageMarkers = markers.filter((marker) => marker.page === number && references[marker.ref])
+                const pageMarkers = shownMarkers.filter((marker) => marker.page === number)
                 return (
                   <div key={number} style={{ padding: `${PAGE_GAP}px ${PAGE_GAP}px 0` }}>
                     <div
@@ -621,7 +737,13 @@ export function PageViewer({
                           devicePixelRatio={pixelRatio}
                           renderTextLayer
                           renderAnnotationLayer
-                          loading={<div style={{ height: pageWidth * pageRatio }} />}
+                          // Said in words, so a page still loading does not look like an empty one.
+                          loading={
+                            <p className="flex items-center gap-2 p-4 text-sm text-ink-muted" style={{ height: pageWidth * pageRatio }}>
+                              <Loader2 className="size-4 animate-spin" />
+                              Loading page {number}…
+                            </p>
+                          }
                         />
                       )}
                       {number === highlightPage &&
@@ -632,11 +754,16 @@ export function PageViewer({
                         <button
                           key={`marker-${i}`}
                           type="button"
+                          data-marker=""
+                          tabIndex={marker === markerStop ? 0 : -1}
+                          onFocus={() => setLastMarker(marker)}
                           onClick={() => (onCitation ? onCitation(marker) : setOpened(marker === openMarker ? null : { marker, target }))}
                           aria-label={`Cited paper ${marker.text}: ${reference(references[marker.ref])}`}
                           aria-expanded={marker === openMarker}
                           className={cn(
-                            'absolute z-10 rounded-xs ring-1 ring-accent/50 hover:bg-accent/20 focus-visible:outline-2 focus-visible:outline-accent',
+                            // The box fits the marker text, often under 10px; the pseudo-element makes the
+                            // pointer target 24px (WCAG 2.2 target size) without covering more of the page.
+                            'absolute z-10 rounded-xs ring-1 ring-accent/50 before:absolute before:-inset-2 hover:bg-accent/20 focus-visible:outline-2 focus-visible:outline-accent',
                             marker === openMarker ? 'bg-accent/20 ring-2 ring-accent' : 'bg-accent/5',
                           )}
                           style={boxStyle(marker, marker.page_width, marker.page_height)}

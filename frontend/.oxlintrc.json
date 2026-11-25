@@ -1,6 +1,8 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["react", "typescript", "oxc"],
+  "jsPlugins": ["eslint-plugin-better-tailwindcss"],
+  "settings": { "better-tailwindcss": { "entryPoint": "src/index.css" } },
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }],
@@ -15,6 +17,36 @@
           }
         ]
       }
+    ],
+    "better-tailwindcss/enforce-canonical-classes": ["error", { "collapse": false }],
+    "better-tailwindcss/no-deprecated-classes": "error",
+    "better-tailwindcss/no-duplicate-classes": "error",
+    "better-tailwindcss/no-conflicting-classes": "error",
+    "better-tailwindcss/no-unnecessary-whitespace": "error",
+    "better-tailwindcss/no-unknown-classes": [
+      "error",
+      { "ignore": ["^type-(display|title|label)$", "^(redesign|teacher|onboarding)-app$", "^toaster$"] }
+    ],
+    "better-tailwindcss/no-restricted-classes": [
+      "warn",
+      {
+        "restrict": [
+          {
+            "pattern": "^.*\\[[^\\]]*\\d+px[^\\]]*\\]$",
+            "message": "Arbitrary px value: use the spacing scale (top-17), a theme token, or --spacing(n) inside calc. Each one adds its own CSS rule."
+          },
+          {
+            "pattern": "^.*\\[#[0-9a-fA-F]{3,8}\\]$",
+            "message": "Arbitrary hex colour: use a colour token from src/index.css."
+          }
+        ]
+      }
     ]
-  }
+  },
+  "overrides": [
+    {
+      "files": ["tests/**"],
+      "rules": { "better-tailwindcss/no-unknown-classes": "off", "better-tailwindcss/no-restricted-classes": "off" }
+    }
+  ]
 }
