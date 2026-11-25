@@ -807,6 +807,22 @@ describe('the order and the memory of the Analyses list', () => {
     expect(onOpen).toHaveBeenCalledWith('x')
   })
 
+  it('records the scroll position once scrolling stops, so Back works after leaving by the nav', () => {
+    vi.useFakeTimers()
+    const scrollY = vi.spyOn(window, 'scrollY', 'get').mockReturnValue(260)
+    const { unmount } = wrap(<AnalysisList analyses={[analysis({ id: 'x', title: 'Dense retrieval', claims: [claim] })]} onOpen={vi.fn()} />)
+    fireEvent.scroll(window)
+    act(() => vi.advanceTimersByTime(150))
+    expect(window.history.state.analysisList).toEqual({ query: '', openGroups: [], scrollY: 260 })
+    // A scroll still settling when the list goes is dropped, not written into the next entry.
+    scrollY.mockReturnValue(500)
+    fireEvent.scroll(window)
+    unmount()
+    act(() => vi.advanceTimersByTime(150))
+    expect(window.history.state.analysisList.scrollY).toBe(260)
+    vi.useRealTimers()
+  })
+
   it('brings back the saved search, the filter and the scroll position', () => {
     // A filter left in the saved entry by an older build loses to the address.
     window.history.replaceState({ analysisList: { query: 'dense', shows: ['supports'], openGroups: [], scrollY: 340 } }, '', '/?standing=refutes')

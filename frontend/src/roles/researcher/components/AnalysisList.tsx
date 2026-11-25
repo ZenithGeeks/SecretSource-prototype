@@ -77,7 +77,24 @@ export function AnalysisList({ analyses, onOpen }: { analyses: Analysis[]; onOpe
     const state: ListState = { query, openGroups, scrollY: savedState()?.scrollY ?? 0 }
     window.history.replaceState({ ...window.history.state, analysisList: state }, '')
   }, [query, openGroups])
-  const open = (id: string) => {
+  // The scroll position too, once scrolling stops: the router pushes the next entry before this
+  // list unmounts, so it cannot be written on the way out.
+  useEffect(() => {
+    let timer: number | undefined
+    const record = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        const state = { ...savedState(), scrollY: window.scrollY }
+        window.history.replaceState({ ...window.history.state, analysisList: state }, '')
+      }, 150)
+    }
+    window.addEventListener('scroll', record, { passive: true })
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('scroll', record)
+    }
+  }, [])
+  const open =(id: string) => {
     const state: ListState = { query, openGroups, scrollY: window.scrollY }
     window.history.replaceState({ ...window.history.state, analysisList: state }, '')
     onOpen(id)

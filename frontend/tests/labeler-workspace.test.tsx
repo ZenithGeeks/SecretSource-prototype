@@ -1123,6 +1123,21 @@ describe('undoing more than one step', () => {
     key('z')
     expect(screen.getByRole('status')).toHaveTextContent('Undone: Passage 1 cleared')
   })
+
+  it('keeps a saved passage verdict when it is clicked again, since saving cannot clear it', async () => {
+    gateway.session = makeSession({
+      saved: {
+        claims: [{ claim_id: 'paperA#0', status: 'accepted' }],
+        candidates: [{ claim_id: 'paperA#0', cand_id: 'c1', reference_id: 'refB', origin: 'retrieved', status: 'relevant' }],
+        labels: [],
+      },
+    })
+    await open()
+    const relevant = () => screen.getAllByRole('radio', { name: /^Relevant/ })[0]
+    expect(relevant()).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(relevant())
+    expect(relevant()).toHaveAttribute('aria-checked', 'true')
+  })
 })
 
 describe('the progress count in the header', () => {

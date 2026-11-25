@@ -31,6 +31,7 @@ export function LabelForm({
   active,
   label,
   others,
+  levelSaved,
   onChange,
 }: {
   /** The reference in a few words, as the paper cites it: "[7]" or "Karpukhin et al. · 2020". */
@@ -41,6 +42,8 @@ export function LabelForm({
   label: LabelDraft | undefined
   /** People who already labeled this pair. Shown, not blocking: a second label is how agreement is measured. */
   others: string[]
+  /** A saved level can be changed but not cleared: saving skips an unset level, so the old row would stay. */
+  levelSaved: boolean
   onChange: (label: LabelDraft) => void
 }) {
   const value = label ?? emptyLabel()
@@ -93,8 +96,11 @@ export function LabelForm({
             onMouseLeave={() => setPointed(null)}
             onFocus={() => setPointed(level)}
             onBlur={() => setPointed(null)}
-            // Choosing the same level again takes it back: a level may be left unset.
-            onClick={() => onChange({ ...value, evidence: value.evidence === level ? null : (level as Level) })}
+            // Choosing the same level again takes it back, until it is saved.
+            onClick={() => {
+              if (value.evidence === level && levelSaved) return
+              onChange({ ...value, evidence: value.evidence === level ? null : (level as Level) })
+            }}
             className={cn(
               'flex min-h-11 flex-col items-center justify-center rounded-lg border px-1 py-1 transition-colors',
               'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',

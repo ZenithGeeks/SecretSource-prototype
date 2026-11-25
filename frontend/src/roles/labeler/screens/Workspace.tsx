@@ -882,6 +882,7 @@ function Body({
         active={id === refId}
         label={draft.labels[id]}
         others={session.others[`${claim.claim_id}|${id}`] ?? []}
+        levelSaved={Boolean(saved[claim.claim_id]?.labels[id]?.evidence)}
         onChange={(label) =>
           patch({ labels: { ...draft.labels, [id]: label } }, labelChangeWords(tag, draft.labels[id] ?? emptyLabel(), label))
         }
@@ -1021,8 +1022,10 @@ function Body({
           focus={focus}
           onFocus={setFocus}
           onJudge={(id, status) => {
-            // Choosing the same answer again takes it back: a passage may stay unjudged.
+            // Choosing the same answer again takes it back, until it is saved: saving skips an
+            // unjudged passage, so the saved answer would stay.
             const { [id]: chosen, ...rest } = draft.cands
+            if (chosen === status && saved[claim.claim_id]?.cands[id]) return
             const rank = claim.candidates.find((c) => c.cand_id === id)?.rank
             const what = chosen === status ? 'cleared' : status === 'relevant' ? 'relevant' : 'not relevant'
             patch({ cands: chosen === status ? rest : { ...rest, [id]: status } }, `Passage ${rank} ${what}`)

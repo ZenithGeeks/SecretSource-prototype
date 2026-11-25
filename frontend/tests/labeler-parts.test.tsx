@@ -413,7 +413,7 @@ describe('ClaimSticky', () => {
 describe('LabelForm', () => {
   const form = (over: Partial<Parameters<typeof LabelForm>[0]> = {}) => {
     const onChange = vi.fn()
-    render(<LabelForm tag="[7]" title="Ref B" active label={{ ...emptyLabel(), evidence: 3 }} others={[]} onChange={onChange} {...over} />)
+    render(<LabelForm tag="[7]" title="Ref B" active label={{ ...emptyLabel(), evidence: 3 }} others={[]} levelSaved={false} onChange={onChange} {...over} />)
     return onChange
   }
 
@@ -467,6 +467,14 @@ describe('LabelForm', () => {
     expect(onChange).toHaveBeenLastCalledWith({ ...emptyLabel(), evidence: null })
   })
 
+  it('keeps a saved level when it is clicked again, since saving cannot clear it', () => {
+    const onChange = form({ levelSaved: true })
+    fireEvent.click(screen.getByRole('radio', { name: '3 · Clear' }))
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('radio', { name: '2 · Weak' }))
+    expect(onChange).toHaveBeenLastCalledWith({ ...emptyLabel(), evidence: 2 })
+  })
+
   it('takes the chosen confidence back when it is clicked again', () => {
     const onChange = form({ label: { ...emptyLabel(), evidence: 3, confidence: 'high' } })
     fireEvent.click(screen.getByRole('radio', { name: 'High' }))
@@ -476,7 +484,7 @@ describe('LabelForm', () => {
 
 describe('LabelForm keys and level rules', () => {
   const form = (over: Partial<Parameters<typeof LabelForm>[0]> = {}) =>
-    render(<LabelForm tag="[7]" title="Ref B" active label={emptyLabel()} others={[]} onChange={vi.fn()} {...over} />)
+    render(<LabelForm tag="[7]" title="Ref B" active label={emptyLabel()} others={[]} levelSaved={false} onChange={vi.fn()} {...over} />)
 
   it('shows the key chip of each level on the reference in view only', () => {
     const { unmount } = form()
@@ -514,7 +522,7 @@ describe('no control inside another', () => {
     const { container } = render(
       <>
         <ClaimDecision claim={claim('c1', 'Original.')} position={1} count={1} draft={emptyDraft()} onChange={vi.fn()} />
-        <LabelForm tag="[7]" title="Ref B" active label={emptyLabel()} others={[]} onChange={vi.fn()} />
+        <LabelForm tag="[7]" title="Ref B" active label={emptyLabel()} others={[]} levelSaved={false} onChange={vi.fn()} />
         <SaveBar left={['a', 'b']} dirty saving={false} error={null} savedRows={null} hasNext onSave={vi.fn()} onStep={vi.fn()} />
       </>,
     )
