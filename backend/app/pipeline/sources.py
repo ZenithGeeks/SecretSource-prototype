@@ -551,7 +551,11 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
         ids = {"DOI": doi} if doi else {}
         return Resolution(pdf, found_title, "openalex", ids, year, first_author)
     if paywalled:
-        raise NoOpenAccessCopy(f"no open-access PDF known for '{title}'", "openalex")
+        error = NoOpenAccessCopy(f"no open-access PDF known for '{title}'", "openalex")
+        # The title + fits(year, first_author) check above already confirmed this is the
+        # cited work; keep that so the caller does not log it as unmatched.
+        error.source_attempts = [_attempt("openalex", "matched")]
+        raise error
     if others:
         raise OnlyOtherWorks(f"OpenAlex has only other works titled '{title}': {'; '.join(others)}")
     raise Unresolvable(f"OpenAlex knows no paper by that title: {title}")
@@ -587,7 +591,7 @@ def _described(title: str, year: int | None, first_author: str) -> str:
     return f"{title} ({', '.join(str(part) for part in (year, first_author) if part)})"
 
 
-def _unpaywall_resolutions(doi: str) -> list[Resolution]:
+def _unpaywall_resolutions(doi: str, expected: dict | None = None) -> list[Resolution]:
     """Every PDF or landing-page location Unpaywall marks open for a DOI.
 
     Its best location can be a publisher endpoint that refuses automated downloads while a
@@ -605,15 +609,21 @@ def _unpaywall_resolutions(doi: str) -> list[Resolution]:
         raise Unresolvable(f"Unpaywall knows no work with DOI {doi}")
     response.raise_for_status()
     work = response.json()
+
+    # Unpaywall answering for this exact DOI confirms identity only when its own title does
+    # not conflict with the citation's; `_validate_resolution` makes the same check when a
+    # location is found below, so a title conflict here must not be reported as a match either.
+    expected_title = " ".join(str((expected or {}).get("title") or "").split())
+    title_confirmed = not expected_title or titles_match(expected_title, work.get("title") or "")
+
     locations = []
     if best := work.get("best_oa_location"):
         locations.append(best)
     locations.extend(work.get("oa_locations") or [])
     if not locations:
         error = NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
-        # Unpaywall answered for this exact DOI (it is not the 404 branch above), so the
-        # identity is confirmed; keep that so the caller does not log it as unmatched.
-        error.source_attempts = [_attempt("unpaywall", "matched")]
+        if title_confirmed:
+            error.source_attempts = [_attempt("unpaywall", "matched")]
         raise error
 
     ids = {"DOI": doi}
@@ -636,13 +646,16 @@ def _unpaywall_resolutions(doi: str) -> list[Resolution]:
             _as_year(work.get("year")),
         ))
     if not resolutions:
-        raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
+        error = NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
+        if title_confirmed:
+            error.source_attempts = [_attempt("unpaywall", "matched")]
+        raise error
     return resolutions
 
 
-def _unpaywall_pdf(doi: str) -> Resolution:
+def _unpaywall_pdf(doi: str, expected: dict | None = None) -> Resolution:
     """The best available Unpaywall location, preserving the legacy single-answer API."""
-    return _unpaywall_resolutions(doi)[0]
+    return _unpaywall_resolutions(doi, expected)[0]
 
 
 def _as_year(value) -> int | None:
@@ -936,6 +949,7 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
 
     fits = _expected_fits(expected)
     matches = []
+    no_pdf_matches: set[str] = set()
     mismatched_doi_titles = []
     for volume in root.findall("./volume"):
         for paper in volume.findall("./paper"):
@@ -956,13 +970,12 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
             ))) if authors else ""
             if not fits(year, first_author):
                 continue
-            if paper.find("pdf") is None:
-                error = NoOpenAccessCopy("ACL Anthology metadata has no PDF for this paper")
-                # The DOI/title + year/author match above already confirmed this is the
-                # cited paper; keep that so the caller does not log it as unmatched.
-                error.source_attempts = [_attempt("acl_anthology", "matched")]
-                raise error
             anthology_id = _acl_paper_id(root, volume, paper)
+            if paper.find("pdf") is None:
+                # Keep scanning instead of raising here: a later paper could be this same
+                # work with a PDF after all, or a second match that makes this ambiguous.
+                no_pdf_matches.add(anthology_id)
+                continue
             ids = {"ACL": anthology_id}
             if found_doi:
                 ids["DOI"] = found_doi
@@ -976,9 +989,17 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
     unique = {item.ids.get("ACL"): item for item in matches}
     if len(unique) > 1:
         raise AmbiguousMatch(f"more than one ACL Anthology paper matches '{title}'")
-    if not unique:
-        raise Unresolvable(f"ACL Anthology has no paper matching '{title}'")
-    return list(unique.values())
+    if unique:
+        return list(unique.values())
+    if no_pdf_matches:
+        error = NoOpenAccessCopy("ACL Anthology metadata has no PDF for this paper")
+        if len(no_pdf_matches) == 1:
+            # Exactly one candidate matched title/DOI and year/author; keep that
+            # confirmation so the caller does not log it as unmatched. With more than
+            # one, identity is not uniquely established, so leave the attempt untagged.
+            error.source_attempts = [_attempt("acl_anthology", "matched")]
+        raise error
+    raise Unresolvable(f"ACL Anthology has no paper matching '{title}'")
 
 
 def _fallback_resolutions(
@@ -1032,7 +1053,7 @@ def _fallback_resolutions(
         str(attempt.get("provider", "")) for attempt in found.attempts
     }
     if doi and UNPAYWALL_EMAIL and "unpaywall" not in prior_providers:
-        ask("unpaywall", lambda: _unpaywall_resolutions(doi))
+        ask("unpaywall", lambda: _unpaywall_resolutions(doi, expected))
 
     if doi and (acl := _acl_anthology_candidate(doi, expected)):
         attempts.append(_attempt("acl_anthology", "matched", locator=acl.url))
@@ -1154,7 +1175,7 @@ def _reported(
 def _by_doi(doi: str, expected: dict | None = None) -> Resolution:
     return _first_answer((
         ("semantic_scholar", lambda found: _semantic_scholar_pdf(f"DOI:{quote(found)}")),
-        ("unpaywall", _unpaywall_pdf),
+        ("unpaywall", lambda found: _unpaywall_pdf(found, expected)),
     ), doi, expected)
 
 
