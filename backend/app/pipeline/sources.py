@@ -514,7 +514,7 @@ def _semantic_scholar_by_title(title: str, fits: Fits = _any_work) -> Resolution
     raise Unresolvable(f"no paper found matching the title: {title}")
 
 
-def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
+def _openalex_by_title(title: str, fits: Fits = _any_work, expected_doi: str = "") -> Resolution:
     """Resolve title-only citations through OpenAlex after arXiv and Semantic Scholar."""
     from app.pipeline.indexes import _IndexError, openalex_works
 
@@ -522,15 +522,16 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
     try:
         works = openalex_works({
             "filter": f"title.search:{words}",
-            "select": "doi,title,publication_year,authorships,locations",
+            "select": "id,doi,title,publication_year,authorships,locations",
             "per-page": 5,
         })
     except _IndexError as error:
         raise LookupUnavailable(f"OpenAlex did not answer: {error}") from error
 
     others = []
-    paywalled = False
-    for work in works:
+    no_pdf_works: set[str | int] = set()
+    no_pdf_doi_conflict = False
+    for position, work in enumerate(works):
         found_title = work.get("title") or ""
         if not titles_match(title, found_title):
             continue
@@ -545,13 +546,27 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
             continue
         pdf = next((loc.get("pdf_url") for loc in work.get("locations") or [] if loc.get("pdf_url")), "")
         if not pdf:
-            paywalled = True
+            candidate_doi = doi_in(str(work.get("doi") or ""))
+            if expected_doi and candidate_doi and candidate_doi.lower() != expected_doi.lower():
+                # `_validate_resolution` would reject this candidate if it had a PDF, so a
+                # no-PDF candidate with a conflicting DOI must not be reported as a match.
+                no_pdf_doi_conflict = True
+                continue
+            # Shared bibliographic metadata cannot establish that two rows are the same work.
+            no_pdf_works.add(work.get("id") or (candidate_doi or "").lower() or position)
             continue
         doi = doi_in(str(work.get("doi") or ""))
         ids = {"DOI": doi} if doi else {}
         return Resolution(pdf, found_title, "openalex", ids, year, first_author)
-    if paywalled:
-        raise NoOpenAccessCopy(f"no open-access PDF known for '{title}'", "openalex")
+    if no_pdf_works or no_pdf_doi_conflict:
+        error = NoOpenAccessCopy(f"no open-access PDF known for '{title}'", "openalex")
+        if len(no_pdf_works) == 1 and not no_pdf_doi_conflict:
+            # Exactly one candidate matched title/fits(year, first_author) and its DOI (when
+            # known) does not conflict; keep that confirmation so the caller does not log it
+            # as unmatched. With more than one, or a DOI conflict, identity is not uniquely
+            # established, so leave the attempt untagged.
+            error.source_attempts = [_attempt("openalex", "matched")]
+        raise error
     if others:
         raise OnlyOtherWorks(f"OpenAlex has only other works titled '{title}': {'; '.join(others)}")
     raise Unresolvable(f"OpenAlex knows no paper by that title: {title}")
@@ -587,7 +602,7 @@ def _described(title: str, year: int | None, first_author: str) -> str:
     return f"{title} ({', '.join(str(part) for part in (year, first_author) if part)})"
 
 
-def _unpaywall_resolutions(doi: str) -> list[Resolution]:
+def _unpaywall_resolutions(doi: str, expected: dict | None = None) -> list[Resolution]:
     """Every PDF or landing-page location Unpaywall marks open for a DOI.
 
     Its best location can be a publisher endpoint that refuses automated downloads while a
@@ -605,12 +620,23 @@ def _unpaywall_resolutions(doi: str) -> list[Resolution]:
         raise Unresolvable(f"Unpaywall knows no work with DOI {doi}")
     response.raise_for_status()
     work = response.json()
+
+    # Unpaywall answering for this exact DOI confirms identity only when its own title does
+    # not conflict with the citation's; `_validate_resolution` makes the same check when a
+    # location is found below, so a title conflict here must not be reported as a match either.
+    expected_title = " ".join(str((expected or {}).get("title") or "").split())
+    found_title = work.get("title") or ""
+    title_confirmed = not expected_title or not found_title or titles_match(expected_title, found_title)
+
     locations = []
     if best := work.get("best_oa_location"):
         locations.append(best)
     locations.extend(work.get("oa_locations") or [])
     if not locations:
-        raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
+        error = NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
+        if title_confirmed:
+            error.source_attempts = [_attempt("unpaywall", "matched")]
+        raise error
 
     ids = {"DOI": doi}
     for location in locations:
@@ -632,13 +658,16 @@ def _unpaywall_resolutions(doi: str) -> list[Resolution]:
             _as_year(work.get("year")),
         ))
     if not resolutions:
-        raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
+        error = NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
+        if title_confirmed:
+            error.source_attempts = [_attempt("unpaywall", "matched")]
+        raise error
     return resolutions
 
 
-def _unpaywall_pdf(doi: str) -> Resolution:
+def _unpaywall_pdf(doi: str, expected: dict | None = None) -> Resolution:
     """The best available Unpaywall location, preserving the legacy single-answer API."""
-    return _unpaywall_resolutions(doi)[0]
+    return _unpaywall_resolutions(doi, expected)[0]
 
 
 def _as_year(value) -> int | None:
@@ -736,7 +765,11 @@ def _openalex_resolutions(work: dict, expected: dict | None = None) -> list[Reso
             _validate_resolution(candidate, expected)
         resolutions.append(candidate)
     if not resolutions:
-        raise NoOpenAccessCopy("OpenAlex knows the work but lists no open PDF location")
+        error = NoOpenAccessCopy("OpenAlex knows the work but lists no open PDF location")
+        # `_validate_resolution(base, ...)` above already confirmed this is the cited work;
+        # keep that fact so the caller does not log a plain no-copy attempt as "unmatched".
+        error.source_attempts = [_attempt("openalex", "matched")]
+        raise error
     return resolutions
 
 
@@ -928,6 +961,9 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
 
     fits = _expected_fits(expected)
     matches = []
+    no_open_copy = False
+    incomplete_identity = False
+    matching_ids: set[str] = set()
     mismatched_doi_titles = []
     for volume in root.findall("./volume"):
         for paper in volume.findall("./paper"):
@@ -948,9 +984,20 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
             ))) if authors else ""
             if not fits(year, first_author):
                 continue
+            # The first matching row without a PDF determines the lookup outcome.
+            # Continue scanning only to decide whether identity was confirmed.
             if paper.find("pdf") is None:
-                raise NoOpenAccessCopy("ACL Anthology metadata has no PDF for this paper")
-            anthology_id = _acl_paper_id(root, volume, paper)
+                no_open_copy = True
+            try:
+                anthology_id = _acl_paper_id(root, volume, paper)
+            except LookupUnavailable:
+                if not no_open_copy:
+                    raise
+                incomplete_identity = True
+                continue
+            matching_ids.add(anthology_id)
+            if no_open_copy:
+                continue
             ids = {"ACL": anthology_id}
             if found_doi:
                 ids["DOI"] = found_doi
@@ -959,6 +1006,11 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
                 "acl_anthology", ids, year, first_author,
             ))
 
+    if no_open_copy:
+        error = NoOpenAccessCopy("ACL Anthology metadata has no PDF for this paper")
+        if len(matching_ids) == 1 and not incomplete_identity and not mismatched_doi_titles:
+            error.source_attempts = [_attempt("acl_anthology", "matched")]
+        raise error
     if mismatched_doi_titles:
         raise IdentityMismatch("the ACL Anthology DOI matches a paper with a different title")
     unique = {item.ids.get("ACL"): item for item in matches}
@@ -1008,6 +1060,7 @@ def _fallback_resolutions(
                 wrapped = LookupUnavailable(f"{provider} did not respond")
                 wrapped.__cause__ = error
                 error = wrapped
+            attempts.extend(getattr(error, "source_attempts", []) or [])
             attempts.append(_attempt(provider, _outcome_code(error), error))
             failures.append(error)
         else:
@@ -1019,7 +1072,7 @@ def _fallback_resolutions(
         str(attempt.get("provider", "")) for attempt in found.attempts
     }
     if doi and UNPAYWALL_EMAIL and "unpaywall" not in prior_providers:
-        ask("unpaywall", lambda: _unpaywall_resolutions(doi))
+        ask("unpaywall", lambda: _unpaywall_resolutions(doi, expected))
 
     if doi and (acl := _acl_anthology_candidate(doi, expected)):
         attempts.append(_attempt("acl_anthology", "matched", locator=acl.url))
@@ -1047,6 +1100,7 @@ def _first_answer(resolvers, argument: str, expected: dict | None = None) -> Res
             if expected:
                 _validate_resolution(found, expected)
         except (ValueError, OSError) as error:
+            attempts.extend(getattr(error, "source_attempts", []) or [])
             attempts.append(_attempt(provider, _outcome_code(error), error))
             failures.append(error)
         else:
@@ -1056,10 +1110,11 @@ def _first_answer(resolvers, argument: str, expected: dict | None = None) -> Res
 
 
 def _by_title(title: str, expected: dict | None = None) -> Resolution:
+    expected_doi = doi_in(str((expected or {}).get("doi") or "")) or ""
     return _first_answer((
         ("arxiv", lambda query: _arxiv_by_title(query, _expected_fits(expected))),
         ("semantic_scholar", lambda query: _semantic_scholar_by_title(query, _expected_fits(expected))),
-        ("openalex", lambda query: _openalex_by_title(query, _expected_fits(expected))),
+        ("openalex", lambda query: _openalex_by_title(query, _expected_fits(expected), expected_doi)),
     ), title, expected)
 
 
@@ -1140,7 +1195,7 @@ def _reported(
 def _by_doi(doi: str, expected: dict | None = None) -> Resolution:
     return _first_answer((
         ("semantic_scholar", lambda found: _semantic_scholar_pdf(f"DOI:{quote(found)}")),
-        ("unpaywall", _unpaywall_pdf),
+        ("unpaywall", lambda found: _unpaywall_pdf(found, expected)),
     ), doi, expected)
 
 
