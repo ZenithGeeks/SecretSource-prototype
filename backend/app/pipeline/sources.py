@@ -610,7 +610,11 @@ def _unpaywall_resolutions(doi: str) -> list[Resolution]:
         locations.append(best)
     locations.extend(work.get("oa_locations") or [])
     if not locations:
-        raise NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
+        error = NoOpenAccessCopy(f"no open-access PDF known for DOI:{doi}", "unpaywall")
+        # Unpaywall answered for this exact DOI (it is not the 404 branch above), so the
+        # identity is confirmed; keep that so the caller does not log it as unmatched.
+        error.source_attempts = [_attempt("unpaywall", "matched")]
+        raise error
 
     ids = {"DOI": doi}
     for location in locations:
@@ -736,7 +740,11 @@ def _openalex_resolutions(work: dict, expected: dict | None = None) -> list[Reso
             _validate_resolution(candidate, expected)
         resolutions.append(candidate)
     if not resolutions:
-        raise NoOpenAccessCopy("OpenAlex knows the work but lists no open PDF location")
+        error = NoOpenAccessCopy("OpenAlex knows the work but lists no open PDF location")
+        # `_validate_resolution(base, ...)` above already confirmed this is the cited work;
+        # keep that fact so the caller does not log a plain no-copy attempt as "unmatched".
+        error.source_attempts = [_attempt("openalex", "matched")]
+        raise error
     return resolutions
 
 
@@ -949,7 +957,11 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
             if not fits(year, first_author):
                 continue
             if paper.find("pdf") is None:
-                raise NoOpenAccessCopy("ACL Anthology metadata has no PDF for this paper")
+                error = NoOpenAccessCopy("ACL Anthology metadata has no PDF for this paper")
+                # The DOI/title + year/author match above already confirmed this is the
+                # cited paper; keep that so the caller does not log it as unmatched.
+                error.source_attempts = [_attempt("acl_anthology", "matched")]
+                raise error
             anthology_id = _acl_paper_id(root, volume, paper)
             ids = {"ACL": anthology_id}
             if found_doi:
@@ -1008,6 +1020,7 @@ def _fallback_resolutions(
                 wrapped = LookupUnavailable(f"{provider} did not respond")
                 wrapped.__cause__ = error
                 error = wrapped
+            attempts.extend(getattr(error, "source_attempts", []) or [])
             attempts.append(_attempt(provider, _outcome_code(error), error))
             failures.append(error)
         else:
@@ -1047,6 +1060,7 @@ def _first_answer(resolvers, argument: str, expected: dict | None = None) -> Res
             if expected:
                 _validate_resolution(found, expected)
         except (ValueError, OSError) as error:
+            attempts.extend(getattr(error, "source_attempts", []) or [])
             attempts.append(_attempt(provider, _outcome_code(error), error))
             failures.append(error)
         else:
