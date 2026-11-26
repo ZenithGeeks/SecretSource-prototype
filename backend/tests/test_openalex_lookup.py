@@ -94,6 +94,22 @@ def test_two_distinct_no_pdf_works_are_ambiguous_not_matched(monkeypatch):
     assert not getattr(failure.value, "source_attempts", None)
 
 
+@pytest.mark.parametrize("second_id, matched", [("W1", True), ("W2", False), (None, False)])
+def test_no_doi_no_pdf_works_are_deduplicated_by_openalex_id(monkeypatch, second_id, matched):
+    record = work(pdfs=(None,), doi=False)
+    asked = answer(
+        monkeypatch,
+        {**record, "id": "https://openalex.org/W1"},
+        {**record, "id": f"https://openalex.org/{second_id}" if second_id else None},
+    )
+    with pytest.raises(sources.NoOpenAccessCopy) as failure:
+        sources._openalex_by_title("Frontier: Exploring Exascale")
+    assert "id" in asked[0]["select"].split(",")
+    assert getattr(failure.value, "source_attempts", []) == (
+        [{"provider": "openalex", "result": "matched"}] if matched else []
+    )
+
+
 def test_a_no_pdf_work_with_a_conflicting_doi_is_not_matched(monkeypatch):
     answer(monkeypatch, work(pdfs=(None,)))
     with pytest.raises(sources.NoOpenAccessCopy) as failure:

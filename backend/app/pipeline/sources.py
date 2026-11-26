@@ -522,16 +522,16 @@ def _openalex_by_title(title: str, fits: Fits = _any_work, expected_doi: str = "
     try:
         works = openalex_works({
             "filter": f"title.search:{words}",
-            "select": "doi,title,publication_year,authorships,locations",
+            "select": "id,doi,title,publication_year,authorships,locations",
             "per-page": 5,
         })
     except _IndexError as error:
         raise LookupUnavailable(f"OpenAlex did not answer: {error}") from error
 
     others = []
-    no_pdf_works: set = set()
+    no_pdf_works: set[str | int] = set()
     no_pdf_doi_conflict = False
-    for work in works:
+    for position, work in enumerate(works):
         found_title = work.get("title") or ""
         if not titles_match(title, found_title):
             continue
@@ -552,7 +552,8 @@ def _openalex_by_title(title: str, fits: Fits = _any_work, expected_doi: str = "
                 # no-PDF candidate with a conflicting DOI must not be reported as a match.
                 no_pdf_doi_conflict = True
                 continue
-            no_pdf_works.add(candidate_doi or (found_title, year, first_author))
+            # Shared bibliographic metadata cannot establish that two rows are the same work.
+            no_pdf_works.add(work.get("id") or (candidate_doi or "").lower() or position)
             continue
         doi = doi_in(str(work.get("doi") or ""))
         ids = {"DOI": doi} if doi else {}
@@ -998,9 +999,9 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
     if mismatched_doi_titles:
         raise IdentityMismatch("the ACL Anthology DOI matches a paper with a different title")
     unique = {item.ids.get("ACL"): item for item in matches}
-    if len(unique) > 1:
-        raise AmbiguousMatch(f"more than one ACL Anthology paper matches '{title}'")
     if unique:
+        if len(unique.keys() | no_pdf_matches) > 1:
+            raise AmbiguousMatch(f"more than one ACL Anthology paper matches '{title}'")
         return list(unique.values())
     if no_pdf_matches:
         error = NoOpenAccessCopy("ACL Anthology metadata has no PDF for this paper")

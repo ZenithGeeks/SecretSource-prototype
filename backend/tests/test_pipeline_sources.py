@@ -1137,6 +1137,25 @@ def test_acl_metadata_rejects_duplicate_matching_papers(monkeypatch):
         })
 
 
+@pytest.mark.parametrize("pdf_first", [False, True])
+@pytest.mark.parametrize("same_id", [False, True])
+def test_acl_pdf_requires_a_unique_matching_paper_id(monkeypatch, pdf_first, same_id):
+    monkeypatch.setattr(sources, "_acl_venue", lambda venue, year: ("acl", {}))
+    no_pdf = '<paper id="1"><title>Expected paper</title></paper>'
+    pdf = f'<paper id="{1 if same_id else 2}"><title>Expected paper</title><pdf/></paper>'
+    records = pdf + no_pdf if pdf_first else no_pdf + pdf
+    monkeypatch.setattr(sources, "_acl_resource", lambda *args: (
+        f'<collection id="2022.acl"><volume id="1">{records}</volume></collection>'
+    ))
+    expected = {"title": "Expected paper", "venue": "ACL", "year": 2022}
+    if same_id:
+        [candidate] = sources._acl_anthology_candidates("Expected paper", expected)
+        assert candidate.url == "https://aclanthology.org/2022.acl-1.1.pdf"
+    else:
+        with pytest.raises(sources.AmbiguousMatch):
+            sources._acl_anthology_candidates("Expected paper", expected)
+
+
 def test_source_cache_rejects_a_cached_title_identity_conflict(monkeypatch, store_in_tmp):
     key = sources._normalised("Shared title")
     store.remember_source(key, {
