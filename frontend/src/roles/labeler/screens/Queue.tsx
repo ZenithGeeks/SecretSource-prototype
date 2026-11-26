@@ -18,6 +18,7 @@ type Scope = NonNullable<Parameters<typeof labelingApi.exportFile>[1]>
 
 const DOWNLOADS: { tab: Export; file: string; label: string }[] = [
   { tab: 'labels', file: 'evidence_labels.csv', label: 'Download labels CSV' },
+  { tab: 'claims', file: 'claims.csv', label: 'Download claims CSV' },
   { tab: 'dspy_claims', file: 'dspy_claims.jsonl', label: 'Download DSPy claims (JSONL)' },
   { tab: 'dspy_verdicts', file: 'dspy_verdicts.jsonl', label: 'Download DSPy verdicts (JSONL)' },
 ]
