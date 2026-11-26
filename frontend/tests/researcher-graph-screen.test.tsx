@@ -312,16 +312,16 @@ describe('Graph · claims view', () => {
     expect(onSelectNode).toHaveBeenLastCalledWith(null)
   })
 
-  test('lists the claims under the graph, contradicted first, and choosing one opens its detail', () => {
+  test('lists the claims under the graph, worst first, and choosing one opens its detail', () => {
     open()
     const list = screen.getByText(/Claims as a list/).closest('details')!
     const rows = within(list).getAllByRole('button')
     expect(rows.map((row) => row.textContent)).toEqual([
       expect.stringContaining('Late interaction wins.'),
       expect.stringContaining('Silent and backed.'),
-      expect.stringContaining('Backed only.'),
       expect.stringContaining('A claim with no edges.'),
       expect.stringContaining('Unchecked only.'),
+      expect.stringContaining('Backed only.'),
     ])
     expect(rows[0]).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(rows[0])
@@ -471,7 +471,7 @@ describe('Graph · claims view', () => {
   test('shows the claims legend', () => {
     open()
     expect(screen.getByText(/1 not in a public index/)).toBeInTheDocument()
-    expect(screen.getByText('contradicted')).toBeInTheDocument()
+    expect(within(screen.getByText('Claim').parentElement as HTMLElement).getByText('Source contradicts')).toBeInTheDocument()
   })
 })
 

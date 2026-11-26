@@ -17,9 +17,9 @@ type Look = { label: string; tone: 'supports' | 'insufficient' | 'refutes' | 'ne
 // The same words and tones as the labeler's stamps, so a claim reads the same everywhere.
 const STANDING: Record<Standing, Look> = {
   backed: { label: 'Backed', tone: 'supports', icon: Check, edge: 'border-l-supports' },
-  silent: { label: 'Not backed', tone: 'insufficient', icon: CircleAlert, edge: 'border-l-insufficient' },
+  silent: { label: 'Silent', tone: 'insufficient', icon: CircleAlert, edge: 'border-l-insufficient' },
   contradicted: { label: 'Contradicted', tone: 'refutes', icon: X, edge: 'border-l-refutes' },
-  unchecked: { label: "Can't check", tone: 'neutral', icon: CircleHelp, edge: 'border-l-border-subtle' },
+  unchecked: { label: 'Not checked', tone: 'neutral', icon: CircleHelp, edge: 'border-l-border-subtle' },
 }
 
 const VERDICT_STANDING: Record<StatementVerdict, Standing> = {
@@ -81,9 +81,9 @@ const CALLOUT_ICON = { neutral: 'text-ink-muted', supports: 'text-supports', acc
 
 function Callout({ icon: Icon, tone = 'neutral', children }: { icon: ComponentType<{ className?: string }>; tone?: keyof typeof CALLOUT_ICON; children: string }) {
   return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-border-subtle bg-neutral-soft p-3 text-[13px] leading-5 text-ink">
+    <div className="flex items-start gap-2.5 rounded-xl border border-border-subtle bg-neutral-soft p-3 text-ui leading-5 text-ink">
       <Icon className={cn('mt-0.5 size-4 shrink-0', CALLOUT_ICON[tone])} aria-hidden="true" />
-      <p className="min-w-0 [overflow-wrap:anywhere]">{children}</p>
+      <p className="min-w-0 wrap-anywhere">{children}</p>
     </div>
   )
 }
@@ -97,7 +97,7 @@ function Marked({ text, words }: { text: string; words: string[] }) {
       {text.split(pattern).map((part, index) =>
         // split keeps the matches at the odd positions
         index % 2 ? (
-          <mark key={index} className="rounded bg-accent-soft px-0.5 font-medium text-ink">
+          <mark key={index} className="rounded-sm bg-accent-soft px-0.5 font-medium text-ink">
             {part}
           </mark>
         ) : (
@@ -114,7 +114,7 @@ function Claims({ view }: { view: Extract<CommandView, { kind: 'claims' }> }) {
     <>
       {view.title && (
         <div className="flex flex-col gap-2">
-          <p className="text-[13px] font-medium leading-5 text-ink [overflow-wrap:anywhere]">{view.title}</p>
+          <p className="text-ui leading-5 font-medium text-ink wrap-anywhere">{view.title}</p>
           {view.status && view.status !== 'done' && <p className="text-xs text-ink-muted">Analysis {view.status}{view.message ? `: ${view.message}` : ''}</p>}
           {tally.length > 0 && (
             <ul aria-label="Claims by standing" className="flex flex-wrap gap-1.5">
@@ -145,12 +145,12 @@ function Claims({ view }: { view: Extract<CommandView, { kind: 'claims' }> }) {
 function ClaimItem({ claim, words }: { claim: ClaimRow; words: string[] }) {
   return (
     <li className={cn('flex gap-2.5 border-l-[3px] px-3 py-2.5 first:rounded-tl-xl last:rounded-bl-xl', STANDING[claim.standing].edge)}>
-      <span className="mt-0.5 flex h-5 min-w-6 shrink-0 items-center justify-center rounded-md bg-border-subtle px-1 text-[11px] font-semibold text-ink-muted tabular-nums">
+      <span className="mt-0.5 flex h-5 min-w-6 shrink-0 items-center justify-center rounded-md bg-border-subtle px-1 text-caption font-semibold text-ink-muted tabular-nums">
         {claim.number}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        {claim.paper && <p className="text-xs font-medium text-ink-muted [overflow-wrap:anywhere]">{claim.paper}</p>}
-        <p className="text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">
+        {claim.paper && <p className="text-xs font-medium text-ink-muted wrap-anywhere">{claim.paper}</p>}
+        <p className="text-ui leading-5 text-ink wrap-anywhere">
           <Marked text={claim.claim} words={words} />
         </p>
         <StandingBadge standing={claim.standing} />
@@ -164,28 +164,28 @@ function ClaimEvidence({ view }: { view: Extract<CommandView, { kind: 'claim' }>
     <>
       <div className={cn('flex flex-col gap-2 rounded-xl border border-border-subtle border-l-[3px] p-3', STANDING[view.standing].edge)}>
         <div className="flex items-center gap-2">
-          <span className="flex h-5 min-w-6 items-center justify-center rounded-md bg-border-subtle px-1 text-[11px] font-semibold text-ink-muted tabular-nums">{view.number}</span>
+          <span className="flex h-5 min-w-6 items-center justify-center rounded-md bg-border-subtle px-1 text-caption font-semibold text-ink-muted tabular-nums">{view.number}</span>
           <StandingBadge standing={view.standing} />
         </div>
-        <p className="text-[13px] leading-5 font-medium text-ink [overflow-wrap:anywhere]">{view.claim}</p>
-        {view.sentence && <p className="border-l-2 border-border-subtle pl-3 text-xs leading-5 text-ink-muted italic [overflow-wrap:anywhere]">{view.sentence}</p>}
+        <p className="text-ui leading-5 font-medium text-ink wrap-anywhere">{view.claim}</p>
+        {view.sentence && <p className="border-l-2 border-border-subtle pl-3 text-xs leading-5 text-ink-muted italic wrap-anywhere">{view.sentence}</p>}
       </div>
       {view.verdicts.length > 0 && <p className="type-label text-ink-muted">What the cited papers say</p>}
       <ul className="flex flex-col gap-2">
         {view.verdicts.map((verdict, index) => (
           <li key={index} className="flex flex-col gap-2 rounded-xl border border-border-subtle p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="min-w-0 text-xs font-medium text-ink [overflow-wrap:anywhere]">{verdict.cited}</p>
+              <p className="min-w-0 text-xs font-medium text-ink wrap-anywhere">{verdict.cited}</p>
               <StandingBadge standing={VERDICT_STANDING[verdict.verdict]} />
             </div>
-            {verdict.quote && <blockquote className="border-l-2 border-accent pl-3 font-serif text-sm leading-5 text-ink italic [overflow-wrap:anywhere]">“{verdict.quote}”</blockquote>}
-            {verdict.reasoning && <p className="text-xs leading-5 text-ink-muted [overflow-wrap:anywhere]">{verdict.reasoning}</p>}
+            {verdict.quote && <blockquote className="border-l-2 border-accent pl-3 font-serif text-sm leading-5 text-ink italic wrap-anywhere">“{verdict.quote}”</blockquote>}
+            {verdict.reasoning && <p className="text-xs leading-5 text-ink-muted wrap-anywhere">{verdict.reasoning}</p>}
           </li>
         ))}
         {view.unchecked.map((entry, index) => (
           <li key={`u${index}`} className="flex flex-col gap-1.5 rounded-xl border border-dashed border-border-subtle p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="min-w-0 text-xs font-medium text-ink [overflow-wrap:anywhere]">{entry.source}</p>
+              <p className="min-w-0 text-xs font-medium text-ink wrap-anywhere">{entry.source}</p>
               <StandingBadge standing="unchecked" />
             </div>
             <p className="text-xs leading-5 text-ink-muted">{entry.reason}</p>
@@ -198,7 +198,7 @@ function ClaimEvidence({ view }: { view: Extract<CommandView, { kind: 'claim' }>
 
 function Gaps({ view }: { view: Extract<CommandView, { kind: 'gaps' }> }) {
   const tiles = [
-    { label: 'Not backed', hint: 'no cited work backs them', value: view.notBacked, look: STANDING.silent, text: 'text-insufficient' },
+    { label: 'Silent', hint: 'no cited work backs them', value: view.notBacked, look: STANDING.silent, text: 'text-insufficient' },
     { label: 'Contradicted', hint: 'a cited work disagrees', value: view.contradicted, look: STANDING.contradicted, text: 'text-refutes' },
     { label: 'Not held', hint: 'cited, not in your library', value: view.missing, look: STANDING.unchecked, text: 'text-ink' },
   ]
@@ -209,7 +209,7 @@ function Gaps({ view }: { view: Extract<CommandView, { kind: 'gaps' }> }) {
           <tile.look.icon className={cn('size-4', tile.text)} aria-hidden="true" />
           <p className={cn('text-xl leading-6 font-semibold tabular-nums', tile.text)}>{tile.value}</p>
           <p className="text-xs leading-4 font-medium text-ink">{tile.label}</p>
-          <p className="text-[11px] leading-4 text-ink-muted">{tile.hint}</p>
+          <p className="text-caption leading-4 text-ink-muted">{tile.hint}</p>
         </li>
       ))}
     </ul>
@@ -220,7 +220,7 @@ function LabelProgress({ view }: { view: Extract<CommandView, { kind: 'progress'
   return (
     <>
       <div className="flex flex-col gap-2 rounded-xl border border-border-subtle p-3">
-        <p className="text-[13px] font-medium text-ink">
+        <p className="text-ui font-medium text-ink">
           <span className="tabular-nums">{view.saved}</span> of <span className="tabular-nums">{view.claims}</span> claims saved
         </p>
         <Progress value={view.saved} max={view.claims} label="Claims saved" tone="supports" />
@@ -231,8 +231,8 @@ function LabelProgress({ view }: { view: Extract<CommandView, { kind: 'progress'
       {view.next ? (
         <div className="flex flex-col gap-1.5 rounded-xl border border-accent bg-accent-soft p-3">
           <p className="type-label text-ink-muted">Next to label</p>
-          <p className="text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">
-            <span className="mr-1.5 inline-flex h-5 min-w-6 items-center justify-center rounded-md bg-border-subtle px-1 text-[11px] font-semibold text-ink-muted tabular-nums">{view.next.number}</span>
+          <p className="text-ui leading-5 text-ink wrap-anywhere">
+            <span className="mr-1.5 inline-flex h-5 min-w-6 items-center justify-center rounded-md bg-border-subtle px-1 text-caption font-semibold text-ink-muted tabular-nums">{view.next.number}</span>
             {view.next.claim}
           </p>
         </div>
@@ -249,7 +249,7 @@ function Code({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <div className="relative">
-      <pre className="rounded-xl border border-border-subtle bg-surface p-3 pt-11 font-mono text-xs leading-5 whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{text}</pre>
+      <pre className="rounded-xl border border-border-subtle bg-surface p-3 pt-11 font-mono text-xs leading-5 whitespace-pre-wrap text-ink wrap-anywhere">{text}</pre>
       <button
         type="button"
         onClick={() => void navigator.clipboard?.writeText(text).then(() => setCopied(true))}

@@ -26,7 +26,7 @@ const claim: Claim = {
 }
 
 describe('the analysis page after the critique', () => {
-  it('says the finished line counts source checks, not claims', () => {
+  it('says the finished line counts citation checks, not claims', () => {
     const stages = [
       { stage: 'extracted', claims: 1 },
       { stage: 'planned', checks: 2, sources: 2 },
@@ -37,7 +37,9 @@ describe('the analysis page after the critique', () => {
 
     render(<AnalysisProgress stages={stages} claims={[claim]} status="done" />)
 
-    expect(screen.getByText('2 source checks: 1 backed, 1 silent')).toBeInTheDocument()
+    expect(screen.getByText('2 citations checked')).toBeInTheDocument()
+    // No per-verdict split here: it counts citations, and the tiles below count claims.
+    expect(screen.queryByText(/backed/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Details/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
@@ -45,7 +47,7 @@ describe('the analysis page after the critique', () => {
     render(<ClaimCard claim={claim} index={0} standing="insufficient" />)
 
     expect(screen.getAllByText(/Kotonya/).length).toBeGreaterThan(0)
-    expect(screen.getByText('No passage in the cited paper matched this claim.')).toBeInTheDocument()
+    expect(screen.getByText("No exact passage matched. The judge's reading of the paper is below.")).toBeInTheDocument()
   })
 
   it('shows the claim once when it is the paper sentence word for word', () => {

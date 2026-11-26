@@ -10,6 +10,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 
 import { api, API_BASE, fetchFile, postEvents, reasonText, request, type CitationMarker, type Source, type SourceOutcome } from './api'
 import type { AnswerEvent } from './assistant'
+import { printedRef } from './claimText'
 
 export type Level = 1 | 2 | 3 | 4
 export type Confidence = 'low' | 'medium' | 'high'
@@ -75,6 +76,14 @@ export function byline(reference: Reference): string {
   const surnames = (reference.authors ?? []).map((name) => name.trim().replace(/^.*\s/, '')).filter(Boolean)
   const who = surnames.length > 2 ? `${surnames[0]} et al.` : surnames.join(', ')
   return [who, reference.year].filter(Boolean).join(' · ')
+}
+
+/** A reference as the pickers list it: the number the paper prints, else who wrote it, then its title. */
+export function referenceName(reference: Reference, markers: Pick<CitationMarker, 'ref' | 'text'>[] = []): string {
+  const printed = printedRef(reference, markers)
+  if (printed) return `${printed} ${reference.label}`
+  const who = byline(reference)
+  return who ? `${who} · ${reference.label}` : reference.label
 }
 
 /** A row as the labeling table stores it: every value a string. */
@@ -670,23 +679,24 @@ export function referenceFinished(claim: WorkClaim, draft: Draft, referenceId: s
   return cands.length > 0 || draft.added.some((a) => a.reference_id === referenceId)
 }
 
-/** "[b40] 3/4 relevant · Clear · Medium" for a folded reference. */
+/** "Karpukhin et al. · 2020: 3 of 4 relevant · level 3 Clear · medium confidence" for a folded reference. Not GROBID's
+ * "[b40]": the PDF prints its own numbers, and those are not known here. */
 export function referenceSummary(
   claim: WorkClaim,
   draft: Draft,
   reference: Reference | undefined,
   referenceId: string,
 ): string {
-  const tag = reference?.ref ? `[${reference.ref}]` : (reference?.label ?? referenceId)
+  const tag = (reference && byline(reference)) || reference?.label || referenceId
   const total =
     claim.candidates.filter((c) => c.reference_id === referenceId).length +
     draft.added.filter((a) => a.reference_id === referenceId).length
   const level = draft.labels[referenceId]?.evidence
   const confidence = draft.labels[referenceId]?.confidence
-  const count = `${relevantPassages(claim, draft, referenceId).length}/${total} relevant`
-  const parts = [`${tag} ${count}`]
-  if (level) parts.push(LEVELS[level - 1].name)
-  if (confidence) parts.push(confidence[0].toUpperCase() + confidence.slice(1))
+  const count = `${relevantPassages(claim, draft, referenceId).length} of ${total} relevant`
+  const parts = [`${tag}: ${count}`]
+  if (level) parts.push(`level ${level} ${LEVELS[level - 1].name}`)
+  if (confidence) parts.push(`${confidence} confidence`)
   return parts.join(' · ')
 }
 
@@ -762,21 +772,6 @@ export const uncheckedReason = (reason: string, sourceOutcome?: SourceOutcome): 
   OUTCOME_TEXT[sourceOutcome?.outcome ?? ''] ??
   (reason === 'named' ? 'the paper only names it, so it was not checked' : reasonText(reason))
 
-/** One short line for a citation the analysis did not check, under a claim with no passages.
- * A code this build does not know still says something, the same as reasonText. */
-const UNCHECKED_LINE: Record<string, string> = {
-  named: 'not checked, the paper only names it',
-  'no-open-access': 'no open-access PDF',
-  'not-downloadable': 'the PDF could not be downloaded',
-  unresolvable: 'no matching work was found',
-  'lookup-unavailable': 'the lookup service did not answer',
-  'web-source': 'a web page, not a paper',
-  withdrawn: 'the paper was withdrawn',
-  failed: 'the check failed',
-}
-
-export const uncheckedPlain = (reason: string): string => UNCHECKED_LINE[reason] ?? reasonText(reason)
-
 // Only http(s): the link comes from a PDF's reference list, so any other scheme is not followed.
 const webLink = (url: string | undefined) => (url && /^https?:\/\//i.test(url) ? [{ text: url, href: url }] : [])
 const doiLink = (doi: string | undefined) =>
@@ -832,6 +827,25 @@ export function bestCandidate(claim: WorkClaim, references: Reference[]): Candid
 export const sameDraft = (draft: Draft, saved: Draft | undefined) =>
   JSON.stringify(draft) === JSON.stringify(saved ?? emptyDraft())
 
+/** How many choices a draft changes from what was saved: the decision (with its wording), each
+ * passage verdict, each passage added or removed, and each level, confidence or reason. */
+export function changeCount(draft: Draft, saved: Draft | undefined): number {
+  const before = saved ?? emptyDraft()
+  const differ = (a: unknown, b: unknown) => (JSON.stringify(a) === JSON.stringify(b) ? 0 : 1)
+  const ids = (a: object, b: object) => new Set([...Object.keys(a), ...Object.keys(b)])
+  // A new Edit fills in the wording to start from; that is part of the one decision.
+  let count = draft.status !== before.status ? 1 : differ(draft.edited, before.edited)
+  for (const id of ids(draft.cands, before.cands)) count += differ(draft.cands[id], before.cands[id])
+  count += draft.added.filter((a) => !before.added.some((b) => sameAdded(a, b))).length
+  count += before.added.filter((b) => !draft.added.some((a) => sameAdded(a, b))).length
+  for (const id of ids(draft.labels, before.labels)) {
+    const now = draft.labels[id] ?? emptyLabel()
+    const then = before.labels[id] ?? emptyLabel()
+    count += differ(now.evidence, then.evidence) + differ(now.confidence, then.confidence) + differ(now.rationale, then.rationale)
+  }
+  return count
+}
+
 /** Decisions not saved yet, kept in this browser so a reload or a gateway outage loses none:
  * the draft of each unsaved claim, and the unsaved claims added by hand. */
 export type Unsaved = { drafts: Record<string, Draft>; added: WorkClaim[] }
@@ -858,25 +872,41 @@ export function writeUnsaved(analysisId: string, annotator: string, unsaved: Uns
   }
 }
 
-/** What is still undecided, in words. Empty means the claim is finished. */
-export function remaining(claim: WorkClaim, draft: Draft, references: Reference[]): string[] {
-  if (!draft.status) return ['Decide on the claim: keep, edit or reject it']
+export const REWORD = 'Reword the claim, or choose Keep'
+
+/** True when Edit is chosen but the wording is empty or still the extracted one: there is no edit to save. */
+export const editNotReworded = (claim: WorkClaim, draft: Draft) =>
+  draft.status === 'edited' && (!draft.edited.trim() || draft.edited.trim() === claim.claim.trim())
+
+/** One thing left to do on a claim, and where on the page it is done: the decision, the first
+ * passage not judged, or one reference's level or confidence. */
+export type Step = { text: string; at: 'decision' | 'passage' | 'level' | 'confidence'; id?: string }
+
+/** What is still undecided, step by step. Empty means the claim is finished. A reference is named
+ * as its tab and level form name it: the number the paper prints, else who wrote it, else its title. */
+export function remainingSteps(claim: WorkClaim, draft: Draft, references: Reference[], markers: CitationMarker[] = []): Step[] {
+  if (!draft.status) return [{ text: 'Decide on the claim: keep, edit or reject it', at: 'decision' }]
   if (draft.status === 'rejected') return []
-  const left: string[] = []
-  if (draft.status === 'edited' && (!draft.edited.trim() || draft.edited.trim() === claim.claim.trim()))
-    left.push('Write the edited claim')
-  const unjudged = claim.candidates.filter((c) => !draft.cands[c.cand_id]).length
-  if (unjudged) left.push(`${unjudged} passage${unjudged === 1 ? '' : 's'} not judged`)
+  const left: Step[] = []
+  if (editNotReworded(claim, draft)) left.push({ text: REWORD, at: 'decision' })
+  const unjudged = displayOrder(claim).filter((c) => !draft.cands[c.cand_id])
+  if (unjudged.length) {
+    left.push({ text: `${unjudged.length} passage${unjudged.length === 1 ? '' : 's'} not judged`, at: 'passage', id: unjudged[0].cand_id })
+  }
   for (const id of referencesOf(claim, draft)) {
     const ref = references.find((r) => r.reference_id === id)
-    const title = ref?.label ?? id
-    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) left.push(`Give ${title} a level`)
+    const title = ref ? printedRef(ref, markers) || byline(ref) || ref.label : id
+    if (relevantPassages(claim, draft, id).length && !draft.labels[id]?.evidence) left.push({ text: `Give ${title} a level`, at: 'level', id })
     else if (draft.labels[id]?.evidence && !draft.labels[id]?.confidence) {
-      left.push(`Give ${ref?.ref ? `[${ref.ref}]` : title} a confidence`)
+      left.push({ text: `Give ${title} a confidence`, at: 'confidence', id })
     }
   }
   return left
 }
+
+/** What is still undecided, in words. */
+export const remaining = (claim: WorkClaim, draft: Draft, references: Reference[], markers: CitationMarker[] = []): string[] =>
+  remainingSteps(claim, draft, references, markers).map((step) => step.text)
 
 export const isDone = (claim: WorkClaim, draft: Draft, references: Reference[]) =>
   remaining(claim, draft, references).length === 0
@@ -907,17 +937,6 @@ export function nextUnfinishedIndex(
     if (!isSavedDone(claims[index], drafts, saved, references)) return index
   }
   return null
-}
-
-/** The earliest claim that is not finished, for the progress count. */
-export function firstUnfinishedIndex(
-  claims: WorkClaim[],
-  drafts: Record<string, Draft>,
-  saved: Record<string, Draft>,
-  references: Reference[],
-): number | null {
-  const index = claims.findIndex((claim) => !isSavedDone(claim, drafts, saved, references))
-  return index < 0 ? null : index
 }
 
 export type SaveNext = { kind: 'claim'; index: number } | { kind: 'paper-done' } | { kind: 'stay' }
@@ -1049,16 +1068,16 @@ export function buildSave(claim: WorkClaim, draft: Draft, saved?: Draft): Save {
   return save
 }
 
-/** Claims finished and saved, for the progress bar: an unsaved draft is not finished yet. */
+/** Claims finished and saved, for the progress bar: an unsaved draft is not finished yet, and
+ * is counted apart in `unsaved`. `ready` counts the unsaved ones with every decision made. */
 export function progress(
   claims: WorkClaim[],
   drafts: Record<string, Draft>,
   references: Reference[],
   saved: Record<string, Draft>,
 ) {
-  const done = claims.filter((c) => {
-    const draft = drafts[c.claim_id] ?? emptyDraft()
-    return isDone(c, draft, references) && sameDraft(draft, saved[c.claim_id])
-  }).length
-  return { done, total: claims.length }
+  const done = claims.filter((c) => isSavedDone(c, drafts, saved, references)).length
+  const changed = claims.filter((c) => !sameDraft(draftOf(drafts, c.claim_id), saved[c.claim_id]))
+  const ready = changed.filter((c) => isDone(c, draftOf(drafts, c.claim_id), references)).length
+  return { done, unsaved: changed.length, ready, total: claims.length }
 }

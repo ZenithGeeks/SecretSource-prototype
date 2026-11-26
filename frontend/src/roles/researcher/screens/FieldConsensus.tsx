@@ -23,10 +23,10 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
   const { data: consensus, isError, isPending, error, refetch } = useFieldConsensus(question)
 
   return (
-    <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 pt-4 pb-12">
+    <div className="mx-auto flex w-full max-w-250 flex-col gap-6 pt-4 pb-12">
       <header>
         <h1 className="type-display text-ink">What does your library say?</h1>
-        <p className="mt-2 text-[15px] leading-6 text-ink-muted">
+        <p className="mt-2 text-reading leading-6 text-ink-muted">
           Ask one question. Claims in your papers that use the same words show how their cited works answer it.
         </p>
       </header>
@@ -47,9 +47,9 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
           onChange={(event) => setDraft(event.target.value)}
           placeholder="e.g. does late interaction generalize out of domain? (press /)"
           aria-label="Your question"
-          className="min-w-0 flex-1 bg-transparent text-[15px] leading-6 text-ink outline-none placeholder:text-ink-muted"
+          className="min-w-0 flex-1 bg-transparent text-reading leading-6 text-ink outline-none placeholder:text-ink-muted"
         />
-        <Button type="submit" className="rounded-[9px] px-4 py-[7px] pointer-coarse:min-h-11">
+        <Button type="submit" className="rounded-lg px-4 py-1.75 pointer-coarse:min-h-11">
           Ask
         </Button>
       </form>
@@ -61,7 +61,7 @@ export function FieldConsensus({ onOpenAnalysis }: { onOpenAnalysis: (id: string
       {consensus && (
         <FadeIn className="flex flex-col gap-6">
           {consensus.rows.length === 0 ? (
-            <p className="text-[15px] text-ink-muted">
+            <p className="text-reading text-ink-muted">
               {consensus.note || 'No claim in your papers matches that question.'}
             </p>
           ) : (

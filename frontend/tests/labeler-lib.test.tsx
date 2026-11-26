@@ -25,6 +25,7 @@ import {
   bestCandidate,
   buildSave,
   byline,
+  changeCount,
   displayOrder,
   draftFromSaved,
   emptyDraft,
@@ -37,7 +38,6 @@ import {
   sameDraft,
   useAssignTopic,
   useScopusSearch,
-  uncheckedPlain,
   workClaims,
   writeUnsaved,
   type Candidate,
@@ -247,7 +247,14 @@ describe('sameDraft and progress', () => {
   it('counts a claim only when it is finished and saved', () => {
     const rejected: Draft = { ...emptyDraft(), status: 'rejected' }
     const claims = [claim({ claim_id: 'a' }), claim({ claim_id: 'b' }), claim({ claim_id: 'c' })]
-    expect(progress(claims, { a: rejected, b: rejected }, [], { a: rejected })).toEqual({ done: 1, total: 3 })
+    expect(progress(claims, { a: rejected, b: rejected }, [], { a: rejected })).toEqual({ done: 1, unsaved: 1, ready: 1, total: 3 })
+  })
+
+  it('counts every claim whose draft differs from what was saved as unsaved', () => {
+    const rejected: Draft = { ...emptyDraft(), status: 'rejected' }
+    const claims = [claim({ claim_id: 'a' }), claim({ claim_id: 'b' })]
+    expect(progress(claims, { a: rejected, b: rejected }, [], {})).toEqual({ done: 0, unsaved: 2, ready: 2, total: 2 })
+    expect(progress(claims, { a: rejected }, [], { a: rejected })).toEqual({ done: 1, unsaved: 0, ready: 0, total: 2 })
   })
 })
 
@@ -274,12 +281,42 @@ describe('unsaved drafts in the browser', () => {
   })
 })
 
+describe('changeCount', () => {
+  const kept: Draft = {
+    ...emptyDraft(),
+    status: 'accepted',
+    cands: { c1: 'relevant' },
+    added: [{ reference_id: 'refB', page: 1, passage: 'kept' }],
+    labels: { refB: { evidence: 3, rationale: 'n=40', confidence: 'high' } },
+  }
+
+  it('counts nothing for the saved draft, and a new decision with its wording as one', () => {
+    expect(changeCount(kept, kept)).toBe(0)
+    expect(changeCount(emptyDraft(), undefined)).toBe(0)
+    expect(changeCount({ ...kept, status: 'edited', edited: 'Reworded.' }, kept)).toBe(1)
+    expect(changeCount({ ...kept, edited: 'Reworded.' }, kept)).toBe(1)
+  })
+
+  it('counts each verdict, each passage added or removed, and each field of a level', () => {
+    const changed: Draft = {
+      ...kept,
+      cands: { c2: 'rejected' },
+      added: [{ reference_id: 'refB', page: 2, passage: 'new' }],
+      labels: { refB: { evidence: 2, rationale: '', confidence: 'high' }, refC: { evidence: 1, rationale: '', confidence: null } },
+    }
+    // c1 and c2; one passage added and one removed; refB level and reason; refC level.
+    expect(changeCount(changed, kept)).toBe(7)
+    // A level cleared away entirely counts each field it had.
+    expect(changeCount({ ...kept, labels: {} }, kept)).toBe(3)
+  })
+})
+
 describe('remaining', () => {
   it('asks for the edited wording, the unjudged passages and a level per reference', () => {
     const c = claim({ candidates: [cand('c1'), cand('c2')] })
     const draft: Draft = { ...emptyDraft(), status: 'edited', edited: 'Y is fast.', cands: { c1: 'relevant' } }
     expect(remaining(c, draft, [{ reference_id: 'refB', file: '', label: 'Ref B' }])).toEqual([
-      'Write the edited claim',
+      'Reword the claim, or choose Keep',
       '1 passage not judged',
       'Give Ref B a level',
     ])
@@ -290,6 +327,16 @@ describe('remaining', () => {
     expect(remaining(c, { ...emptyDraft(), status: 'accepted', cands: {} }, [])).toEqual(['2 passages not judged'])
     const judged: Draft = { ...emptyDraft(), status: 'accepted', cands: { c1: 'relevant', c2: 'rejected' } }
     expect(remaining(c, judged, [])).toEqual(['Give zz a level'])
+  })
+
+  it('names a reference as its tab does: the printed number, else who wrote it, else the title', () => {
+    const c = claim({ candidates: [cand('c1')] })
+    const judged: Draft = { ...emptyDraft(), status: 'accepted', cands: { c1: 'relevant' } }
+    const refB = { reference_id: 'refB', file: '', label: 'A long title', ref: 'b4', authors: ['Ana Silva', 'Bo Lee', 'Cy Wu'], year: '2025' }
+    const markers = [{ ref: 'b4', text: '[4]' }]
+    expect(remaining(c, judged, [refB], markers)).toEqual(['Give [4] a level'])
+    expect(remaining(c, judged, [refB])).toEqual(['Give Silva et al. · 2025 a level'])
+    expect(remaining(c, judged, [{ ...refB, authors: [], year: '' }])).toEqual(['Give A long title a level'])
   })
 
   it('requires confidence as well as a level on the reference', () => {
@@ -371,20 +418,6 @@ describe('buildSave', () => {
     expect(save.labels).toEqual([
       { claim_id: 'p#0', reference_id: 'refB', evidence: 2, rationale: 'ok', spans: ['kept'], confidence: 'low' },
     ])
-  })
-})
-
-describe('uncheckedPlain', () => {
-  it('has a short line for each reason the analysis reports, and something for a code it does not know', () => {
-    expect(uncheckedPlain('named')).toBe('not checked, the paper only names it')
-    expect(uncheckedPlain('no-open-access')).toBe('no open-access PDF')
-    expect(uncheckedPlain('not-downloadable')).toBe('the PDF could not be downloaded')
-    expect(uncheckedPlain('unresolvable')).toBe('no matching work was found')
-    expect(uncheckedPlain('lookup-unavailable')).toBe('the lookup service did not answer')
-    expect(uncheckedPlain('web-source')).toBe('a web page, not a paper')
-    expect(uncheckedPlain('withdrawn')).toBe('the paper was withdrawn')
-    expect(uncheckedPlain('failed')).toBe('the check failed')
-    expect(uncheckedPlain('mystery')).toBe('checking it failed')
   })
 })
 

@@ -6,11 +6,10 @@ URL is ignored: access logs record URLs, so anyone who can read the logs could r
 We ask Supabase who the token belongs to and keep the answer for a few minutes, so a page that
 makes ten requests does not make ten lookups.
 
-On Cloud Run, the Vercel proxy (frontend/api/[...path].ts) spends the gateway's own
-Authorization header on the Google identity token Cloud Run's IAM requires, and relays the
-user's Supabase token as X-User-Authorization instead. That header wins when present; a
-direct caller with no such proxy in front (local dev, docker compose, ss-core) still works
-with a plain Authorization header, since there is no Google token there to make room for.
+A proxy (such as frontend/api/[...path].ts) that uses Authorization for its own upstream
+auth can relay the user's Supabase token in X-User-Authorization instead; that header wins
+when present, while direct callers (local dev, docker compose, ss-core) send a plain
+Authorization header.
 
 Without Supabase configured, login is off: every caller is nobody, the owner is None, and the
 gateway works as one shared space, as it did before login existed. With Supabase configured, a

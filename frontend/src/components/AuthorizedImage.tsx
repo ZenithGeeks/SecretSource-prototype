@@ -10,7 +10,7 @@ export function AuthorizedImage({ src, alt, className, ...props }: ImgHTMLAttrib
   if (image.failed) {
     // className carries the image's max-h/max-w for sizing a real <img> — a full caption of
     // text needs to be readable, not cropped to an image's height. An inline style always
-    // wins over a class (no dependency on cn()'s merge recognising max-h-none as the same
+    // wins over a class (no dependency on cn()'s merge recognising an unset max height as the same
     // utility group as the caller's max-h-*, which it does not), so the box reliably grows to
     // fit the text instead of clipping it or overflowing into whatever renders after it.
     return (

@@ -79,7 +79,7 @@ function Why({ statement, title, onShowSource }: { statement: Statement; title?:
   return (
     <div className="mt-2 flex flex-col gap-1.5 rounded-xl bg-neutral-soft p-3">
       <p className="type-label text-ink-muted">What the passage says{statement.page ? ` · page ${statement.page}` : ''}</p>
-      {statement.quote && <p className="font-serif text-[15px] leading-6 italic text-ink">“{statement.quote}”</p>}
+      {statement.quote && <p className="font-serif text-reading leading-6 italic text-ink">“{statement.quote}”</p>}
       {statement.reasoning && <p className="text-xs leading-5 text-ink-muted">{statement.reasoning}</p>}
       <button
         type="button"
@@ -116,7 +116,7 @@ function StatementRow({
   const explained = Boolean(statement.verdict && (statement.quote || statement.reasoning))
   return (
     <li data-ask-target={askTarget({ kind: 'statement', id: target })} className={cn('border-l-2 pl-3', stamp.bar)}>
-      <p className="text-[13px] leading-5 text-ink">{statement.text}</p>
+      <p className="text-ui leading-5 text-ink">{statement.text}</p>
       <div className="mt-1 flex items-center justify-between gap-2">
         {statement.source ? (
           // Hover or focus shows the quoted passage once the judge has read it.
@@ -139,7 +139,7 @@ function StatementRow({
                   {sourceLabel(statement, title)}
                   {statement.page ? ` · page ${statement.page}` : ''}
                 </span>
-                <span className="mt-1 line-clamp-4 block font-serif text-[13px] leading-5 italic text-ink">“{statement.quote}”</span>
+                <span className="mt-1 line-clamp-4 block font-serif text-ui leading-5 italic text-ink">“{statement.quote}”</span>
               </span>
             )}
           </span>
@@ -187,7 +187,7 @@ function TurnView({
   const unanswered = turn.status === 'done' && turn.statements.length === 0 && !turn.note && !turn.view
   return (
     <div className="flex flex-col gap-3">
-      <p data-ask-target={askTarget({ kind: 'question', id: String(turn.id) })} className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">
+      <p data-ask-target={askTarget({ kind: 'question', id: String(turn.id) })} className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-ui leading-5 text-ink">
         {turn.question}
       </p>
       {turn.statements.length > 0 && (
@@ -218,7 +218,7 @@ function TurnView({
       {unanswered && (
         <div className="flex gap-2.5 rounded-xl bg-neutral-soft p-3">
           <SearchX className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-          <div className="text-[13px] leading-5">
+          <div className="text-ui leading-5">
             <p className="font-medium text-ink">
               {about.kind === 'library' ? 'No paper in your library answers this.' : 'This paper does not answer this.'}
             </p>
@@ -232,13 +232,13 @@ function TurnView({
       {turn.status === 'failed' && (
         <div className="flex gap-2.5 rounded-xl border border-border-subtle bg-neutral-soft p-3">
           <CircleAlert className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-          <div className="flex flex-col items-start gap-2 text-[13px] leading-5 text-ink">
+          <div className="flex flex-col items-start gap-2 text-ui leading-5 text-ink">
             <p>The answer failed. Your question is kept in this chat.</p>
             {onAskAgain && (
               <button
                 type="button"
                 onClick={onAskAgain}
-                className="min-h-11 rounded-lg border border-border-subtle bg-surface px-3 text-[13px] font-medium hover:bg-accent-soft lg:min-h-8"
+                className="min-h-11 rounded-lg border border-border-subtle bg-surface px-3 text-ui font-medium hover:bg-accent-soft lg:min-h-8"
               >
                 Ask again
               </button>
@@ -264,14 +264,14 @@ function ChatList({ onPick, onBack, onNew }: { onPick: (id: string) => void; onB
         <IconButton onClick={onBack} aria-label="Back to the chat" className="lg:size-7">
           <ChevronLeft className="size-4" aria-hidden="true" />
         </IconButton>
-        <h2 className="flex-1 text-[15px] font-semibold text-ink">Your chats</h2>
+        <h2 className="flex-1 text-reading font-semibold text-ink">Your chats</h2>
         <IconButton onClick={onNew} aria-label="New chat" className="lg:size-7">
           <Plus className="size-4" aria-hidden="true" />
         </IconButton>
       </div>
       <div className="flex-1 overflow-y-auto px-5">
-        {failed && <p className="py-3 text-[13px] text-ink-muted">Your chats could not be loaded.</p>}
-        {chats?.length === 0 && <p className="py-3 text-[13px] text-ink-muted">No chats yet.</p>}
+        {failed && <p className="py-3 text-ui text-ink-muted">Your chats could not be loaded.</p>}
+        {chats?.length === 0 && <p className="py-3 text-ui text-ink-muted">No chats yet.</p>}
         <ul className="divide-y divide-border-subtle">
           {chats?.map((chat) => (
             <li key={chat.id}>
@@ -281,7 +281,7 @@ function ChatList({ onPick, onBack, onNew }: { onPick: (id: string) => void; onB
                 className="flex w-full items-center gap-2 py-3 text-left hover:bg-accent-soft/40 focus-visible:outline-2 focus-visible:outline-accent"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2 text-[13px] leading-5 text-ink">{chat.title || 'Untitled chat'}</span>
+                  <span className="line-clamp-2 text-ui leading-5 text-ink">{chat.title || 'Untitled chat'}</span>
                   <span className="text-xs text-ink-muted">{whenLabel(chat.updated)}</span>
                 </span>
                 <ChevronRight className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
@@ -416,6 +416,7 @@ export function AssistantPanel({
   const { turns, answering, draft, setDraft } = assistant
   const last = turns.at(-1)
   const askOnline = useFeature('ask')
+  const offlineId = useId() // the offline note, which Send points at while it is off
   // A /command does not ask the model, so it still runs while Ask is offline.
   const canSend = draft.trim() !== '' && (askOnline || draft.trim().startsWith('/'))
 
@@ -465,9 +466,13 @@ export function AssistantPanel({
     <aside
       ref={root}
       aria-label="Ask"
-      // Escape closes the panel, unless a menu inside it (the @ and / list) used the key first.
+      // Escape closes the panel, unless a menu inside it (the @ and / list) used the key first,
+      // and then counts as used, so a page viewer beside the panel stays open.
       onKeyDown={(event) => {
-        if (event.key === 'Escape' && !event.defaultPrevented) onClose()
+        if (event.key === 'Escape' && !event.defaultPrevented) {
+          event.preventDefault()
+          onClose()
+        }
         keepTabInside(event)
       }}
       className={cn(
@@ -491,7 +496,7 @@ export function AssistantPanel({
             <IconButton onClick={onClose} aria-label="Back to the screen" className="lg:hidden">
               <ChevronLeft className="size-4" aria-hidden="true" />
             </IconButton>
-            <h2 className="flex flex-1 items-center gap-1.5 text-[15px] font-semibold text-ink">
+            <h2 className="flex flex-1 items-center gap-1.5 text-reading font-semibold text-ink">
               <Mascot role={role} size={24} />
               Ask
             </h2>
@@ -546,11 +551,11 @@ export function AssistantPanel({
 
               <div className="flex flex-1 flex-col gap-6 overflow-y-auto dot-grid px-5 py-4">
                 {assistant.opening && turns.length === 0 && (
-                  <p role="status" className="text-[13px] text-ink-muted">
+                  <p role="status" className="text-ui text-ink-muted">
                     Opening this chat…
                   </p>
                 )}
-                {assistant.openFailed && <p className="text-[13px] text-ink-muted">This chat could not be opened.</p>}
+                {assistant.openFailed && <p className="text-ui text-ink-muted">This chat could not be opened.</p>}
                 {turns.length === 0 && !assistant.opening && !assistant.openFailed && (
                   <MotionConfig reducedMotion="user">
                     <AskWelcome
@@ -579,7 +584,7 @@ export function AssistantPanel({
 
               <div className="px-5 pb-4">
                 {toStart && (
-                  <div role="alert" className="mb-3 flex flex-col gap-2 rounded-xl border border-insufficient/40 bg-insufficient-soft p-3 text-[13px] text-ink">
+                  <div role="alert" className="mb-3 flex flex-col gap-2 rounded-xl border border-insufficient/40 bg-insufficient-soft p-3 text-ui text-ink">
                     <p>
                       Start checking <span className="font-medium">{String(toStart.parsed.args.paper)}</span>? It takes
                       about 4 minutes and uses the team&apos;s LLM budget.
@@ -587,7 +592,7 @@ export function AssistantPanel({
                     <div className="flex gap-2">
                       <Button
                         type="button"
-                        className="px-3 py-1.5 text-[13px]"
+                        className="px-3 py-1.5 text-ui"
                         onClick={() => {
                           void assistant.run(toStart.question, toStart.parsed)
                           setToStart(null)
@@ -595,7 +600,7 @@ export function AssistantPanel({
                       >
                         Start
                       </Button>
-                      <Button type="button" variant="ghost" className="px-3 py-1.5 text-[13px]" onClick={() => setToStart(null)}>
+                      <Button type="button" variant="ghost" className="px-3 py-1.5 text-ui" onClick={() => setToStart(null)}>
                         Cancel
                       </Button>
                     </div>
@@ -625,7 +630,7 @@ export function AssistantPanel({
                       <button
                         type="button"
                         onClick={assistant.stop}
-                        className="ml-auto flex min-h-11 items-center gap-1.5 rounded-full border border-accent px-3 text-[13px] font-medium text-accent hover:bg-accent-soft lg:min-h-8"
+                        className="ml-auto flex min-h-11 items-center gap-1.5 rounded-full border border-accent px-3 text-ui font-medium text-accent hover:bg-accent-soft lg:min-h-8"
                       >
                         <Square className="size-3 fill-current" aria-hidden="true" />
                         Stop
@@ -635,6 +640,7 @@ export function AssistantPanel({
                         type="submit"
                         disabled={!canSend}
                         aria-label="Send"
+                        aria-describedby={askOnline ? undefined : offlineId}
                         className="ml-auto flex size-11 items-center justify-center rounded-full bg-linear-to-br from-accent to-accent/70 text-white shadow-md disabled:opacity-40 lg:size-8"
                       >
                         <ArrowUp className="size-4" aria-hidden="true" />
@@ -645,7 +651,7 @@ export function AssistantPanel({
                 {askOnline ? (
                   <p className="mt-2 text-xs text-ink-muted">{NOTE}</p>
                 ) : (
-                  <p role="status" className="mt-2 text-xs text-refutes">
+                  <p role="status" id={offlineId} className="mt-2 text-xs text-refutes">
                     {OFFLINE_REASON.ask}
                   </p>
                 )}

@@ -41,10 +41,10 @@ export function AskWelcome({
         transition={{ duration: 0.25, ease: 'easeOut', delay: 0.08 }}
         className="flex w-full flex-col gap-3 rounded-2xl border border-border-subtle bg-surface p-5 text-center shadow-md"
       >
-        <h3 className="text-[15px] font-semibold text-ink">
+        <h3 className="text-reading font-semibold text-ink">
           {about.kind === 'library' ? 'Ask about the papers in your library' : `Ask about ${about.label}`}
         </h3>
-        <p className="text-[13px] leading-5 text-ink-muted">
+        <p className="text-ui leading-5 text-ink-muted">
           Answers come back as short statements. Each one cites a passage and is checked by the judge before it
           counts.{about.kind === 'library' && canNarrow && ' Open a paper or select a graph node first to ask about that one only.'}
         </p>
@@ -54,7 +54,7 @@ export function AskWelcome({
               key={question}
               type="button"
               onClick={() => onAsk(question)}
-              className="min-h-10 rounded-xl border border-border-subtle px-3 py-2 text-left text-[13px] text-ink transition-colors hover:border-accent hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent"
+              className="min-h-10 rounded-xl border border-border-subtle px-3 py-2 text-left text-ui text-ink transition-colors hover:border-accent hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-accent"
             >
               {question}
             </button>

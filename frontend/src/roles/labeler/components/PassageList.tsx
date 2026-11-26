@@ -1,8 +1,9 @@
 /**
  * The passages retrieval found for a claim, grouped by reference paper. Each paper is one section:
  * its passages (each judged by hand: does it bear on the claim or not?), the ones the person added
- * for it, and the level form for it. Clicking a passage shows it in the reference viewer, and the
- * focused one is shown in full. Below, a form to add a passage retrieval missed.
+ * for it, and one level form for it after them, since the level is for the reference as a whole.
+ * Clicking a passage, or moving keyboard focus onto it, shows it in the reference viewer and opens
+ * the full text. The others stay at three lines. Below, a form to add a passage retrieval missed.
  */
 
 import { Loader2, Plus, Sparkles, X } from 'lucide-react'
@@ -10,10 +11,11 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { Button, IconButton, Input, Textarea } from '../../../components/ui'
 import {
+  byline,
   referenceFinished,
+  referenceName,
   referenceSummary,
   referencesOf,
-  uncheckedPlain,
   type AddedPassage,
   type Candidate,
   type CandidateStatus,
@@ -22,24 +24,41 @@ import {
   type WorkClaim,
 } from '../../../lib/labeling'
 import { askTarget } from '../../../lib/askCursor'
+import { onRadioKeys, radioTabIndex } from '../../../lib/roving'
 import { cn } from '../../../lib/utils'
 import type { AskedPassage } from './AskPanel'
 import { Kbd } from './ClaimDecision'
 
-export type Focus = { file: string; passage: string; page: number | null; key: string }
+export type Focus = { file: string; passage: string; page: number | null; key: string; automatic?: true }
 
 const STATUS: { status: CandidateStatus; label: string; key: string }[] = [
   { status: 'relevant', label: 'Relevant', key: 'R' },
   { status: 'rejected', label: 'Not relevant', key: 'N' },
 ]
 
-/** Scrolls a card into view inside the panel when it becomes the focused one (not in jsdom). */
-function useReveal(shown: boolean) {
+/** Scrolls `card` into view inside its label panel only. `scrollIntoView` would also scroll
+ * every container above it, the locked app shell included, and hide the claim strip. */
+export function revealInPanel(card: HTMLElement) {
+  const panel = card.closest<HTMLElement>('[data-label-panel]')
+  if (!panel) {
+    // A narrow screen has no panel of its own: the page scrolls, so the browser's way is right.
+    if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest' })
+    return
+  }
+  const top = card.getBoundingClientRect().top - panel.getBoundingClientRect().top + panel.scrollTop
+  const bottom = top + card.offsetHeight
+  if (top < panel.scrollTop) panel.scrollTop = top
+  else if (bottom > panel.scrollTop + panel.clientHeight) panel.scrollTop = bottom - panel.clientHeight
+}
+
+/** Reveal explicit focus even on mount (such as after adding a passage), once per focus. */
+function useReveal(shouldReveal: boolean) {
   const ref = useRef<HTMLLIElement>(null)
+  const revealed = useRef(false)
   useEffect(() => {
-    const card = ref.current
-    if (shown && card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest' })
-  }, [shown])
+    if (shouldReveal && !revealed.current && ref.current) revealInPanel(ref.current)
+    revealed.current = shouldReveal
+  }, [shouldReveal])
   return ref
 }
 
@@ -61,6 +80,7 @@ function PassageCard({
   c,
   label,
   shown,
+  reveal,
   status,
   onFocus,
   onJudge,
@@ -69,46 +89,57 @@ function PassageCard({
   c: Candidate
   label: string
   shown: boolean
+  reveal: boolean
   status: CandidateStatus | undefined
   onFocus: () => void
   onJudge: (status: CandidateStatus) => void
   onAsk?: () => void
 }) {
-  const ref = useReveal(shown)
+  const ref = useReveal(shown && reveal)
   return (
     <li
       ref={ref}
       data-ask-target={askTarget({ kind: 'passage', id: c.cand_id })}
       className={cn(
-        'scroll-mb-48 rounded-lg border p-3 transition-colors',
-        shown ? 'border-accent bg-accent-soft' : 'border-border-subtle bg-surface',
+        'scroll-mb-48 rounded-lg border transition-colors',
+        // An outline for the passage the keys act on; fill is left to the Relevant verdict.
+        shown ? 'border-accent bg-surface p-3 ring-2 ring-accent' : 'border-border-subtle bg-surface p-2',
       )}
     >
       <button
         type="button"
         onClick={onFocus}
+        onFocus={() => {
+          // Tabbing onto a clamped passage opens it, the same as a click.
+          if (!shown) onFocus()
+        }}
+        aria-expanded={shown}
         aria-pressed={shown}
-        className="w-full rounded text-left focus-visible:outline-2 focus-visible:outline-accent"
+        className="w-full rounded-sm text-left focus-visible:outline-2 focus-visible:outline-accent"
       >
         <span className="text-xs font-semibold text-ink">
-          #{c.rank}
-          {c.page != null && <span className="font-normal text-ink-muted"> · p.{c.page}</span>}
+          Passage {c.rank}
+          {c.page != null && <span className="font-normal text-ink-muted"> · page {c.page}</span>}
         </span>
-        <span title={shown ? undefined : c.passage} className={cn('mt-1 block text-sm leading-6 text-ink', !shown && 'line-clamp-3')}>
+        {/* `block` and `line-clamp` both set `display`. Keeping both leaves the clamp unset and
+            the card at the full passage height. */}
+        <span title={shown ? undefined : c.passage} className={cn('mt-1 text-sm leading-6 text-ink wrap-anywhere', shown ? 'block' : 'line-clamp-3')}>
           {c.passage}
         </span>
       </button>
-      <div role="radiogroup" aria-label={`Passage ${c.rank} of ${label}`} className="mt-2 flex gap-2">
-        {STATUS.map((s) => (
+      <div role="radiogroup" aria-label={`Passage ${c.rank} of ${label}`} onKeyDown={onRadioKeys} className="mt-2 flex gap-2">
+        {STATUS.map((s, index) => (
           <button
             key={s.status}
             type="button"
             role="radio"
             aria-checked={status === s.status}
+            tabIndex={radioTabIndex(status === s.status, index, STATUS.some((option) => option.status === status))}
             aria-keyshortcuts={shown ? s.key : undefined}
             onClick={() => onJudge(s.status)}
             className={cn(
-              'flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent',
+              'flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent',
+              shown ? 'min-h-11' : 'min-h-9 pointer-coarse:min-h-11',
               status === s.status
                 ? s.status === 'relevant'
                   ? 'border-supports bg-supports-soft text-supports'
@@ -117,7 +148,10 @@ function PassageCard({
             )}
           >
             {s.label}
-            {shown && <Kbd>{s.key}</Kbd>}
+            {/* On every passage, faint except on the one R and N act on. */}
+            <span className={cn(!shown && 'opacity-50')}>
+              <Kbd>{s.key}</Kbd>
+            </span>
           </button>
         ))}
       </div>
@@ -129,34 +163,40 @@ function PassageCard({
 function AddedCard({
   a,
   shown,
+  reveal,
   onFocus,
   onRemove,
   onAsk,
 }: {
   a: AddedPassage
   shown: boolean
+  reveal: boolean
   onFocus: () => void
   onRemove: () => void
   onAsk?: () => void
 }) {
-  const ref = useReveal(shown)
+  const ref = useReveal(shown && reveal)
   return (
     <li
       ref={ref}
       className={cn(
-        'scroll-mb-48 flex flex-col rounded-lg border p-3',
-        shown ? 'border-accent bg-accent-soft' : 'border-border-subtle bg-surface',
+        'flex scroll-mb-48 flex-col rounded-lg border',
+        shown ? 'border-accent bg-surface p-3 ring-2 ring-accent' : 'border-border-subtle bg-surface p-2',
       )}
     >
       <div className="flex items-start gap-2">
         <button
           type="button"
           onClick={onFocus}
+          onFocus={() => {
+            if (!shown) onFocus()
+          }}
+          aria-expanded={shown}
           aria-pressed={shown}
-          className="min-w-0 flex-1 rounded text-left focus-visible:outline-2 focus-visible:outline-accent"
+          className="min-w-0 flex-1 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-accent"
         >
-          {a.page != null && <span className="block text-xs text-ink-muted">p.{a.page}</span>}
-          <span title={shown ? undefined : a.passage} className={cn('block text-sm leading-6 text-ink', !shown && 'line-clamp-3')}>
+          {a.page != null && <span className="block text-xs text-ink-muted">page {a.page}</span>}
+          <span title={shown ? undefined : a.passage} className={cn('text-sm leading-6 text-ink wrap-anywhere', shown ? 'block' : 'line-clamp-3')}>
             {a.passage}
           </span>
         </button>
@@ -177,19 +217,25 @@ export function PassageList({
   claim,
   draft,
   references,
+  markers = [],
   focus,
   onFocus,
   onJudge,
   onAdd,
   onRemove,
   grade,
+  empty = 'No passages were stored for this claim. Add what supports it below.',
   search,
   onSearchAgain,
   onAsk,
+  canAdd = true,
+  pasteOnly = false,
 }: {
   claim: WorkClaim
   draft: Draft
   references: Reference[]
+  /** The paper's citation markers, for the reference numbers it prints. */
+  markers?: { ref: string; text: string }[]
   focus: Focus | null
   onFocus: (focus: Focus) => void
   onJudge: (candId: string, status: CandidateStatus) => void
@@ -197,16 +243,26 @@ export function PassageList({
   onRemove: (passage: AddedPassage) => void
   /** What goes under one reference's passages: its level form, or a note that it needs a relevant passage. */
   grade: (referenceId: string) => ReactNode
+  /** The one line shown when the claim has no passages at all. */
+  empty?: string
   /** The live search for a claim with no stored passages, while it runs or after it failed. */
   search?: 'searching' | 'failed'
   onSearchAgain?: () => void
   /** Ask AI about one passage; without it the cards have no Ask button. */
   onAsk?: (passage: AskedPassage) => void
+  /** False hides "Add a missed passage", for a claim with no paper a passage could come from. */
+  canAdd?: boolean
+  /** The claim has no reference to read, only cited works with no PDF: a passage can only be pasted (#824). */
+  pasteOnly?: boolean
 }) {
+  // Automatic focus opens the PDF while leaving the label panel at the claim decision.
+  const revealFocused = !focus?.automatic
   const fileOf = (id: string) => references.find((r) => r.reference_id === id)?.file ?? ''
   const labelOf = (id: string) => references.find((r) => r.reference_id === id)?.label ?? id
-  // Missing on a gateway older than the field: there is then nothing to explain.
-  const missed = claim.unchecked ?? []
+  const shortNameOf = (id: string) => {
+    const reference = references.find((r) => r.reference_id === id)
+    return (reference && byline(reference)) || labelOf(id)
+  }
   const refIds = referencesOf(claim, draft)
   const [pickedRef, setPickedRef] = useState<string | null>(null)
   const focusedRefId = focus
@@ -238,10 +294,12 @@ export function PassageList({
   }
 
   return (
-    <section aria-labelledby="passages-title" className="flex flex-col gap-3">
-      <h3 id="passages-title" className="font-serif text-base font-semibold text-ink">
-        Passages retrieval found
-      </h3>
+    <section aria-labelledby={refIds.length > 0 ? 'passages-title' : undefined} aria-label={refIds.length > 0 ? undefined : 'Passages'} className="flex flex-col gap-3">
+      {refIds.length > 0 && (
+        <h3 id="passages-title" className="font-serif text-base font-semibold text-ink">
+          {refIds.length === 1 ? `Passages found in ${shortNameOf(refIds[0])}` : 'Passages found in the cited papers'}
+        </h3>
+      )}
       {search === 'searching' && (
         <p role="status" className="flex items-center gap-2 text-sm text-ink-muted">
           <Loader2 className="size-4 animate-spin" />
@@ -256,27 +314,15 @@ export function PassageList({
           </Button>
         </p>
       )}
-      {!search && claim.candidates.length === 0 && (
-        <div className="flex flex-col gap-2 text-sm text-ink-muted">
-          <p>No passages were stored for this claim. Add what supports it below.</p>
-          {missed.length > 0 && (
-            <ul aria-label="Citations that were not checked" className="flex list-disc flex-col gap-1 pl-5">
-              {missed.map((row, index) => (
-                <li key={`${row.ref}:${index}`}>
-                  {row.label}: {uncheckedPlain(row.reason)}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+      {!search && claim.candidates.length === 0 && <p className="text-sm text-ink-muted">{empty}</p>}
       {refIds.length > 1 && (
         <div role="tablist" aria-label="References for this claim" className="flex flex-wrap gap-1.5">
           {refIds.map((id) => {
             const finished = referenceFinished(claim, draft, id)
             const reference = references.find((r) => r.reference_id === id)
             const active = id === activeId
-            const tag = reference?.ref ? `[${reference.ref}] ${labelOf(id)}` : labelOf(id)
+            const tag = reference ? referenceName(reference, markers) : labelOf(id)
+            const text = finished ? referenceSummary(claim, draft, reference, id) : tag
             return (
               <button
                 key={id}
@@ -284,16 +330,18 @@ export function PassageList({
                 role="tab"
                 aria-selected={active}
                 onClick={() => selectRef(id)}
+                title={text}
                 className={cn(
                   'max-w-full truncate rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent',
+                  // Selected has the accent border and fill; hover only shades the background.
                   active
                     ? 'border-accent bg-accent-soft text-ink'
                     : finished
-                      ? 'border-border-subtle bg-canvas text-ink-muted hover:border-accent hover:text-ink'
-                      : 'border-border-subtle bg-surface text-ink hover:border-accent',
+                      ? 'border-border-subtle bg-canvas text-ink-muted hover:text-ink'
+                      : 'border-border-subtle bg-surface text-ink hover:bg-canvas',
                 )}
               >
-                {finished ? referenceSummary(claim, draft, reference, id) : tag}
+                {text}
               </button>
             )
           })}
@@ -303,9 +351,18 @@ export function PassageList({
         const id = activeId
         const cands = claim.candidates.filter((c) => c.reference_id === id).sort((a, b) => a.rank - b.rank)
         const added = draft.added.filter((a) => a.reference_id === id)
+        const addedKey = (a: AddedPassage) => `added:${a.reference_id}:${a.passage}`
         return (
           <section key={id} aria-label={labelOf(id)} data-ask-target={askTarget({ kind: 'reference', id })} className="flex flex-col gap-2">
-            {refIds.length === 1 && <h4 className="font-serif text-base font-semibold text-ink">{labelOf(id)}</h4>}
+            {/* One heading: the title is a muted line under it, as on the claim. */}
+            {refIds.length === 1 && (
+              <p title={labelOf(id)} className="truncate text-xs text-ink-muted">
+                {labelOf(id)}
+              </p>
+            )}
+            {cands.length > 0 && (
+              <p className="text-caption text-ink-muted pointer-coarse:hidden">R relevant · N not relevant · J/U or ↓/↑ next/previous</p>
+            )}
             {cands.length > 0 && (
               <ul className="flex flex-col gap-2">
                 {cands.map((c) => (
@@ -314,12 +371,13 @@ export function PassageList({
                     c={c}
                     label={labelOf(id)}
                     shown={focus?.key === c.cand_id}
+                    reveal={revealFocused}
                     status={draft.cands[c.cand_id]}
                     onFocus={() => onFocus({ file: c.reference_file, passage: c.passage, page: c.page, key: c.cand_id })}
                     onJudge={(status) => onJudge(c.cand_id, status)}
                     onAsk={
                       onAsk &&
-                      (() => onAsk({ referenceId: id, name: `#${c.rank} ${labelOf(id)}`, page: c.page, text: c.passage }))
+                      (() => onAsk({ referenceId: id, name: `Passage ${c.rank} · ${labelOf(id)}`, page: c.page, text: c.passage }))
                     }
                   />
                 ))}
@@ -330,12 +388,13 @@ export function PassageList({
                 <p className="text-sm font-medium text-ink">Passages you added</p>
                 <ul className="flex flex-col gap-2">
                   {added.map((a) => {
-                    const key = `added:${a.reference_id}:${a.passage}`
+                    const key = addedKey(a)
                     return (
                       <AddedCard
                         key={key}
                         a={a}
                         shown={focus?.key === key}
+                        reveal={revealFocused}
                         onFocus={() => onFocus({ file: fileOf(a.reference_id), passage: a.passage, page: a.page, key })}
                         onRemove={() => onRemove(a)}
                         onAsk={
@@ -350,17 +409,25 @@ export function PassageList({
                 </ul>
               </>
             )}
-            {grade(id)}
+            <div data-level-form="">{grade(id)}</div>
           </section>
         )
       })()}
 
-      <AddPassage references={references} onAdd={onAdd} />
+      {canAdd && <AddPassage references={references} onAdd={onAdd} pasteOnly={pasteOnly} />}
     </section>
   )
 }
 
-function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p: AddedPassage) => void }) {
+function AddPassage({
+  references,
+  onAdd,
+  pasteOnly,
+}: {
+  references: Reference[]
+  onAdd: (p: AddedPassage) => void
+  pasteOnly: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [reference, setReference] = useState('')
   const [page, setPage] = useState('')
@@ -372,7 +439,7 @@ function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p:
     return (
       <Button variant="ghost" className="justify-start" onClick={() => setOpen(true)}>
         <Plus className="size-4" />
-        Add a passage retrieval missed
+        {pasteOnly ? 'Paste a passage from a cited work' : 'Add a missed passage'}
       </Button>
     )
   return (
@@ -389,7 +456,9 @@ function AddPassage({ references, onAdd }: { references: Reference[]; onAdd: (p:
       }}
     >
       <p className="text-sm text-ink-muted">
-        Paste a passage from the reference here, or select it in the reference's PDF and choose Add as evidence.
+        {pasteOnly
+          ? 'Paste a passage from one of the works this claim cites. They have no PDF to select it in.'
+          : "Paste a passage from the reference here, or select it in the reference's PDF and choose Add as evidence."}
       </p>
       <div className="flex gap-2">
         <div className="flex min-w-0 flex-1 flex-col gap-1">

@@ -80,7 +80,7 @@ export function AgentAccessCard() {
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search tools…"
           aria-label="Search tools"
-          className="min-h-9 w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
+          className="min-h-9 w-full bg-transparent text-ui text-ink outline-none placeholder:text-ink-muted"
         />
       </label>
 
@@ -97,7 +97,7 @@ export function AgentAccessCard() {
                 aria-expanded={isOpen}
                 onClick={() => toggleGroup(group.id)}
                 disabled={Boolean(words)}
-                className="flex min-h-11 w-full items-center gap-2 bg-neutral-soft px-3 text-left text-[13px] font-semibold text-ink hover:bg-accent-soft"
+                className="flex min-h-11 w-full items-center gap-2 bg-neutral-soft px-3 text-left text-ui font-semibold text-ink hover:bg-accent-soft"
               >
                 <span className="flex-1">{group.title}</span>
                 <span className="text-accent">
@@ -132,7 +132,7 @@ function ToolRow({ tool, on, onToggle }: { tool: AgentTool; on: boolean; onToggl
   const badge = (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium',
+        'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-caption font-medium',
         tool.kind === 'read' ? 'border-accent/40 bg-accent-soft text-accent' : 'border-border-subtle text-ink-muted',
       )}
     >
@@ -143,7 +143,7 @@ function ToolRow({ tool, on, onToggle }: { tool: AgentTool; on: boolean; onToggl
   if (onToggle) {
     return (
       <li>
-        <label className="flex min-h-10 cursor-pointer items-center gap-2.5 px-3 text-[13px] text-ink hover:bg-accent-soft/50">
+        <label className="flex min-h-10 cursor-pointer items-center gap-2.5 px-3 text-ui text-ink hover:bg-accent-soft/50">
           <input type="checkbox" checked={on} onChange={onToggle} className="size-4 accent-accent" />
           <span className="flex-1">{tool.label}</span>
           {badge}
@@ -152,9 +152,9 @@ function ToolRow({ tool, on, onToggle }: { tool: AgentTool; on: boolean; onToggl
     )
   }
   return (
-    <li className={cn('flex min-h-10 items-center gap-2.5 px-3 text-[13px]', on ? 'text-ink' : 'text-ink-muted line-through')}>
+    <li className={cn('flex min-h-10 items-center gap-2.5 px-3 text-ui', on ? 'text-ink' : 'text-ink-muted line-through')}>
       <span className="flex-1">{tool.label}</span>
-      {on ? badge : <span className="text-[11px]">Off</span>}
+      {on ? badge : <span className="text-caption">Off</span>}
     </li>
   )
 }

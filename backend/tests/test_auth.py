@@ -15,7 +15,7 @@ def _request(headers: dict[str, str]) -> Request:
 
 def test_x_user_authorization_wins_when_both_headers_are_present():
     request = _request(
-        {"x-user-authorization": "Bearer user-token", "authorization": "Bearer google-id-token"}
+        {"x-user-authorization": "Bearer user-token", "authorization": "Bearer upstream-token"}
     )
     assert _token(request) == "user-token"
 

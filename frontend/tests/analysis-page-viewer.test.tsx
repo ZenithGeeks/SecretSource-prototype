@@ -153,7 +153,7 @@ describe('opening the paper', () => {
   it('asks the gateway for the paper by name, behind the signed-in token', async () => {
     await render(<PageViewer target={target} />)
     expect(stub.authorizedFor).toBe('/api/papers/my%20paper.pdf')
-    expect(screen.getByRole('complementary', { name: 'my paper.pdf, page 1' })).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Claim 1 in this paper, page 1' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open original PDF' })).toHaveAttribute('href', 'blob:paper')
   })
 
@@ -200,18 +200,38 @@ describe('opening the paper', () => {
 })
 
 describe('the header', () => {
-  it('names the paper and where the passage was not found', async () => {
-    await render(<PageViewer target={{ ...target, detail: 'Ioffe 2015', quote: 'A quote.' }} />)
-    expect(screen.getByText('Ioffe 2015 · my paper.pdf · exact place not found, showing the page')).toBeInTheDocument()
+  it('makes the label a button when told where it leads', async () => {
+    const onLabel = vi.fn()
+    await render(<PageViewer target={target} onLabel={onLabel} />)
+    fireEvent.click(screen.getByRole('button', { name: target.label }))
+    expect(onLabel).toHaveBeenCalledOnce()
   })
 
-  it('does not claim a failed lookup when there was no passage, a location, or an error', async () => {
-    const { rerender } = await render(<PageViewer target={target} />)
-    expect(screen.getByText('my paper.pdf')).toBeInTheDocument()
-    rerender(<PageViewer target={{ ...target, quote: 'q', source: location }} />)
-    expect(screen.getByText('my paper.pdf')).toBeInTheDocument()
+  it('leaves the label as plain text without one', async () => {
+    await render(<PageViewer target={target} />)
+    expect(screen.queryByRole('button', { name: target.label })).not.toBeInTheDocument()
+  })
+
+  it('gives the detail and where the passage was not found, not the file name', async () => {
+    await render(<PageViewer target={{ ...target, detail: 'Ioffe 2015', quote: 'A quote.' }} />)
+    expect(screen.getByText('Ioffe 2015 · exact place not found, showing the page')).toBeInTheDocument()
+    expect(screen.queryByText(/my paper\.pdf/)).not.toBeInTheDocument()
+  })
+
+  it('shows the detail alone when the place was found, and leaves the line empty with nothing to say', async () => {
+    const line = () => screen.getByRole('heading', { level: 2, name: target.label }).nextElementSibling
+    const { rerender } = await render(<PageViewer target={{ ...target, detail: 'Ioffe 2015', quote: 'q', source: location }} />)
+    expect(line()).toHaveTextContent(/^Ioffe 2015$/)
+    rerender(<PageViewer target={target} />)
+    expect(line()).toBeEmptyDOMElement()
+  })
+
+  it('does not claim a failed lookup when there was a location or an error', async () => {
+    const line = () => screen.getByRole('heading', { level: 2, name: target.label }).nextElementSibling
+    const { rerender } = await render(<PageViewer target={{ ...target, quote: 'q', source: location }} />)
+    expect(line()).toBeEmptyDOMElement()
     rerender(<PageViewer target={{ ...target, quote: 'q', error: 'The lookup failed.' }} />)
-    expect(screen.getByText('my paper.pdf')).toBeInTheDocument()
+    expect(line()).toBeEmptyDOMElement()
     expect(screen.getByRole('alert')).toHaveTextContent('The lookup failed.')
   })
 
@@ -225,9 +245,42 @@ describe('the header', () => {
 
   it('says which of two papers it is', async () => {
     const { rerender } = await render(<PageViewer target={{ ...target, paperRole: 'under-review' }} />)
-    expect(screen.getByText(/Paper under review/)).toBeInTheDocument()
+    expect(screen.getByText('Under review:')).toBeVisible()
+    // The role never shrinks, so a half-width pane cuts the title instead.
+    expect(screen.getByText('Under review:')).toHaveClass('shrink-0')
+    expect(screen.queryByText(/^Paper:/)).not.toBeInTheDocument()
     rerender(<PageViewer target={{ ...target, paperRole: 'reference' }} />)
-    expect(screen.getByText(/Cited reference/)).toBeInTheDocument()
+    expect(screen.getByText('Cited reference:')).toHaveClass('shrink-0')
+  })
+
+  it('puts the role and the title on lines of their own above the toolbar when asked', async () => {
+    await render(<PageViewer target={{ ...target, paperRole: 'reference', detail: 'Kim · 2023' }} titleOnOwnLine />)
+    const heading = screen.getByRole('heading', { name: /^Cited reference/ })
+    expect(within(heading).getByText('Cited reference')).toHaveClass('shrink-0')
+    expect(heading).toHaveTextContent('Claim 1 in this paper · Kim · 2023')
+    expect(heading).toHaveAttribute('title', 'Claim 1 in this paper')
+    expect(within(screen.getByRole('toolbar', { name: 'Page controls' })).queryByRole('heading')).toBeNull()
+  })
+
+  it('keeps the document drawn while its pane is hidden', async () => {
+    let report: (entries: { contentRect: { width: number } }[]) => void = () => {}
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: typeof report) {
+          report = callback
+        }
+        observe() {
+          report([{ contentRect: { width: 800 } }])
+        }
+        disconnect() {}
+      },
+    )
+    await render(<PageViewer target={target} />)
+    expect(screen.getByTestId('drawn-1')).toBeInTheDocument()
+    act(() => report([{ contentRect: { width: 0 } }]))
+    expect(screen.getByTestId('drawn-1')).toBeInTheDocument()
+    expect(screen.queryByText('Opening the paper…')).not.toBeInTheDocument()
   })
 
   it('has a close button only when it can be closed', async () => {
@@ -332,6 +385,39 @@ describe('paging', () => {
   it('scrolls to a highlighted box within its page', async () => {
     await render(<PageViewer target={{ ...target, source: location }} />)
     expect(scrollTo).toHaveBeenCalledWith({ top: expect.any(Number) })
+  })
+
+  it('puts a highlighted box in the middle of the panel', async () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(1000)
+    await render(<PageViewer target={{ ...target, source: location }} />)
+    // The first box's middle is 15% down a 1000px page; the panel reports no height in jsdom.
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0 - 16 - 48 + 16 + 150 })
+  })
+
+  it('scrolls back to the highlight as pages above it resize, until the reader scrolls', async () => {
+    const resized: (() => void)[] = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private report: (entries: { contentRect: { width: number } }[]) => void) {
+          resized.push(() => report([{ contentRect: { width: stub.width } }]))
+        }
+        observe() {
+          this.report([{ contentRect: { width: stub.width } }])
+        }
+        disconnect() {}
+      },
+    )
+    await render(<PageViewer target={{ ...target, source: location }} />)
+    scrollTo.mockClear()
+    act(() => resized.forEach((resize) => resize()))
+    expect(scrollTo).toHaveBeenCalled()
+    expect(screen.getByText('Page 2 of 3')).toBeInTheDocument()
+
+    fireEvent.wheel(pageNode(1).closest('.overflow-auto') as HTMLElement)
+    scrollTo.mockClear()
+    act(() => resized.forEach((resize) => resize()))
+    expect(scrollTo).not.toHaveBeenCalled()
   })
 
   it('opens a new target at its page', async () => {
@@ -475,6 +561,18 @@ describe('the toolbar and layout', () => {
     stub.narrow = false
     act(() => stub.mediaChange!())
     expect(screen.getByRole('button', { name: 'Fill the window' })).toBeInTheDocument()
+  })
+
+  it('keeps an embedded viewer inside its pane when the default would cover the screen', async () => {
+    stub.narrow = true
+    await render(<PageViewer target={{ ...target, paperRole: 'reference' }} embedded keyboard={false} className="h-full" />)
+    const pane = screen.getByRole('complementary')
+    expect(pane).toHaveClass('h-full')
+    expect(pane).not.toHaveClass('fixed')
+    fireEvent.click(screen.getByRole('button', { name: 'Fill the window' }))
+    expect(pane).toHaveClass('fixed', 'inset-4')
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the side panel' }))
+    expect(pane).not.toHaveClass('fixed')
   })
 
   it('closes on Escape on a narrow screen even after expanding', async () => {
@@ -637,9 +735,110 @@ describe('citation markers', () => {
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
   })
 
+  describe('keyboard', () => {
+    const near = marker({ ref: 'b1', text: '[1]', x0: 10, x1: 15 })
+    const far = marker({ ref: 'b2', text: '[2]', x0: 50, x1: 55 })
+    const later = marker({ ref: 'b1', text: '[3]', page: 2 })
+    const stops = () => screen.getAllByRole('button', { name: /^Cited paper/ }).map((node) => node.tabIndex)
+
+    it('makes the markers one Tab stop, the first on the page in view', async () => {
+      await render(<PageViewer target={target} markers={[near, far, later]} references={references} />)
+      expect(stops()).toEqual([0, -1, -1])
+    })
+
+    it('puts the Tab stop on the first marker when none is on the page in view', async () => {
+      await render(<PageViewer target={target} markers={[later]} references={references} />)
+      expect(stops()).toEqual([0])
+    })
+
+    it('moves the Tab stop to the first marker of the page the reader pages to', async () => {
+      await render(<PageViewer target={target} markers={[near, later]} references={references} />)
+      fireEvent.click(button('Next page'))
+      expect(stops()).toEqual([-1, 0])
+    })
+
+    it('keeps the Tab stop on the marker that had focus', async () => {
+      await render(<PageViewer target={target} markers={[near, far]} references={references} />)
+      act(() => screen.getByRole('button', { name: /\[2\]/ }).focus())
+      expect(stops()).toEqual([-1, 0])
+    })
+
+    it('moves focus between markers with the arrow keys, Home and End', async () => {
+      await render(<PageViewer target={target} markers={[near, far, later]} references={references} />)
+      const [first, second, third] = screen.getAllByRole('button', { name: /^Cited paper/ })
+      act(() => first.focus())
+      fireEvent.keyDown(first, { key: 'ArrowRight' })
+      expect(second).toHaveFocus()
+      fireEvent.keyDown(second, { key: 'End' })
+      expect(third).toHaveFocus()
+      fireEvent.keyDown(third, { key: 'ArrowLeft' })
+      expect(second).toHaveFocus()
+      fireEvent.keyDown(second, { key: 'Home' })
+      expect(first).toHaveFocus()
+    })
+
+    it('does not turn the page when the arrow key moved between markers', async () => {
+      await render(<PageViewer target={target} markers={[near, far]} references={references} />)
+      const [first] = screen.getAllByRole('button', { name: /^Cited paper/ })
+      act(() => first.focus())
+      fireEvent.keyDown(first, { key: 'ArrowRight' })
+      expect(screen.getByText('Page 1 of 3')).toBeInTheDocument()
+    })
+
+    it('ignores keys that are not moves, and keys pressed outside a marker', async () => {
+      await render(<PageViewer target={target} markers={[near, far]} references={references} />)
+      const [first, second] = screen.getAllByRole('button', { name: /^Cited paper/ })
+      act(() => first.focus())
+      fireEvent.keyDown(first, { key: 'a' })
+      expect(first).toHaveFocus()
+      fireEvent.keyDown(document.querySelector('[data-page="1"]') as HTMLElement, { key: 'ArrowRight' })
+      expect(second).not.toHaveFocus()
+    })
+  })
+
   it('draws no markers or card when it is given none', async () => {
     await render(<PageViewer target={target} />)
     expect(screen.queryByRole('button', { name: /^Cited paper/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('the page controls as one Tab stop', () => {
+  const enabled = () => within(toolbar()).getAllByRole('button').filter((node) => !(node as HTMLButtonElement).disabled)
+  const stops = () => enabled().filter((node) => node.tabIndex === 0)
+
+  it('leaves one enabled control in the Tab order', async () => {
+    await render(<PageViewer target={target} />)
+    expect(stops()).toHaveLength(1)
+    expect(stops()[0]).toBe(enabled()[0])
+  })
+
+  it('moves focus along the controls with the arrow keys, skipping a disabled one', async () => {
+    await render(<PageViewer target={target} />)
+    const [first] = stops()
+    act(() => first.focus())
+    fireEvent.keyDown(first, { key: 'ArrowRight' })
+    expect(first).not.toHaveFocus()
+    expect(toolbar().contains(document.activeElement)).toBe(true)
+    expect(document.activeElement).not.toBe(button('Previous page'))
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' })
+    expect(first).toHaveFocus()
+  })
+
+  it('keeps the Tab stop where it was when focus lands on the bar itself', async () => {
+    const { rerender } = await render(<PageViewer target={target} />)
+    const next = button('Next page')
+    act(() => next.focus())
+    fireEvent.focus(toolbar())
+    rerender(<PageViewer target={{ ...target }} />)
+    expect(stops()).toEqual([button('Next page')])
+  })
+
+  it('keeps the Tab stop on the control that was last focused', async () => {
+    const { rerender } = await render(<PageViewer target={target} />)
+    const next = button('Next page')
+    act(() => next.focus())
+    rerender(<PageViewer target={{ ...target }} />)
+    expect(stops()).toEqual([button('Next page')])
   })
 })
 

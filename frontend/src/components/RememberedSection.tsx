@@ -85,7 +85,7 @@ export function RememberedSection({ isPreview }: { isPreview: boolean }) {
             <li key={fact.id} className="flex items-start gap-3 py-3">
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="rounded bg-accent-soft px-1.5 text-xs text-ink-muted">{KIND_NAMES[fact.kind]}</span>
+                  <span className="rounded-sm bg-accent-soft px-1.5 text-xs text-ink-muted">{KIND_NAMES[fact.kind]}</span>
                   <span className="font-medium text-ink">{fact.subject}</span>
                 </p>
                 <p className="mt-0.5 text-sm text-ink-muted">{fact.summary}</p>

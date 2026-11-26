@@ -423,16 +423,8 @@ write to it could queue a job. `backend/app/queue.py` uses RQ's
 ColBERT, ColPali (optional), Supabase, and `redis` and `worker`. `redis` and `worker` are
 required, so `degraded` is true when Redis cannot be reached or no worker is listening.
 
-A Google Cloud Monitoring uptime check calls the gateway's `/health` every 5 minutes from 6
-regions, and passes when the body contains `"ok":true`. Two alert policies email the team: one
-fires when the uptime check fails from more than one region for 10 minutes, and one fires when
-the gateway returns more than 5 5xx responses in 5 minutes.
-
-Grafana runs on ss-core, next to the worker, with two dashboards: "System evaluation" (analyses
-running, queue wait, worker and container CPU and memory, from Prometheus) and "Cloud Run
-services" (requests, latency, instance count, CPU and memory for each Cloud Run service). Cloud
-Run is private, so Prometheus cannot scrape it there. Those metrics come from Google Cloud
-Monitoring instead.
+Grafana runs on ss-core, next to the worker, with "System evaluation" (analyses
+running, queue wait, worker and container CPU and memory, from Prometheus).
 
 See [deploy/monitoring/README.md](deploy/monitoring/README.md) for how to run this stack and
 what each dashboard shows.

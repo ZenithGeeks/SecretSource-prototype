@@ -19,7 +19,7 @@ const RELATION_LABEL: Record<GraphRelation, string> = {
 }
 
 const PANEL =
-  'flex w-full flex-col gap-4 overflow-y-auto rounded-2xl border border-border-subtle bg-surface p-5 shadow-card lg:w-[360px] lg:shrink-0'
+  'flex w-full flex-col gap-4 overflow-y-auto rounded-2xl border border-border-subtle bg-surface p-5 shadow-card lg:w-90 lg:shrink-0'
 
 /** Puts focus on a detail panel when it opens or shows another item, so a keyboard or screen reader
  * user lands in what they just chose instead of staying on the canvas. */
@@ -48,7 +48,7 @@ function IndexNote({ node }: { node: GraphNode | undefined }) {
 }
 
 function Quote({ children }: { children: ReactNode }) {
-  return <p className="font-serif text-[14px] leading-[22px] italic text-ink">{children}</p>
+  return <p className="font-serif text-[14px] leading-5.5 italic text-ink">{children}</p>
 }
 
 function Cited({ quote, page }: { quote?: string; page?: string }) {
@@ -95,22 +95,22 @@ export function GraphClaimDetail({ graph, claimId, onClose }: { graph: Knowledge
       <div className="flex items-center gap-2">
         <VerdictBadge verdict={standingOf(edges)} />
         <span className="flex-1" />
-        <IconButton onClick={copyEvidence} aria-label="Copy evidence" title={copied ? 'Copied' : 'Copy evidence'} className="size-8 rounded-[9px] pointer-coarse:size-11">
+        <IconButton onClick={copyEvidence} aria-label="Copy evidence" title={copied ? 'Copied' : 'Copy evidence'} className="size-8 rounded-lg pointer-coarse:size-11">
           <Copy className="size-4" />
         </IconButton>
-        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-[9px] pointer-coarse:size-11">
+        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-lg pointer-coarse:size-11">
           <X className="size-4" />
         </IconButton>
       </div>
       <h2 className="text-[17px] leading-6 font-medium text-ink">{claim.label}</h2>
 
       <p className="type-label text-ink-muted">Where it comes from</p>
-      <div className="flex flex-col gap-3 rounded-[10px] bg-neutral-soft px-3 py-2.5">
+      <div className="flex flex-col gap-3 rounded-lg bg-neutral-soft px-3 py-2.5">
         {origins.length === 0 && <p className="text-xs text-ink-muted">No origin recorded.</p>}
         {origins.map((e) => (
           <div key={e.id} className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
-              <span className="text-[13px] leading-[18px] font-medium text-ink">{name(e.source)}</span>
+              <span className="text-ui leading-4.5 font-medium text-ink">{name(e.source)}</span>
               <VerdictBadge verdict="uncited" text="origin" />
             </div>
             <Cited quote={e.quote} page={e.page} />
@@ -123,7 +123,7 @@ export function GraphClaimDetail({ graph, claimId, onClose }: { graph: Knowledge
         {others.map((e) => (
           <div key={e.id} className="flex flex-col gap-1.5 border-t border-border-subtle py-2.5">
             <div className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 text-[13px] leading-[18px] font-medium text-ink">{name(e.source)}</span>
+              <span className="min-w-0 flex-1 text-ui leading-4.5 font-medium text-ink">{name(e.source)}</span>
               <VerdictBadge verdict={RELATION_STANDING[e.relation]} />
             </div>
             <IndexNote node={paper(e.source)} />
@@ -136,7 +136,7 @@ export function GraphClaimDetail({ graph, claimId, onClose }: { graph: Knowledge
         ))}
       </div>
       {contradicts && origins.length <= 1 && (
-        <div className="rounded-[10px] bg-refutes-soft px-3 py-2 text-[13px] text-ink">
+        <div className="rounded-lg bg-refutes-soft px-3 py-2 text-ui text-ink">
           One source holds it up, and a paper it cites doesn't contain the result — the claim inherits
           without new evidence.
         </div>
@@ -163,14 +163,14 @@ export function GraphPairDetail({ graph, edge, onClose }: { graph: KnowledgeGrap
   return (
     <aside ref={panel} tabIndex={-1} aria-label="Pair detail" className={PANEL}>
       <div className="flex items-center gap-2">
-        <h2 className="min-w-0 flex-1 text-[15px] leading-[22px] font-semibold text-ink">
+        <h2 className="min-w-0 flex-1 text-reading leading-5.5 font-semibold text-ink">
           {label(edge.a)} <span aria-hidden="true" className="font-normal text-ink-muted">↔</span> {label(edge.b)}
         </h2>
-        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-[9px] pointer-coarse:size-11">
+        <IconButton onClick={onClose} aria-label="Close" title="Close" className="size-8 rounded-lg pointer-coarse:size-11">
           <X className="size-4" />
         </IconButton>
       </div>
-      <p className="text-[13px] leading-[18px] text-ink-muted">{relation}</p>
+      <p className="text-ui leading-4.5 text-ink-muted">{relation}</p>
       {outside.map((id) => (
         <p key={id} className="text-xs font-medium text-insufficient">
           {label(id)} was not found in a public index
@@ -196,7 +196,7 @@ export function GraphPairDetail({ graph, edge, onClose }: { graph: KnowledgeGrap
           ))}
         </div>
       ) : (
-        <p className="text-[13px] text-ink-muted">No shared passages indexed for this pair yet.</p>
+        <p className="text-ui text-ink-muted">No shared passages indexed for this pair yet.</p>
       )}
       {/* Two links, not two window.open calls: a browser lets only the first of those through. */}
       <div className="flex flex-col gap-1.5">

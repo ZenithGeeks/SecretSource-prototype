@@ -5,7 +5,7 @@
  */
 
 import { m } from 'framer-motion'
-import { Check, ChevronRight, CircleAlert, CircleCheck, EyeOff, Loader2, MoreVertical, RotateCcw, Trash2 } from 'lucide-react'
+import { Check, ChevronRight, CircleAlert, EyeOff, Loader2, MoreVertical, RotateCcw, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
 import { MenuButton } from '../../../components/library'
@@ -26,13 +26,9 @@ function CellLabel({ children }: { children: ReactNode }) {
   return <span className="text-ink-muted @4xl:hidden">{children}: </span>
 }
 
+/** Only a paper that is not ready says so: "Ready" on nearly every row was noise. */
 function StatusBadge({ status }: { status: Paper['status'] }) {
-  if (status === 'done')
-    return (
-      <Badge tone="supports">
-        <CircleCheck aria-hidden="true" /> Ready
-      </Badge>
-    )
+  if (status === 'done') return null
   if (status === 'running')
     return (
       <Badge>
@@ -46,32 +42,36 @@ function StatusBadge({ status }: { status: Paper['status'] }) {
   )
 }
 
-/** The team's progress as the bar, the viewer's own count under it. A second person on the same
- * claim does not move the bar, but it is how agreement is measured, so "You" stays visible. */
-function TeamProgress({ paper }: { paper: Paper }) {
+/** The viewer's own progress leads, as the bar: a row the team finished can still be the viewer's
+ * work to do, and a green team bar read as done. The team's count follows, smaller. */
+function MyProgress({ paper }: { paper: Paper }) {
   if (paper.status !== 'done') return <span className="text-ink-muted">Not ready</span>
   if (paper.claims === 0) return <span className="text-ink-muted">No claims</span>
-  const teamDone = paper.team_judged >= paper.claims
+  const mineDone = isFinished(paper)
   return (
     <span className="flex w-full max-w-60 flex-col gap-1.5">
       <span className="flex items-center gap-1 whitespace-nowrap tabular-nums">
         <CellLabel>Progress</CellLabel>
-        {teamDone ? (
+        {mineDone ? (
           <>
             <Check className="size-4 shrink-0 text-supports" aria-hidden="true" />
-            <span className="font-medium text-supports">All {paper.claims} claims</span>
+            <span className="font-medium text-supports">You: all {paper.claims} claims</span>
           </>
         ) : (
-          `${paper.team_judged} of ${paper.claims} claims`
+          <span className="font-medium text-ink">
+            You: {paper.judged} of {paper.claims} claims
+          </span>
         )}
       </span>
       <Progress
-        value={paper.team_judged}
+        value={paper.judged}
         max={paper.claims}
-        label={`Claims the team decided in ${paper.title}`}
-        tone={teamDone ? 'supports' : 'accent'}
+        label={`Claims you decided in ${paper.title}`}
+        tone={mineDone ? 'supports' : 'accent'}
       />
-      <span className="text-xs text-ink-muted tabular-nums">You: {isFinished(paper) ? 'all' : paper.judged}</span>
+      <span className="text-xs text-ink-muted tabular-nums">
+        Team: {paper.team_judged >= paper.claims ? 'all' : `${paper.team_judged} of`} {paper.claims}
+      </span>
     </span>
   )
 }
@@ -88,6 +88,14 @@ type RowProps = {
   onOpenLabels?: (id: string) => void
 }
 
+/** The address of a paper's workspace or labels, as LabelerApp writes it, for a new tab. */
+function paperHref(page: 'analysis' | 'labels', id: string) {
+  const params = new URLSearchParams(window.location.search)
+  for (const key of ['analysis', 'labels', 'tab']) params.delete(key)
+  params.set(page, id)
+  return `?${params}`
+}
+
 function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabels }: RowProps) {
   const assign = useAssignTopic()
   const retry = useRetryPaper()
@@ -100,10 +108,14 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
   const adder = paper.added_by || 'the person who added it'
   const others = paper.labelers.filter((name) => name !== me)
   const isBlind = blind?.has(paper.analysis_id) ?? false
-  const viewLabels = Boolean(onOpenLabels) && opensLabels(paper, lead && !isBlind)
+  // The row opens the labels only once the viewer's own work on the paper is finished. A lead
+  // can read them sooner, from a smaller button beside the row's own action.
+  const viewLabels = Boolean(onOpenLabels) && opensLabels(paper, false)
+  const peekLabels = Boolean(onOpenLabels) && !viewLabels && opensLabels(paper, lead && !isBlind)
   const open = viewLabels && onOpenLabels ? onOpenLabels : onOpen
   const hasKeywords = Boolean(paper.subject || paper.keywords?.length)
-  let action = 'Label'
+  // One verb per state, the same in Blind checks: Start, Continue, Review, View labels.
+  let action = 'Start'
   if (viewLabels) action = 'View labels'
   else if (isFinished(paper)) action = 'Review'
   else if (paper.judged > 0) action = 'Continue'
@@ -124,18 +136,23 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
     >
       <td className={cn(cell, 'w-full @4xl:w-auto @4xl:min-w-56 @4xl:pl-4')}>
         {ready ? (
-          // The ::after layer stretches this button over the whole row, so a click anywhere opens it,
+          // The ::after layer stretches this link over the whole row, so a click anywhere opens it,
           // and it draws the focus ring around the row instead of the global one around the title.
-          <button
-            type="button"
+          // A link, so the paper can open in a new tab; a plain click stays in the app.
+          <a
+            href={paperHref(viewLabels ? 'labels' : 'analysis', paper.analysis_id)}
             aria-label={`${paper.title} (${action})`}
-            onClick={() => open(paper.analysis_id)}
-            className="text-left font-medium text-ink focus-visible:outline-none! after:absolute after:inset-0 after:rounded-sm hover:text-accent focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
+            onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+              event.preventDefault()
+              open(paper.analysis_id)
+            }}
+            className="block font-medium text-ink focus-visible:outline-none! after:absolute after:inset-0 after:rounded-sm hover:text-accent focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
           >
-            <span className="line-clamp-2 break-words">{paper.title}</span>
-          </button>
+            <span className="line-clamp-2 wrap-break-word">{paper.title}</span>
+          </a>
         ) : (
-          <span className="line-clamp-2 font-medium break-words text-ink">{paper.title}</span>
+          <span className="line-clamp-2 font-medium wrap-break-word text-ink">{paper.title}</span>
         )}
         <div className="mt-1 flex flex-wrap items-center gap-1">
           <Badge tone={paper.topic === myTopic ? 'accent' : 'neutral'} title={paper.topic === myTopic ? 'Your topic' : undefined}>
@@ -155,7 +172,7 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
               type="button"
               aria-expanded={showKeywords}
               onClick={() => setShowKeywords((open) => !open)}
-              className="relative z-10 rounded px-1.5 py-0.5 text-xs text-ink-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              className="relative z-10 rounded-sm px-1.5 py-0.5 text-xs text-ink-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
             >
               {showKeywords ? 'Hide keywords' : 'Keywords'}
             </button>
@@ -177,7 +194,7 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
         )}
       </td>
       <td className={cn(cell, 'w-full @4xl:w-40')}>
-        <TeamProgress paper={paper} />
+        <MyProgress paper={paper} />
       </td>
       <td className={cell}>
         <CellLabel>Also labeled by</CellLabel>
@@ -191,6 +208,16 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
         )}
       </td>
       <td className={cn(cell, 'flex w-full items-center justify-end gap-1 @4xl:w-auto @4xl:whitespace-nowrap')}>
+        {peekLabels && onOpenLabels && (
+          <Button
+            variant="ghost"
+            className="relative z-10 min-h-11 px-3"
+            aria-label={`View labels for ${paper.title}`}
+            onClick={() => onOpenLabels(paper.analysis_id)}
+          >
+            View labels
+          </Button>
+        )}
         {ready && (
           // Looks like a button; the stretched title button above does the opening.
           <span aria-hidden="true" className="inline-flex min-h-11 items-center gap-1 px-2 font-medium text-accent">
@@ -220,6 +247,8 @@ function PaperRow({ paper, me, myTopic, lead = false, blind, onOpen, onOpenLabel
             onFile={(file) => upload.mutate({ file, topic: '', replaces: paper.analysis_id })}
           />
         )}
+        {/* The menu is only on papers you added; the others keep its room so rows line up. */}
+        {!paper.mine && <span aria-hidden="true" className="size-10 shrink-0" />}
         {paper.mine && (
           <MenuButton
             label={`More actions for ${paper.title}`}

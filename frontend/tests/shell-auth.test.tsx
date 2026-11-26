@@ -1,6 +1,6 @@
 /** lib/useAuth.ts: the live session, signing out, and ending a session the gateway refused. */
 
-import type { Session } from '@supabase/supabase-js'
+import type { Session } from '@supabase/auth-js'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 

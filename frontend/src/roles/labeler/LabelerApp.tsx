@@ -4,15 +4,17 @@
  */
 
 import { ClipboardCheck, EyeOff, Tags } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import type { NavEntry } from '../../components/AppShell'
+import type { Crumb, NavEntry } from '../../components/AppShell'
 import { AppShell } from '../../components/AppShell'
 import { useAsk } from '../../components/Ask'
 import { SettingsModal } from '../../components/SettingsModal'
+import { usePool } from '../../lib/labeling'
 import type { Role } from '../../lib/roles'
 import { settingsRequested } from '../../lib/settingsDeepLink'
 import { PaperBell } from './components/PaperBell'
+import { revealInPanel } from './components/PassageList'
 import { BlindChecks } from './screens/BlindChecks'
 import { Labels } from './screens/Labels'
 import { Queue } from './screens/Queue'
@@ -28,12 +30,50 @@ const NAV: NavEntry<Screen>[] = [
 ]
 const TITLES: Record<Screen, string> = { papers: 'Papers to label', blind: 'Blind checks' }
 
+/** The page the address names: an open paper, a paper's labels, or one of the two lists. */
+function pageFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  return {
+    analysis: params.get('analysis'),
+    labels: params.get('labels'),
+    screen: (params.get('tab') === 'blind' ? 'blind' : 'papers') as Screen,
+  }
+}
+
+/** Puts the page in the address. Another page is a new history entry, so Back returns to the one
+ * before; the first sync only tidies the address the app opened with. */
+function syncPageParams(analysis: string | null, labels: string | null, screen: Screen, keepHistory: boolean) {
+  const params = new URLSearchParams(window.location.search)
+  const shown = pageFromUrl()
+  const newPage = keepHistory && (shown.analysis !== analysis || shown.labels !== labels || shown.screen !== screen)
+  if (analysis) params.set('analysis', analysis)
+  else params.delete('analysis')
+  if (labels) params.set('labels', labels)
+  else params.delete('labels')
+  if (screen === 'blind') params.set('tab', 'blind')
+  else params.delete('tab')
+  const query = params.toString()
+  const url = query ? `?${query}` : window.location.pathname
+  if (newPage) window.history.pushState(null, '', url)
+  // Keeps the list's scroll, saved in the entry's state.
+  else window.history.replaceState(window.history.state, '', url)
+}
+
+/** How far the list is scrolled, kept in its history entry so Back returns to the same place. */
+function rememberScroll() {
+  window.history.replaceState({ ...window.history.state, labelerScroll: window.scrollY }, '')
+}
+
 export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () => void; onSwitchRole?: (role: Role) => void }) {
-  const [analysis, setAnalysis] = useState<string | null>(() => new URLSearchParams(window.location.search).get('analysis'))
+  const [analysis, setAnalysis] = useState<string | null>(() => pageFromUrl().analysis)
   // A paper's labels, read-only (Labels). Set only while no paper is open in the workspace.
-  const [labels, setLabels] = useState<string | null>(() => new URLSearchParams(window.location.search).get('labels'))
-  const [screen, setScreen] = useState<Screen>(() => (new URLSearchParams(window.location.search).get('tab') === 'blind' ? 'blind' : 'papers'))
+  const [labels, setLabels] = useState<string | null>(() => pageFromUrl().labels)
+  const [screen, setScreen] = useState<Screen>(() => pageFromUrl().screen)
   const [unsaved, setUnsaved] = useState(false) // the open workspace holds drafts that are not saved
+  // The paper Back was pressed on with unsaved labels: it stayed open and says why.
+  const [backBlockedOn, setBackBlockedOn] = useState<string | null>(null)
+  // The open paper is a blind check: Ask is off there, so its toolbar button goes too (#867).
+  const [blind, setBlind] = useState(false)
   // A modal over the current screen, as in the other roles, so unsaved labels stay open under it.
   const [settingsOpen, setSettingsOpen] = useState(() => settingsRequested(window.location.search))
   const leave = (go: () => void) => () => {
@@ -42,10 +82,24 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
   }
   const openPaper = (id: string) =>
     leave(() => {
+      rememberScroll()
       setLabels(null)
       setAnalysis(id)
     })()
+  const fromList = (go: () => void) => {
+    rememberScroll()
+    go()
+  }
   usePaperNotices(openPaper)
+  // The open paper's title ends the breadcrumb, so the top bar names it and not only the list.
+  // With a paper open, the list's name goes back to the list, as the crumbs of the other roles do.
+  const pool = usePool()
+  const openTitle = pool.data?.papers.find((p) => p.analysis_id === (analysis ?? labels))?.title
+  const backToList = leave(() => {
+    setAnalysis(null)
+    setLabels(null)
+  })
+  const breadcrumb: Crumb[] = openTitle ? [{ label: TITLES[screen], onSelect: backToList }, openTitle] : [TITLES[screen]]
   // Where the workspace draws its claim tools (review, questions about the paper and its
   // references) inside the Ask panel's "This claim" mode.
   const [claimSlot, setClaimSlot] = useState<HTMLDivElement | null>(null)
@@ -76,17 +130,33 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
     extra: analysis ? { label: 'This claim', content: <div ref={setClaimSlot} /> } : undefined,
   })
 
+  const synced = useRef(false)
+  const shownUrl = useRef('')
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (analysis) params.set('analysis', analysis)
-    else params.delete('analysis')
-    if (labels) params.set('labels', labels)
-    else params.delete('labels')
-    if (screen === 'blind') params.set('tab', 'blind')
-    else params.delete('tab')
-    const query = params.toString()
-    window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
+    syncPageParams(analysis, labels, screen, synced.current)
+    synced.current = true
+    shownUrl.current = window.location.search
   }, [analysis, labels, screen])
+
+  // Back and Forward show the page the address names, and the list where it was scrolled. With
+  // unsaved labels the paper stays: its entry goes back on the stack and the page says why.
+  useEffect(() => {
+    const onPop = () => {
+      const next = pageFromUrl()
+      if (unsaved && next.analysis !== analysis) {
+        window.history.pushState(null, '', shownUrl.current)
+        setBackBlockedOn(analysis)
+        return
+      }
+      const scroll = window.history.state?.labelerScroll
+      setAnalysis(next.analysis)
+      setLabels(next.labels)
+      setScreen(next.screen)
+      if (typeof scroll === 'number') requestAnimationFrame(() => window.scrollTo(0, scroll))
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [unsaved, analysis])
 
   return (
     <AppShell
@@ -107,15 +177,43 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
       // The workspace shows two PDFs and a label panel, so it takes the whole window.
       wide={analysis ? 'full' : true}
       foldable
-      breadcrumb={[TITLES[screen]]}
-      toolbarLead={ask.button}
-      panel={ask.panel}
+      breadcrumb={breadcrumb}
+      toolbarLead={
+        <>
+          {/* First in the top bar: Ask AI, the workspace's controls, the claim strip and both
+              papers all come before the decision in Tab order. */}
+          {analysis && (
+            <a
+              href="#claim-decision"
+              onClick={(event) => {
+                // Focus moves without the hash, so Back leaves the paper instead of only dropping "#claim-decision".
+                const decision = document.getElementById('claim-decision')
+                if (!decision) return
+                event.preventDefault()
+                decision.focus({ preventScroll: true })
+                revealInPanel(decision)
+              }}
+              className="sr-only rounded-lg bg-accent px-3 py-2 text-ui font-medium text-canvas focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+            >
+              Skip to the decision
+            </a>
+          )}
+          {!blind && ask.button}
+        </>
+      }
+      panel={blind ? undefined : ask.panel}
       notifications={<PaperBell onOpen={openPaper} />}
     >
+      {unsaved && backBlockedOn === analysis && (
+        <p role="alert" className="rounded-lg bg-accent-soft px-3 py-2 text-sm font-medium text-ink">
+          This paper has unsaved labels. Save them, or discard the change, before going back.
+        </p>
+      )}
       {analysis ? (
         <Workspace
           analysisId={analysis}
           onDirtyChange={setUnsaved}
+          onBlindChange={setBlind}
           askSlot={claimSlot}
           onOpenAsk={ask.showExtra}
           onBack={() => leave(() => setAnalysis(null))()}
@@ -124,9 +222,13 @@ export function LabelerApp({ onChangeRole, onSwitchRole }: { onChangeRole?: () =
       ) : labels ? (
         <Labels analysisId={labels} onBack={() => setLabels(null)} onLabel={() => openPaper(labels)} />
       ) : screen === 'blind' ? (
-        <BlindChecks onOpen={setAnalysis} />
+        <BlindChecks onOpen={(id) => fromList(() => setAnalysis(id))} />
       ) : (
-        <Queue onOpen={setAnalysis} onOpenLabels={setLabels} onShowBlind={() => setScreen('blind')} />
+        <Queue
+          onOpen={(id) => fromList(() => setAnalysis(id))}
+          onOpenLabels={(id) => fromList(() => setLabels(id))}
+          onShowBlind={() => fromList(() => setScreen('blind'))}
+        />
       )}
       {ask.viewer}
       <SettingsModal

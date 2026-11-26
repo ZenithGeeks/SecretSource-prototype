@@ -54,10 +54,10 @@ export function VerdictDispute({
           className="text-sm"
         />
         <div className="flex items-center gap-2">
-          <Button type="submit" disabled={send.isPending} className="px-3 py-1.5 text-[13px]">
+          <Button type="submit" disabled={send.isPending} className="px-3 py-1.5 text-ui">
             Send
           </Button>
-          <TextButton onClick={() => setWriting(false)} className="text-[13px]">
+          <TextButton onClick={() => setWriting(false)} className="text-ui">
             Cancel
           </TextButton>
           {send.isError && (

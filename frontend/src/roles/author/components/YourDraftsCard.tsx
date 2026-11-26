@@ -60,14 +60,14 @@ export function YourDraftsCard({
                 aria-current={draft.id === currentId ? 'true' : undefined}
                 data-ask-target={askTarget({ kind: 'draft', id: draft.id })}
                 className={cn(
-                  'flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-2 text-left hover:bg-accent-soft/40',
+                  'flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 py-2 text-left hover:bg-accent-soft/40',
                   FOCUS,
                   draft.id === currentId && 'bg-accent-soft/60',
                 )}
               >
                 <FileText className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate text-[13px] font-medium text-ink">{draft.title}</span>
+                  <span className="truncate text-ui font-medium text-ink">{draft.title}</span>
                   <span className="text-xs text-ink-muted">
                     v{draft.version} · {editedLabel(draft.edited ?? draft.updated)} · {draft.runningCheckId ? 'checking…' : checkedLabel(draft.lastCheckedAt)}
                   </span>
@@ -83,7 +83,7 @@ export function YourDraftsCard({
         <div className="flex flex-col gap-1 rounded-lg bg-canvas px-3 py-2.5">
           {delta ? (
             <>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Since the previous check</p>
+              <p className="text-caption font-medium uppercase tracking-wide text-ink-muted">Since the previous check</p>
               <p className="text-xs text-ink">
                 {delta.addedCitations >= 0 ? '+' : ''}
                 {delta.addedCitations} citation{Math.abs(delta.addedCitations) === 1 ? '' : 's'} · {delta.fixedIssues} issue

@@ -61,7 +61,7 @@ export function RecentProjects({
   return (
     <section aria-labelledby="author-recent-projects" className="mt-5">
       <div className="mb-1 flex items-center justify-between px-2.5">
-        <h2 id="author-recent-projects" className="text-[11px] font-semibold tracking-[0.1em] text-ink-muted uppercase">
+        <h2 id="author-recent-projects" className="text-caption font-semibold tracking-widest text-ink-muted uppercase">
           Recent projects
         </h2>
         <button
@@ -88,7 +88,7 @@ export function RecentProjects({
                   aria-current={active ? 'page' : undefined}
                   title={`${project.name} · ${status.label}`}
                   className={cn(
-                    'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-[13px] leading-[18px] lg:py-[7px]',
+                    'flex w-full items-center gap-2.5 rounded-lg p-2.5 text-left text-ui leading-4.5 lg:py-1.75',
                     FOCUS,
                     active ? 'bg-accent-soft font-medium text-accent' : 'text-ink hover:bg-accent-soft/60',
                   )}
@@ -107,7 +107,7 @@ export function RecentProjects({
           })}
         </ul>
       ) : (
-        <p className="px-2.5 text-[11px] text-ink-muted">
+        <p className="px-2.5 text-caption text-ink-muted">
           {library.isPending ? 'Loading projects…' : library.isError ? 'Your projects could not load' : 'No projects yet'}
         </p>
       )}

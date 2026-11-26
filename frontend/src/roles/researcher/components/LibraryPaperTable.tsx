@@ -37,7 +37,7 @@ function standingLabel(backed: number, contradicted: number, rest: number) {
 /** Contradicted / silent-or-unchecked / backed as one thin bar, worst first like every other tally. The words sit beside it, so
  * colour is never the only signal. */
 function StandingBar({ paper }: { paper: LibraryPaper }) {
-  if (paper.backed === null) return <span className="text-[13px] text-ink-muted">Not analyzed</span>
+  if (paper.backed === null) return <span className="text-ui text-ink-muted">Not analyzed</span>
   const backed = paper.backed
   const contradicted = paper.contradicted ?? 0
   const rest = Math.max(0, paper.claims - backed - contradicted)
@@ -88,7 +88,7 @@ export function LibraryPaperTable({
         aria-pressed={sortBy === key}
         onClick={() => setSortBy(sortBy === key ? null : key)}
         title={sortBy === key ? 'Back to the usual order' : SORT_HINTS[key]}
-        className="type-label rounded text-ink-muted hover:text-ink pointer-coarse:min-h-11"
+        className="type-label rounded-sm text-ink-muted hover:text-ink pointer-coarse:min-h-11"
       >
         {label}
         {sortBy === key && <span aria-hidden="true">{key === 'title' ? ' ↑' : ' ↓'}</span>}
@@ -113,7 +113,7 @@ export function LibraryPaperTable({
           className="flex w-full items-center gap-5 border-t border-border-subtle px-5 py-3 text-left hover:bg-accent-soft"
         >
           <div className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-medium text-ink">{paper.title}</span>
+            <span className="block truncate text-ui font-medium text-ink">{paper.title}</span>
             <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
               <span>{paper.cite}</span>
               {paper.indexed === 'no' && (
@@ -139,12 +139,12 @@ export function LibraryPaperTable({
               {paper.backed === null ? ' · Not analyzed' : ` · ${standingLabel(paper.backed, paper.contradicted ?? 0, Math.max(0, paper.claims - paper.backed - (paper.contradicted ?? 0)))}`}
             </span>
           </div>
-          <span className="hidden w-16 shrink-0 font-mono text-[13px] text-ink md:inline">{paper.claims}</span>
+          <span className="hidden w-16 shrink-0 font-mono text-ui text-ink md:inline">{paper.claims}</span>
           <span className="hidden w-56 shrink-0 md:inline">
             <StandingBar paper={paper} />
           </span>
           {hasClusters && (
-            <span className="hidden w-36 shrink-0 text-[13px] text-ink-muted md:inline">{paper.cluster}</span>
+            <span className="hidden w-36 shrink-0 text-ui text-ink-muted md:inline">{paper.cluster}</span>
           )}
           <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-ink-muted" />
         </button>
@@ -156,7 +156,7 @@ export function LibraryPaperTable({
         <button
           type="button"
           onClick={onExpand}
-          className="w-full border-t border-border-subtle px-5 py-3 text-left text-[13px] font-medium text-accent hover:bg-accent-soft"
+          className="w-full border-t border-border-subtle px-5 py-3 text-left text-ui font-medium text-accent hover:bg-accent-soft"
         >
           Show all {papers.length} papers
         </button>

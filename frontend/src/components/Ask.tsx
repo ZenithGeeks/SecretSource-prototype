@@ -9,7 +9,8 @@
 
 import { useCallback, useRef, useState, type ComponentProps } from 'react'
 
-import { api, paperName } from '../lib/api'
+import { paperName } from '../lib/api'
+import { findQuote } from '../lib/findQuote'
 import type { Role } from '../lib/roles'
 import type { AskContext } from '../lib/assistant'
 import { shortTitle, useAssistant } from '../lib/assistant'
@@ -120,17 +121,15 @@ export function useAsk({
 
   /** Opens a statement's page with its quote marked, when the quote can be found on it. */
   async function showSource(target: Target) {
-    const found = target.quote ? await findQuote(target.paper, target.quote, target.page) : null
-    setSource({ ...target, page: found?.page ?? target.page, source: found?.page ? (found as Target['source']) : null })
+    const found = target.quote ? await findPiece(target.paper, target.quote, target.page) : null
+    setSource({ ...target, page: found?.page ?? target.page, source: found })
   }
 
   /** Where the judge's quote sits. The judge joins pieces of passages with "…", which no page holds
-   * word for word, so the longest piece is looked for: on its page first, then in the whole paper. */
-  async function findQuote(paper: string, quote: string, page?: number) {
+   * word for word, so the longest piece is looked for. */
+  async function findPiece(paper: string, quote: string, page?: number) {
     const piece = quote.split('…').reduce((longest, part) => (part.trim().length > longest.length ? part.trim() : longest), '')
-    const onPage = await api.findInPaper(paper, piece, page).catch(() => null)
-    if (onPage?.page || !page) return onPage
-    return api.findInPaper(paper, piece).catch(() => null)
+    return findQuote(paper, piece, page)
   }
 
   const button = (

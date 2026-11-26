@@ -51,6 +51,8 @@ export type Source = {
   boxes: { x0: number; y0: number; x1: number; y1: number }[]
   page_width: number
   page_height: number
+  /** Share of the searched text's words the boxes cover, 0.8 to 1; only the find route sends it. */
+  coverage?: number
 }
 
 export type Claim = {
@@ -178,6 +180,10 @@ export type Analysis = {
   message?: string
   file?: string
   title?: string // the paper's own title, from GROBID; missing on older analyses
+  started?: string // ISO time the run was queued
+  completed?: string // ISO time the run ended; the list sends it, without the stages
+  authors?: string[] // from GROBID, with the title
+  year?: string
   claims: Claim[]
   figures?: PaperFigure[] // missing on analyses from before #85, and until the run has read them
   references?: Record<string, Citation> // the references the paper's markers point to (#47)
@@ -258,10 +264,6 @@ async function send(path: string, init?: RequestInit): Promise<Response> {
   return response
 }
 
-/** Where to PUT a PDF for a direct upload, from POST /uploads: an upload session URL, which
- * needs no credentials. `url` is null when the gateway has no papers bucket. */
-type UploadTicket = { url: null } | { url: string; object: string; headers: Record<string, string> }
-
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await send(path, init)).json()
 }
@@ -309,28 +311,11 @@ export const api = {
       body: JSON.stringify({ paper, verify }),
     }),
 
-  /** Upload a PDF and start its analysis. Where the gateway has a papers bucket, the PDF goes
-   * straight to Cloud Storage through an upload session the gateway starts: the web proxy
-   * refuses a body over 4.5 MB (#266). Elsewhere, local compose for example, it goes through
-   * the gateway as before. */
-  uploadAnalysis: async (file: File, verify: boolean) => {
-    const ticket = await request<UploadTicket>('/uploads', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: file.name, size: file.size }),
-    })
-    if (!ticket.url) {
-      const form = new FormData()
-      form.append('file', file)
-      return request<{ id: string }>(`/analyses/upload?verify=${verify}`, { method: 'POST', body: form })
-    }
-    const put = await fetch(ticket.url, { method: 'PUT', headers: ticket.headers, body: file })
-    if (!put.ok) throw new Error(`${put.status}: the upload to storage failed`)
-    return request<{ id: string }>('/analyses/from-upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ object_name: ticket.object, verify }),
-    })
+  /** Upload a PDF to the gateway and start its analysis. */
+  uploadAnalysis: (file: File, verify: boolean) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<{ id: string }>(`/analyses/upload?verify=${verify}`, { method: 'POST', body: form })
   },
 
   /** Where a piece of text sits in a paper. `page: null` means it could not be found. */

@@ -2,19 +2,30 @@
 
 import { ChevronDown, ChevronRight, FileText, Loader2, Sparkles, Upload } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useState } from 'react'
+import { createContext, useContext, useState } from 'react'
 
 import type { Citation, Claim, Dispute, PaperFigure, Stage, Unchecked, Verdict } from '../lib/api'
 import { api, figureImageUrl, reasonText } from '../lib/api'
+import { findQuote } from '../lib/findQuote'
+import { useOpenPart } from '../lib/openParts'
 import { citationLink, citationNumber, preprintNote, reference } from '../lib/citations'
-import { answersFor, citedAs, opensByDefault, STANDING_MEANINGS, unpaired } from '../lib/claims'
+import { answersFor, citedAs, opensByDefault, STANDING_MEANINGS, STANDINGS, unpaired, verdictCountLabel, verdictTally } from '../lib/claims'
 import type { Standing } from '../lib/claims'
 import { fromUploadedPdf, recheckFailure, recheckStage, sourceUploadMessage } from '../lib/sourceUpload'
 import { cn } from '../lib/utils'
 import { AuthorizedImage } from './AuthorizedImage'
 import type { Target } from './PageViewer'
+import { DISCLOSURE_SUMMARY, StandingCounts } from './StandingKey'
 import { StandingBadge, TextButton, VerdictBadge } from './ui'
 import { VerdictDispute } from './VerdictDispute'
+
+/** How a cited work is named in the page viewer and on its figures: its title where the claim's
+ * citation has one, else the file name it was read from. ClaimCard provides it per claim. */
+/* v8 ignore next -- every reader sits under ClaimCard's Provider; the default only satisfies the type */
+const SourceName = createContext<(verdict: Verdict) => string>((verdict) => verdict.source)
+
+/** The claim a card's parts are remembered under. ClaimCard provides it. */
+const CardKey = createContext('')
 
 /** The verdict colour, as the short rule before an evidence panel's label. */
 const VERDICT_BAR = {
@@ -30,6 +41,13 @@ const WHY_LABELS = {
   insufficient: 'Why it isn’t settled',
 } as const
 
+/** What the page viewer calls a quote from a cited work that did not decide the claim. */
+const QUOTE_LABELS = {
+  supports: 'Supporting quote',
+  refutes: 'Contradicting quote',
+  insufficient: 'Quote',
+} as const
+
 /** A small heading that says where the text under it comes from. */
 function Label({ children }: { children: React.ReactNode }) {
   return (
@@ -43,12 +61,6 @@ function quotePage(verdict: Verdict) {
   const start = flat(verdict.quote).slice(0, 80)
   if (!start) return undefined
   return verdict.evidence.find((passage) => flat(passage.text).includes(start))?.page
-}
-
-/** "vidore/colqwen2-v1.0" -> "ColQwen2 v1.0": the reader wants the model, not the repo path. */
-function modelName(checkpoint: string) {
-  const name = checkpoint.slice(checkpoint.lastIndexOf('/') + 1)
-  return name.replace(/^col(.)/i, (_, first: string) => `Col${first.toUpperCase()}`).replace(/-v/, ' v')
 }
 
 /** What to write under a crop: the caption when it already names the figure, the label
@@ -124,7 +136,7 @@ function withFigureLinks(
       <button
         key={mention.index}
         onClick={() => open(figure)}
-        className="rounded text-accent underline underline-offset-2 hover:no-underline focus-visible:outline-2 focus-visible:outline-accent"
+        className="rounded-sm text-accent underline underline-offset-2 hover:no-underline focus-visible:outline-2 focus-visible:outline-accent"
       >
         {mention[0]}
       </button>,
@@ -160,11 +172,13 @@ function Failure({ failure, action }: { failure: Unchecked; action?: ReactNode }
         <span className="font-medium">Not checked</span>
         <span className="text-ink-muted"> — {reasonText(failure.reason)}</span>
       </p>
-      {/* The specific message is what says the lookup was rate limited rather than empty. */}
+      {/* The lookup's own words say whether it was rate limited rather than empty, but they are
+          written for whoever debugs the lookup, so they wait behind a disclosure. */}
       {failure.message && (
-        <p className="mt-1 text-xs text-ink-muted/80" title={failure.message}>
-          {failure.message}
-        </p>
+        <details className="mt-1 text-xs text-ink-muted">
+          <summary className="cursor-pointer">Technical details</summary>
+          <p className="mt-1">{failure.message}</p>
+        </details>
       )}
       {action}
     </div>
@@ -267,7 +281,11 @@ function shortRef(citation: Citation) {
   return citation.year ? `${who} ${citation.year}` : who
 }
 
-/** Look the text up in the cited paper, then show it, located or not. */
+/** Counts "Show in cited paper" clicks, so a slow lookup cannot replace a newer click's page. */
+let showRequests = 0
+
+/** Show the cited paper at once, then the quote's place in it once the lookup finds it. The
+ * lookup can take seconds, and until then the viewer says it is looking. */
 async function showInCitedPaper(
   verdict: Verdict,
   onShow: (target: Target) => void,
@@ -275,19 +293,16 @@ async function showInCitedPaper(
   quote: string,
   page?: number,
 ) {
-  // The page comes from the retrieved passage, which can start on the page before the quote;
-  // when the quote is not on it, look through the whole paper.
-  let found = await api.findInPaper(verdict.source, quote, page).catch(() => null)
-  if (page && !found?.page) found = await api.findInPaper(verdict.source, quote).catch(() => null)
-  onShow({
-    paper: verdict.source,
-    label,
-    quote,
-    source: found && found.page ? (found as Target['source']) : null,
-    page: found?.page ?? page,
-    verdict: verdict.verdict,
-  })
+  const request = ++showRequests
+  const target: Target = { paper: verdict.source, label, quote, source: null, page, verdict: verdict.verdict, lookup: request }
+  onShow({ ...target, locating: true })
+  const found = await findQuote(verdict.source, quote, page)
+  if (request !== showRequests) return
+  onShow({ ...target, source: found, page: found?.page ?? page })
 }
+
+/** Past this many characters a quote is set upright: long italic text is slow to read. */
+const LONG_QUOTE = 200
 
 /** A quote and where it sits: the paper's own sentence, or what a cited work says (Figma "side-by-side"). */
 function EvidencePanel({
@@ -295,25 +310,36 @@ function EvidencePanel({
   label,
   action,
   onAction,
+  shortcut,
+  inPaper,
+  long = false,
   children,
 }: {
-  bar: string
+  /** The standing's colour, as a short rule before the label; none for the paper's own sentence. */
+  bar?: string
   label: string
   action?: string
   onAction?: () => void
+  /** The key that triggers the action from anywhere in the card (AnalysisView listens for it). */
+  shortcut?: string
+  /** The action shows the claim in the analysed paper: why there is no cited quote instead, which O reads out. */
+  inPaper?: string
+  long?: boolean
   children: ReactNode
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-2.5 rounded-xl bg-neutral-soft px-4 py-3.5">
       <div className="flex items-center gap-1.5">
-        <span aria-hidden="true" className={cn('h-3 w-[3px] shrink-0 rounded-sm', bar)} />
+        {bar && <span aria-hidden="true" className={cn('h-3 w-0.75 shrink-0 rounded-sm', bar)} />}
         <p className="type-label truncate text-ink-muted">{label}</p>
       </div>
-      <blockquote className="font-serif text-base leading-[26px] italic">{children}</blockquote>
+      <blockquote className={cn('font-serif text-base leading-6.5', !long && 'italic')}>{children}</blockquote>
       {action && onAction && (
         <TextButton
           onClick={onAction}
-          className="mt-auto inline-flex items-center gap-1 self-start text-[13px] leading-[18px]"
+          aria-keyshortcuts={shortcut}
+          data-in-paper={inPaper}
+          className="mt-auto inline-flex items-center gap-1 self-start text-ui leading-4.5"
         >
           {action}
           <ChevronRight className="size-4" aria-hidden="true" />
@@ -323,26 +349,66 @@ function EvidencePanel({
   )
 }
 
-/** The retrieved passages behind a verdict, each with the page it came from. */
-function Passages({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
+/** "Read the full reasoning" or "4 more passages": link colour and a chevron, as "Show in cited paper" has. */
+function MoreToggle({ open, onToggle, children }: { open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
-    <ul className="space-y-2 text-xs text-ink-muted">
+    <TextButton onClick={onToggle} aria-expanded={open} className="inline-flex items-center gap-1 self-start text-ui leading-4.5">
+      {children}
+      <ChevronDown className={cn('size-4', open && 'rotate-180')} aria-hidden="true" />
+    </TextButton>
+  )
+}
+
+/** A figure's caption, cut at three lines until the reader asks for all of it. */
+function Caption({ text }: { text: string }) {
+  const [full, setFull] = useState(false)
+  return (
+    <figcaption className="space-y-1 text-xs text-ink-muted">
+      <span className={cn('block', text.length > LONG_CAPTION && !full && 'line-clamp-3')}>{text}</span>
+      {text.length > LONG_CAPTION && (
+        <MoreToggle open={full} onToggle={() => setFull(!full)}>
+          {full ? 'Hide the full caption' : 'Read the full caption'}
+        </MoreToggle>
+      )}
+    </figcaption>
+  )
+}
+
+/** The retrieved passages behind a verdict, each a quote with the page it came from. The data
+ * does not mark which words matched, so nothing in them is emphasised. */
+function Passages({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
+  const name = useContext(SourceName)
+  return (
+    <ul className="space-y-3">
       {verdict.evidence.map((passage, j) => (
-        <li key={j} className="rounded-lg border border-border-subtle p-2">
-          <span className="mr-2 inline-block">
-            {onShow ? (
-              <PageLink
-                page={passage.page}
-                onClick={() => showInCitedPaper(verdict, onShow, `Passage in ${verdict.source}`, passage.text, passage.page)}
-              />
-            ) : (
-              <span className="rounded bg-neutral-soft px-1.5 py-0.5 font-medium tabular-nums">p. {passage.page}</span>
-            )}
-          </span>
-          {passage.text}
+        <li key={j} className="space-y-1">
+          {onShow ? (
+            <PageLink
+              page={passage.page}
+              onClick={() => showInCitedPaper(verdict, onShow, `Passage in ${name(verdict)}`, passage.text, passage.page)}
+            />
+          ) : (
+            <span className="rounded-sm bg-neutral-soft px-1.5 py-0.5 text-xs font-medium tabular-nums">p. {passage.page}</span>
+          )}
+          <Passage text={passage.text} />
         </li>
       ))}
     </ul>
+  )
+}
+
+/** One retrieved passage, cut at three lines until the reader asks for all of it. */
+function Passage({ text }: { text: string }) {
+  const [full, setFull] = useState(false)
+  return (
+    <>
+      <blockquote className={cn('max-w-prose font-serif text-reading leading-6 text-ink', text.length > LONG_REASON && !full && 'line-clamp-3')}>“{text}”</blockquote>
+      {text.length > LONG_REASON && (
+        <MoreToggle open={full} onToggle={() => setFull(!full)}>
+          {full ? 'Hide the full passage' : 'Read the full passage'}
+        </MoreToggle>
+      )}
+    </>
   )
 }
 
@@ -355,21 +421,25 @@ function isJudged(verdict: Verdict, hit: Hit) {
 }
 
 /** The page a hit was found on, with the crop's box outlined where we know it (#564). */
-function hitTarget(verdict: Verdict, hit: Hit): Target {
+function hitTarget(verdict: Verdict, hit: Hit, name: string): Target {
   return {
     paper: verdict.source,
-    label: `${hitName(hit)} of ${verdict.source}`,
+    label: `${hitName(hit)} of ${name}`,
     source: hit.region ?? null,
     page: hit.page,
     verdict: verdict.verdict,
   }
 }
 
+/** A figure or table match with a picture of it; a page match has none. */
+const hasCrop = (hit: Hit) => hit.kind !== 'page' && Boolean(hit.image)
+
 /** The figure and table crops the cited work was matched on: naming a figure and making the
  * reader open a page to see it is most of the work of looking it up. Pages have no crop. The
  * crop the verdict was read off comes first and says so; the others follow in match order. */
 function FigureCrops({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
-  const hits = (verdict.pages ?? []).filter((hit) => hit.kind !== 'page' && hit.image)
+  const name = useContext(SourceName)
+  const hits = (verdict.pages ?? []).filter(hasCrop)
   if (!hits.length) return null
   const ordered = [...hits.filter((hit) => isJudged(verdict, hit)), ...hits.filter((hit) => !isJudged(verdict, hit))]
   return (
@@ -379,7 +449,7 @@ function FigureCrops({ verdict, onShow }: { verdict: Verdict; onShow?: (target: 
         const image = (
           <AuthorizedImage
             src={figureImageUrl(verdict.source, hit.image as string)}
-            alt={hit.caption || `${hitName(hit)} of ${verdict.source}`}
+            alt={hit.caption || `${hitName(hit)} of ${name(verdict)}`}
             loading="lazy"
             className={cn(
               'max-h-40 rounded-lg border bg-surface object-contain',
@@ -393,8 +463,8 @@ function FigureCrops({ verdict, onShow }: { verdict: Verdict; onShow?: (target: 
             {onShow ? (
               <button
                 type="button"
-                onClick={() => onShow(hitTarget(verdict, hit))}
-                aria-label={`Show ${hitName(hit)} on its page in ${verdict.source}`}
+                onClick={() => onShow(hitTarget(verdict, hit, name(verdict)))}
+                aria-label={`Show ${hitName(hit)} on its page in ${name(verdict)}`}
                 className="block rounded-lg focus-visible:outline-2 focus-visible:outline-accent"
               >
                 {image}
@@ -402,11 +472,9 @@ function FigureCrops({ verdict, onShow }: { verdict: Verdict; onShow?: (target: 
             ) : (
               image
             )}
-            <figcaption className="text-xs text-ink-muted">
-              {/* Docling's caption usually already opens with "Figure 3:", so prefixing the
-                  label again reads as a stutter. */}
-              {captionOf(hit)}
-            </figcaption>
+            {/* Docling's caption usually already opens with "Figure 3:", so prefixing the label
+                again reads as a stutter. */}
+            <Caption text={captionOf(hit)} />
           </figure>
         )
       })}
@@ -415,19 +483,22 @@ function FigureCrops({ verdict, onShow }: { verdict: Verdict; onShow?: (target: 
 }
 
 /** The pages of the cited work the match was found on, as chips that open them. */
-function PageChips({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
-  const title = verdict.page_model ? `Found by searching page images with ${modelName(verdict.page_model)}` : undefined
+function PageChips({ verdict, pages, onShow }: { verdict: Verdict; pages: Hit[]; onShow?: (target: Target) => void }) {
+  const name = useContext(SourceName)
+  const title = verdict.page_model ? 'Found by searching the pages as images' : undefined
   return (
     <>
-      {(verdict.pages ?? []).map((hit, k) => {
+      {pages.map((hit, k) => {
         const text = `${hitName(hit).replace(/^./, (c) => c.toUpperCase())} in the cited paper`
-        const chip = 'inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-[5px] text-xs leading-4 font-medium text-accent'
+        const chip = 'inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1.25 text-xs leading-4 font-medium text-accent'
         return onShow ? (
           <button
             key={k}
             type="button"
+            // Named by its words; the search method is only the description, from the title.
+            aria-label={text}
             title={title}
-            onClick={() => onShow(hitTarget(verdict, hit))}
+            onClick={() => onShow(hitTarget(verdict, hit, name(verdict)))}
             className={cn(chip, 'hover:underline focus-visible:outline-2 focus-visible:outline-accent')}
           >
             <FileText className="size-4" aria-hidden="true" />
@@ -452,6 +523,61 @@ function PreprintNote({ verdict }: { verdict: Verdict }) {
   return <p className="text-xs text-ink-muted">{note}. Its wording or numbers can differ from the published paper.</p>
 }
 
+/** Everything behind a verdict past its quote and reasoning, folded into one disclosure so an
+ * open card stays short: the preprint note, the pages and figures it was matched on, and the
+ * retrieved passages. The count is the number of items inside. */
+function MoreEvidence({ verdict, onShow }: { verdict: Verdict; onShow?: (target: Target) => void }) {
+  const [open, setOpen] = useOpenPart(`${useContext(CardKey)} more ${verdict.source}`, false)
+  const pages = verdict.pages ?? []
+  // A match with a crop shows as its picture below, so it gets no chip as well.
+  const chips = pages.filter((hit) => !hasCrop(hit))
+  const count = (verdict.source_version === 'preprint' ? 1 : 0) + pages.length + verdict.evidence.length
+  if (!count) return null
+  return (
+    <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className={cn(DISCLOSURE_SUMMARY, 'text-ui')}>
+        {open ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronRight className="size-4" aria-hidden="true" />}
+        More evidence ({count})
+      </summary>
+      <div className="mt-2 flex flex-col gap-3">
+        <PreprintNote verdict={verdict} />
+        {chips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <PageChips verdict={verdict} pages={chips} onShow={onShow} />
+          </div>
+        )}
+        <FigureCrops verdict={verdict} onShow={onShow} />
+        {verdict.evidence.length > 0 && <Passages verdict={verdict} onShow={onShow} />}
+      </div>
+    </details>
+  )
+}
+
+function CitationReference({ citation }: { citation: Citation }) {
+  const link = citationLink(citation)
+  return (
+    <p className="text-sm text-ink-muted">
+      {link ? (
+        <a
+          href={link}
+          target="_blank"
+          rel="noreferrer"
+          // Underlined on hover only, so a linked reference looks like the unlinked ones beside it.
+          className="hover:text-accent hover:underline"
+        >
+          {reference(citation)}
+        </a>
+      ) : (
+        reference(citation)
+      )}
+      {/* The number the PDF prints for this work, to find it in the paper's reference list. */}
+      {citationNumber(citation) && (
+        <span className="ml-1 font-medium text-ink tabular-nums">[{citationNumber(citation)}]</span>
+      )}
+    </p>
+  )
+}
+
 /** What a source answered, for a cited work that is not the claim's main evidence: one line until
  * opened, then the deciding quote and the working behind it. */
 function Answer({
@@ -468,8 +594,8 @@ function Answer({
   fromUpload?: boolean
   ownsAnalysis?: boolean
 }) {
+  const name = useContext(SourceName)
   const [open, setOpen] = useState(false)
-  const [showEvidence, setShowEvidence] = useState(false)
   const page = verdict.quote ? quotePage(verdict) : undefined
 
   // The card already leads with the deciding source; the others stay one line each, so a claim
@@ -497,7 +623,7 @@ function Answer({
         type="button"
         onClick={() => setOpen(false)}
         aria-expanded
-        className="flex items-center gap-2.5 self-start rounded focus-visible:outline-2 focus-visible:outline-accent"
+        className="flex items-center gap-2.5 self-start rounded-sm focus-visible:outline-2 focus-visible:outline-accent"
       >
         <VerdictBadge verdict={verdict.verdict} />
         <ChevronDown className="size-4 text-ink-muted" aria-hidden="true" />
@@ -508,7 +634,7 @@ function Answer({
           bar={VERDICT_BAR[verdict.verdict]}
           label={`What the cited paper says${page ? ` · page ${page}` : ''}`}
           action={onShow ? 'Show in cited paper' : undefined}
-          onAction={onShow && (() => showInCitedPaper(verdict, onShow, `Deciding quote in ${verdict.source}`, verdict.quote, page))}
+          onAction={onShow && (() => showInCitedPaper(verdict, onShow, `${QUOTE_LABELS[verdict.verdict]} in ${name(verdict)}`, verdict.quote, page))}
         >
           “{verdict.quote}”
         </EvidencePanel>
@@ -517,36 +643,31 @@ function Answer({
       <div className="space-y-1.5">
         <Label>{WHY_LABELS[verdict.verdict]}</Label>
         <p className="max-w-prose text-sm text-ink-muted">{verdict.reasoning}</p>
-        <PreprintNote verdict={verdict} />
         {fromUpload && <UploadedNote owns={ownsAnalysis} />}
         {footer}
       </div>
-
-      <FigureCrops verdict={verdict} onShow={onShow} />
-      <div className="flex flex-wrap items-center gap-2">
-        <PageChips verdict={verdict} onShow={onShow} />
-        {verdict.evidence.length > 0 && (
-          <TextButton
-            onClick={() => setShowEvidence(!showEvidence)}
-            aria-expanded={showEvidence}
-            className="text-[13px]"
-          >
-            {showEvidence ? 'Hide passages' : `${verdict.evidence.length} more passages`}
-          </TextButton>
-        )}
-      </div>
-      {showEvidence && verdict.evidence.length > 0 && <Passages verdict={verdict} onShow={onShow} />}
+      <MoreEvidence verdict={verdict} onShow={onShow} />
     </div>
   )
 }
 
-/** About three lines of reasoning at the card's width; longer text folds behind "Read all". */
+/** About three lines of reasoning at the card's width; longer text folds behind "Read the full reasoning". */
 const LONG_REASON = 300
+/** About three lines of a caption at a figure's width. */
+const LONG_CAPTION = 120
 
 /** The claim is the paper's sentence word for word, apart from case, spacing and punctuation. */
 function sameWords(a: string, b?: string) {
   const words = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
   return !!b && words(a) === words(b)
+}
+
+/** How one cited work answered, as a standing: its verdict, else why it was not checked. */
+function citedStanding(claim: Claim, citation: Citation): Standing {
+  const { verdict, failure } = answersFor(claim, citation)
+  if (verdict) return verdict.verdict
+  if (failure) return 'unchecked'
+  return (claim.named ?? []).includes(citedAs(citation)) ? 'named' : 'unchecked'
 }
 
 /** One cited work and how it answered, never a bare bibliography line (#46). */
@@ -575,28 +696,9 @@ function CitedWork({
   ownsAnalysis?: boolean
   sourceUpload?: { analysisId: string; onUploaded: () => Promise<unknown> }
 }) {
-  const link = citationLink(citation)
   return (
     <li>
-      <Label>Cited work</Label>
-      <p className="text-sm text-ink-muted">
-        {link ? (
-          <a
-            href={link}
-            target="_blank"
-            rel="noreferrer"
-            className="underline decoration-border-subtle underline-offset-2 hover:text-accent"
-          >
-            {reference(citation)}
-          </a>
-        ) : (
-          reference(citation)
-        )}
-        {/* The number the PDF prints for this work, to find it in the paper's reference list. */}
-        {citationNumber(citation) && (
-          <span className="ml-1.5 font-medium text-ink tabular-nums">[{citationNumber(citation)}]</span>
-        )}
-      </p>
+      <CitationReference citation={citation} />
       {verdict && (
         <Answer
           verdict={verdict}
@@ -645,12 +747,15 @@ export function ClaimCard({
   onSelect,
   actions,
   startCollapsed = false,
+  defaultOpen = !startCollapsed && opensByDefault(standing),
   analysisId,
   disputes = [],
   sourceUpload,
   stages = [],
   pdfs,
   ownsAnalysis = false,
+  stacked = false,
+  notice,
 }: {
   claim: Claim
   index: number
@@ -669,6 +774,8 @@ export function ClaimCard({
   actions?: ReactNode
   /** Stay a one-line row until opened, whatever the verdict (the list shown while a run is going). */
   startCollapsed?: boolean
+  /** Override the initial expansion for a finished result list. */
+  defaultOpen?: boolean
   /** With it, the owner can dispute a verdict; left out where nobody may (shared or teacher views). */
   analysisId?: string
   /** The owner's disputes in this analysis. */
@@ -681,10 +788,14 @@ export function ClaimCard({
   pdfs?: Record<string, string>
   /** The viewer owns the analysis, so the upload note says "you". */
   ownsAnalysis?: boolean
+  /** The page viewer takes most of the width: the two quotes go one above the other. */
+  stacked?: boolean
+  /** What a shortcut did on this card, shown in its header line (AnalysisView reads it out). */
+  notice?: string
 }) {
-  const [open, setOpen] = useState(!startCollapsed && opensByDefault(standing))
-  const [showEvidence, setShowEvidence] = useState(false)
-  const [fullReason, setFullReason] = useState(false)
+  const [open, setOpen] = useOpenPart(`claim ${index}`, defaultOpen)
+  const [fullReason, setFullReason] = useOpenPart(`claim ${index} reason`, false)
+  const [othersOpen, setOthersOpen] = useOpenPart(`claim ${index} others`, false)
   const loose = unpaired(claim)
   // The analysis-wide references too: a sentence can carry a marker its claim did not keep.
   const sentence = claim.sentence
@@ -702,11 +813,23 @@ export function ClaimCard({
   const primary = verdicts.find((v) => v.verdict === standing) ?? verdicts[0]
   const primaryCitation = primary ? claim.citations.find((c) => answersFor(claim, c).verdict === primary) : undefined
   const primaryPage = primary?.quote ? quotePage(primary) : undefined
-  const primaryName = primaryCitation ? shortRef(primaryCitation) : (primary?.source ?? '')
+  // Both quotes set one way: italic or upright by each one's length made a card of two styles.
+  const longQuotes = sentence.length > LONG_QUOTE || (primary?.quote.length ?? 0) > LONG_QUOTE
+  // The chip shows the worst answer only; what the other cited works said goes beside it.
+  const notChecked = primary ? claim.citations.filter((citation) => !answersFor(claim, citation).verdict).length + loose.failures.length : 0
+  const also = [
+    verdictTally(verdicts.filter((verdict) => verdict !== primary).map((verdict) => verdict.verdict)),
+    notChecked ? verdictCountLabel('unchecked', notChecked) : '',
+  ].filter(Boolean).join(', ')
+  const alsoText = also && <span className="shrink-0 text-xs text-ink-muted">also {also}</span>
+  // Never the stored file name ("10.18653-v1-2023.acl-long.153.pdf"): it means nothing to a reader.
+  const primaryName = primaryCitation ? shortRef(primaryCitation) : 'Cited paper'
+  // The viewer stays open while the reader expands other claims, so it says whose quote it shows.
+  const showCited = onShow && ((target: Target) => onShow({ ...target, label: `Claim ${index + 1} · ${target.label}`, claim: index }))
   const place = claim.source
   const showInPaper =
     paper && onShow && place
-      ? () => onShow({ paper, label: `Claim ${index + 1} in this paper`, quote: sentence, source: place })
+      ? () => onShow({ paper, label: `Claim ${index + 1} in this paper`, quote: sentence, source: place, claim: index })
       : undefined
 
   const toggle = () => {
@@ -722,10 +845,18 @@ export function ClaimCard({
         dispute={disputes.find((d) => d.claim === index && d.source === verdict.source)}
       />
     ) : null
+  const sourceName = (verdict: Verdict) =>
+    claim.citations.find((citation) => verdict.cited && citedAs(citation) === verdict.cited)?.title || 'the cited paper'
   const surface =
-    'rounded-2xl border border-border-subtle bg-surface shadow-card'
+    // The margin keeps a card scrolled to from the viewer's label clear of the sticky toolbar.
+    'scroll-mt-16 rounded-2xl border border-border-subtle bg-surface shadow-card'
+  // "#17", with a fixed width: the list is sorted by verdict, so a bare number read as an order
+  // with claims missing, and one- and two-digit numbers shifted the claim text.
   const number = (
-    <span className="shrink-0 font-mono text-[13px] leading-[18px] text-ink-muted tabular-nums">{index + 1}</span>
+    <span title={`Claim ${index + 1} in the paper's order`} className="w-8 shrink-0 font-mono text-ui leading-4.5 text-ink-muted tabular-nums">
+      <span aria-hidden="true">#</span>
+      {index + 1}
+    </span>
   )
 
   // The whole row is the control: a claim whose sources backed it stays one line until a
@@ -733,24 +864,77 @@ export function ClaimCard({
   if (!open) {
     const cited = claim.citations.map(shortRef).join(' · ')
     return (
-      <div className={surface}>
+      <div data-claim-card data-claim={index} className={surface}>
         <button
           type="button"
           onClick={toggle}
           aria-expanded={false}
-          className="flex w-full items-center gap-3.5 rounded-2xl px-5 py-3.5 text-left hover:bg-accent-soft/40 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
+          data-claim-toggle
+          className="flex w-full items-center gap-3.5 rounded-2xl px-5 py-3.5 text-left hover:bg-accent-soft/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
         >
           {number}
-          <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
-            <span className="line-clamp-2 text-[15px] leading-6">{claim.claim}</span>
-            <span className="truncate text-xs leading-4 text-ink-muted">{cited || 'Nothing cited for this claim'}</span>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.75">
+            <span className="line-clamp-2 text-reading leading-6">{claim.claim}</span>
+            <span className="truncate text-xs leading-4 text-ink-muted">{notice || cited || 'Nothing cited for this claim'}</span>
           </span>
           <StandingBadge standing={standing} title={STANDING_MEANINGS[standing]} />
+          {alsoText}
           <ChevronRight className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
         </button>
       </div>
     )
   }
+
+  // Every cited work but the one the card leads with, and how each answered.
+  const others = claim.citations.filter((citation) => {
+    const { verdict } = answersFor(claim, citation)
+    return !verdict || verdict !== primary
+  })
+  const looseVerdicts = loose.verdicts.filter((verdict) => verdict !== primary)
+  const otherCount = others.length + looseVerdicts.length + loose.failures.length
+  const otherCounts = Object.fromEntries(STANDINGS.map((kind) => [kind, 0])) as Record<Standing, number>
+  for (const citation of others) otherCounts[citedStanding(claim, citation)] += 1
+  for (const verdict of looseVerdicts) otherCounts[verdict.verdict] += 1
+  otherCounts.unchecked += loose.failures.length
+  const otherWorks = (
+    <>
+      <ul className="space-y-4">
+        {others.map((citation, i) => (
+          <CitedWork
+            key={i}
+            citation={citation}
+            // claim.named holds lookup keys; citedAs builds the same key in the same order.
+            onlyNamed={(claim.named ?? []).includes(citedAs(citation))}
+            onShow={showCited}
+            footer={disputeOf}
+            stages={stages}
+            pdfs={pdfs}
+            ownsAnalysis={ownsAnalysis}
+            sourceUpload={sourceUpload}
+            {...answersFor(claim, citation)}
+          />
+        ))}
+      </ul>
+      {/* Anything naming no citation we hold still has to appear somewhere. Named by what it
+          was looked up by, the file name as a last resort. */}
+      {looseVerdicts.map((verdict, i) => (
+        <div key={`loose-verdict-${i}`}>
+          <p className="truncate text-sm text-ink-muted" title={verdict.cited || verdict.source}>
+            {verdict.cited || verdict.source}
+          </p>
+          <Answer verdict={verdict} onShow={showCited} footer={disputeOf(verdict)} />
+        </div>
+      ))}
+      {loose.failures.map((failure, i) => (
+        <div key={`loose-failure-${i}`}>
+          <p className="truncate text-sm text-ink-muted" title={failure.source}>
+            {failure.source}
+          </p>
+          <Failure failure={failure} />
+        </div>
+      ))}
+    </>
+  )
 
   const meta = [
     section ? section.replace(/^Section\s+/, '§').replace(' · ', ' ') : '',
@@ -758,16 +942,22 @@ export function ClaimCard({
   ].filter(Boolean).join(' · ')
 
   return (
-    <div className={cn(surface, 'flex flex-col gap-[18px] p-5')}>
+    <SourceName.Provider value={sourceName}>
+    <CardKey.Provider value={`claim ${index}`}>
+    <div data-claim-card data-claim={index} className={cn(surface, 'flex flex-col gap-4.5 p-5')}>
       <button
         type="button"
         onClick={toggle}
         aria-expanded
-        className="flex w-full items-center gap-2.5 rounded text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+        data-claim-toggle
+        className="flex w-full items-center gap-2.5 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         {number}
+        {/* The badge sits before the chevron, where the folded row has it. */}
+        {/* Every open card has this line; a claim whose sentence was not found in the PDF has no section or page. */}
+        <span title={notice} className="min-w-0 flex-1 truncate text-xs leading-4 text-ink-muted">{notice || meta || 'Not found in the paper’s pages'}</span>
         <StandingBadge standing={standing} title={STANDING_MEANINGS[standing]} />
-        <span className="min-w-0 flex-1 truncate text-xs leading-4 text-ink-muted">{meta}</span>
+        {alsoText}
         <ChevronDown className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
       </button>
 
@@ -776,14 +966,18 @@ export function ClaimCard({
       )}
 
       {(claim.sentence || primary) && (
-        <div className={cn('grid gap-3', claim.sentence && primary?.quote ? 'md:grid-cols-2' : 'md:grid-cols-1')}>
+        // Beside the page viewer, side by side would wrap each quote into a narrow column.
+        <div className={cn('grid gap-3', claim.sentence && primary?.quote && !stacked && 'md:grid-cols-2')}>
           {/* The paper's own words are evidence; the paraphrase above them is not (#46). */}
           {claim.sentence && (
             <EvidencePanel
-              bar="bg-accent"
               label={`This paper${claim.source ? ` · page ${claim.source.page}` : ''}`}
               action={showInPaper ? 'Show in paper' : undefined}
               onAction={showInPaper}
+              // With no cited quote to show, O shows the claim's own place in the paper.
+              shortcut={primary?.quote ? undefined : 'O'}
+              inPaper={primary ? `The deciding work (${primaryName}) has no matched passage` : 'No cited work quotes this claim'}
+              long={longQuotes}
             >
               “{withFigureLinks(sentence, ownFigures, openFigure)}”
             </EvidencePanel>
@@ -792,9 +986,11 @@ export function ClaimCard({
             <EvidencePanel
               bar={VERDICT_BAR[primary.verdict]}
               label={`${primaryName}${primaryPage ? ` · page ${primaryPage}` : ''}`}
-              action={onShow ? 'Show in cited paper' : undefined}
-              onAction={onShow && (() =>
-                showInCitedPaper(primary, onShow, `Deciding quote in ${primary.source}`, primary.quote, primaryPage)
+              action={showCited ? 'Show in cited paper' : undefined}
+              shortcut="O"
+              long={longQuotes}
+              onAction={showCited && (() =>
+                showInCitedPaper(primary, showCited, `Deciding quote in ${primaryName}`, primary.quote, primaryPage)
               )}
             >
               “{primary.quote}”
@@ -803,7 +999,7 @@ export function ClaimCard({
           {primary && !primary.quote && (
             <EvidencePanel bar={VERDICT_BAR[primary.verdict]} label={primaryName}>
               <span className="not-italic text-ink-muted">
-                No passage in the cited paper matched this claim.
+                No exact passage matched. The judge's reading of the paper is below.
               </span>
             </EvidencePanel>
           )}
@@ -818,7 +1014,7 @@ export function ClaimCard({
                 type="button"
                 onClick={() => openFigure?.(figure)}
                 disabled={!openFigure}
-                className="block rounded focus-visible:outline-2 focus-visible:outline-accent"
+                className="block rounded-sm focus-visible:outline-2 focus-visible:outline-accent"
               >
                 <AuthorizedImage
                   src={figureImageUrl(paper, figure.image)}
@@ -827,9 +1023,7 @@ export function ClaimCard({
                   className="max-h-40 rounded-lg border border-border-subtle bg-surface object-contain"
                 />
               </button>
-              <figcaption className="line-clamp-3 text-xs text-ink-muted" title={figure.caption}>
-                {figure.caption}
-              </figcaption>
+              <Caption text={figure.caption} />
             </figure>
           ))}
         </div>
@@ -844,87 +1038,39 @@ export function ClaimCard({
               {primaryName && <span className="text-ink-muted"> · {primaryName}</span>}
             </p>
           </div>
-          <p className={cn('max-w-prose text-[15px] leading-6 text-ink-muted', !fullReason && 'line-clamp-3')}>
+          {primaryCitation && <CitationReference citation={primaryCitation} />}
+          <p className={cn('max-w-prose text-reading leading-6 text-ink-muted', primary.reasoning.length > LONG_REASON && !fullReason && 'line-clamp-3')}>
             {primary.reasoning}
           </p>
           {primary.reasoning.length > LONG_REASON && (
-            <TextButton
-              onClick={() => setFullReason(!fullReason)}
-              aria-expanded={fullReason}
-              className="self-start text-[13px]"
-            >
-              {fullReason ? 'Show less' : 'Read all'}
-            </TextButton>
+            <MoreToggle open={fullReason} onToggle={() => setFullReason(!fullReason)}>
+              {fullReason ? 'Hide the full reasoning' : 'Read the full reasoning'}
+            </MoreToggle>
           )}
-          <PreprintNote verdict={primary} />
           {fromUploadedPdf(pdfs, primaryCitation) && <UploadedNote owns={ownsAnalysis} />}
           {disputeOf(primary)}
         </div>
       )}
 
-      {primary && (primary.pages?.length || primary.evidence.length > 0) ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <PageChips verdict={primary} onShow={onShow} />
-          {primary.evidence.length > 0 && (
-            <TextButton
-              onClick={() => setShowEvidence(!showEvidence)}
-              aria-expanded={showEvidence}
-              className="text-[13px] leading-[18px]"
-            >
-              {showEvidence ? 'Hide passages' : `${primary.evidence.length} more passages`}
-            </TextButton>
-          )}
-        </div>
-      ) : null}
-      {primary && <FigureCrops verdict={primary} onShow={onShow} />}
-      {primary && showEvidence && primary.evidence.length > 0 && <Passages verdict={primary} onShow={onShow} />}
+      {primary && <MoreEvidence verdict={primary} onShow={showCited} />}
 
-      {claim.citations.length > 0 && (
-        <ul className="space-y-4">
-          {claim.citations.map((citation, i) => {
-            const answers = answersFor(claim, citation)
-            // The card already leads with this one's quote, explanation and pages.
-            if (answers.verdict && answers.verdict === primary) return null
-            // claim.named holds lookup keys; citedAs builds the same key in the same order.
-            const onlyNamed = (claim.named ?? []).includes(citedAs(citation))
-            return (
-              <CitedWork
-                key={i}
-                citation={citation}
-                onlyNamed={onlyNamed}
-                onShow={onShow}
-                footer={disputeOf}
-                stages={stages}
-                pdfs={pdfs}
-                ownsAnalysis={ownsAnalysis}
-                sourceUpload={sourceUpload}
-                {...answers}
-              />
-            )
-          })}
-        </ul>
+      {otherCount > 0 && primary && (
+        // Folded to one line of counts: a claim citing six works ran three screens long.
+        <details open={othersOpen} onToggle={(event) => setOthersOpen(event.currentTarget.open)}>
+          <summary className={cn(DISCLOSURE_SUMMARY, 'flex-wrap text-ui')}>
+            {othersOpen ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronRight className="size-4" aria-hidden="true" />}
+            {otherCount} other cited {otherCount === 1 ? 'work' : 'works'}
+            <StandingCounts counts={otherCounts} />
+          </summary>
+          <div className="mt-2 space-y-4">{otherWorks}</div>
+        </details>
       )}
-
-      {/* Anything naming no citation we hold still has to appear somewhere. */}
-      {/* No reference line here, so the file name is the only way to name the source. */}
-      {loose.verdicts.filter((verdict) => verdict !== primary).map((verdict, i) => (
-        <div key={`loose-verdict-${i}`}>
-          <Label>Cited work</Label>
-          <p className="truncate text-sm text-ink-muted" title={verdict.source}>
-            {verdict.source}
-          </p>
-          <Answer verdict={verdict} onShow={onShow} footer={disputeOf(verdict)} />
+      {otherCount > 0 && !primary && (
+        <div className="space-y-4">
+          <h3 className="type-label text-ink-muted">Cited works</h3>
+          {otherWorks}
         </div>
-      ))}
-      {loose.failures.map((failure, i) => (
-        <div key={`loose-failure-${i}`}>
-          <Label>Cited work</Label>
-          <p className="truncate text-sm text-ink-muted" title={failure.source}>
-            {failure.source}
-          </p>
-          <Failure failure={failure} />
-        </div>
-      ))}
+      )}
 
       {claim.citations.length === 0 && (
         <p className="text-sm text-ink-muted">
@@ -934,5 +1080,7 @@ export function ClaimCard({
       )}
       {actions}
     </div>
+    </CardKey.Provider>
+    </SourceName.Provider>
   )
 }

@@ -49,7 +49,7 @@ const LIBRARY = {
 }
 
 const ANALYSES = [
-  { id: 'a1', paper: 'colbert.pdf', file: 'colbert.pdf', title: 'ColBERTv2', status: 'done', claims: [], stages: [] },
+  { id: 'a1', paper: 'colbert.pdf', file: 'colbert.pdf', title: 'ColBERTv2 analysis', status: 'done', claims: [], stages: [] },
   { id: 'a5', paper: 'plaid.pdf', file: 'plaid.pdf', title: 'PLAID', status: 'done', claims: [], stages: [] },
   { id: 'a6', paper: 'raw/new.pdf', file: 'raw/new.pdf', status: 'done', claims: [], stages: [] },
   { id: 'a7', paper: 'p.pdf', status: 'done', claims: [], stages: [] },

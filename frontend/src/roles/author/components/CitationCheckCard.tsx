@@ -102,7 +102,7 @@ function CitationRow({ citation, selected, onSelect }: { citation: Citation; sel
           <CitationBadge verdict={citation.verdict} notFound={isNotFound(citation)} />
           <span className={cn('min-w-0 truncate font-mono text-xs', VERDICTS[citation.verdict].text)}>{`\\cite{${citation.key}}`}</span>
         </span>
-        <span className="max-w-full text-[15px] leading-6 break-words text-ink">{citation.claim}</span>
+        <span className="max-w-full text-reading leading-6 wrap-break-word text-ink">{citation.claim}</span>
         <span title={note} className="max-w-full truncate font-mono text-xs text-ink-muted">
           {note}
         </span>
@@ -192,7 +192,7 @@ export function CitationCheckCard({
         <ul aria-label="Citations by section" className="pb-1.5">
           {sections.map((section) => (
             <Fragment key={section}>
-              <li className="px-5 pt-2 pb-1 text-[11px] font-medium tracking-wide break-words text-ink-muted uppercase">{section}</li>
+              <li className="px-5 pt-2 pb-1 text-caption font-medium tracking-wide wrap-break-word text-ink-muted uppercase">{section}</li>
               {rows
                 .filter((c) => (c.section || c.file) === section)
                 .map((c) => (

@@ -112,8 +112,8 @@ export function DoIt({
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
         {agent.lines.length === 0 && (
           <div className="flex flex-col gap-3">
-            <p className="text-[15px] font-medium text-ink">Tell the AI what to do, and watch it work.</p>
-            <ul className="flex list-disc flex-col gap-1 pl-4 text-[13px] leading-5 text-ink">
+            <p className="text-reading font-medium text-ink">Tell the AI what to do, and watch it work.</p>
+            <ul className="flex list-disc flex-col gap-1 pl-4 text-ui leading-5 text-ink">
               <li>It opens screens and papers, and points at things with its own cursor.</li>
               <li>It fills in a field only after you press Apply, and changes role only after you press Switch.</li>
               <li>It never saves labels, deletes or uploads anything.</li>
@@ -145,12 +145,12 @@ export function DoIt({
             {elapsed >= SLOW_SECONDS && <span>· still going. Stop ends it and changes nothing.</span>}
           </p>
         )}
-        {stopped && !agent.running && <p className="text-[13px] leading-5 text-ink">Stopped. Nothing was changed.</p>}
+        {stopped && !agent.running && <p className="text-ui leading-5 text-ink">Stopped. Nothing was changed.</p>}
         {wayBack && (
           <button
             type="button"
             onClick={() => goBack(wayBack)}
-            className="flex min-h-9 items-center gap-1.5 self-start rounded-lg px-2 text-[13px] font-medium text-accent hover:bg-accent-soft"
+            className="flex min-h-9 items-center gap-1.5 self-start rounded-lg px-2 text-ui font-medium text-accent hover:bg-accent-soft"
           >
             <ChevronLeft className="size-4" aria-hidden="true" />
             Back to where you were
@@ -174,7 +174,7 @@ export function DoIt({
             aria-label="What should the AI do?"
             placeholder={agent.running ? 'Working… Stop ends it' : 'e.g. Open my most recent paper'}
             maxLength={2000}
-            className="min-h-9 min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
+            className="min-h-9 min-w-0 flex-1 bg-transparent text-ui text-ink outline-none placeholder:text-ink-muted"
           />
           {agent.running ? (
             <button
@@ -217,7 +217,7 @@ export function DoIt({
 
 function Line({ line }: { line: AgentLine }) {
   if (line.kind === 'person') {
-    return <p className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-[13px] leading-5 text-ink">{line.text}</p>
+    return <p className="ml-8 self-end rounded-xl bg-neutral-soft px-3 py-2 text-ui leading-5 text-ink">{line.text}</p>
   }
   if (line.kind === 'step' || line.kind === 'progress') {
     return (
@@ -228,7 +228,7 @@ function Line({ line }: { line: AgentLine }) {
     )
   }
   if (line.kind === 'delegation') return <Delegation line={line} />
-  return <p className={cn('text-[13px] leading-5', line.kind === 'error' ? 'text-refutes' : 'text-ink')}>{line.text}</p>
+  return <p className={cn('text-ui leading-5', line.kind === 'error' ? 'text-refutes' : 'text-ink')}>{line.text}</p>
 }
 
 /** The specialists the agent hands work to, by the name the stream gives. */
@@ -274,7 +274,7 @@ function Delegation({ line }: { line: Extract<AgentLine, { kind: 'delegation' }>
           </m.span>
         </AnimatePresence>
       </div>
-      {line.task && <p className="text-[13px] leading-5 text-ink-muted [overflow-wrap:anywhere]">{line.task}</p>}
+      {line.task && <p className="text-ui leading-5 text-ink-muted wrap-anywhere">{line.task}</p>}
     </m.div>
   )
 }
@@ -283,7 +283,7 @@ function Delegation({ line }: { line: Extract<AgentLine, { kind: 'delegation' }>
 export function ApproveChange({ change }: { change: PendingChange }) {
   return (
     <div role="group" aria-label="Approve this change" className="flex flex-col gap-2 rounded-xl border border-insufficient bg-insufficient-soft p-3">
-      <p className="text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">{change.summary}</p>
+      <p className="text-ui leading-5 text-ink wrap-anywhere">{change.summary}</p>
       <div className="flex justify-end gap-2">
         <button
           type="button"

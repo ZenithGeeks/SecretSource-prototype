@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the RQ worker on ss-core from a commit on main (#412), and the Discord status bot
-# when its code changed.
+# Deploy the RQ worker on ss-core from a commit on main (#412).
 #
 #   sudo /usr/local/bin/deploy-worker <commit-sha>
 #
@@ -18,7 +17,6 @@ REPO="git@github.com:ZenithGeeks/SecretSource-prototype.git"
 MIRROR=/var/lib/secretsource-deploy/repo.git
 WORKER_DIR=/var/lib/docker/secretsource-worker
 CONTAINER=secretsource-worker-worker-1
-BOT_DIR=services/status-bot
 IMAGE=secretsource-worker-worker
 KEY=/root/.ssh/secretsource_deploy
 WAIT_MINUTES=45 # an analysis takes ~25 min on ss-core's CPU
@@ -42,8 +40,26 @@ sha=$(git -C "$MIRROR" rev-parse --verify --quiet "${SHA_ARG}^{commit}") || fail
 git -C "$MIRROR" merge-base --is-ancestor "$sha" main || fail "${sha:0:7} is not on main"
 short=${sha:0:7}
 
+cleanup_retired_grafana() {
+  local removed=0
+  local rel
+  for rel in \
+    "deploy/monitoring/grafana/provisioning/datasources/google-cloud-monitoring.yml" \
+    "deploy/monitoring/grafana/dashboards/cloud-run.json"; do
+    if [[ -e "$WORKER_DIR/$rel" ]] && ! git -C "$MIRROR" cat-file -e "$sha:$rel" 2>/dev/null; then
+      rm -f "$WORKER_DIR/$rel"
+      removed=1
+    fi
+  done
+  if [[ $removed -eq 1 ]] && (cd "$WORKER_DIR" && [[ -n $(docker compose ps -q grafana 2>/dev/null) ]]); then
+    (cd "$WORKER_DIR" && docker compose up -d --no-deps --force-recreate grafana) \
+      || say "grafana recreate failed; continuing with the worker deploy" >&2
+  fi
+}
+
 deployed=$(awk '{print $1; exit}' "$WORKER_DIR/REVISION" 2>/dev/null || true)
 if [[ $deployed == "$short" ]]; then
+  cleanup_retired_grafana
   say "$short is already deployed"
   exit 0
 fi
@@ -51,23 +67,7 @@ fi
 # The code is copied into the image at build time, so replacing the files and building do not
 # touch the running worker. Only the restart has to wait for it to be idle.
 git -C "$MIRROR" archive "$sha" | tar -x -C "$WORKER_DIR"
-
-# The bot runs no analyses, so it does not wait for the worker to be idle. A failed bot deploy is
-# reported and the worker deploy goes on: the worker matters more.
-bot_changed() {
-  [[ -n $deployed ]] || return 0
-  git -C "$MIRROR" cat-file -e "${deployed}^{commit}" 2>/dev/null || return 0
-  ! git -C "$MIRROR" diff --quiet "$deployed" "$sha" -- "$BOT_DIR"
-}
-deploy_status_bot() {
-  (cd "$WORKER_DIR" &&
-    docker compose --profile status-bot build --quiet status-bot &&
-    docker compose --profile status-bot up -d --no-deps --no-build --force-recreate status-bot)
-}
-if bot_changed; then
-  say "deploying the status bot at $short"
-  deploy_status_bot || say "the status bot did not deploy; see the output above" >&2
-fi
+cleanup_retired_grafana
 
 say "building $short"
 (cd "$WORKER_DIR" && docker compose build --quiet worker)

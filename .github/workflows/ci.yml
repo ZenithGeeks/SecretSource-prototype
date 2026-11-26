@@ -25,7 +25,6 @@ jobs:
     outputs:
       python: ${{ steps.paths.outputs.python }}
       backend: ${{ steps.paths.outputs.backend }}
-      status_bot: ${{ steps.paths.outputs.status_bot }}
       frontend: ${{ steps.paths.outputs.frontend }}
     steps:
       # A PR checks out its merge commit; its first parent is the base branch, so two commits
@@ -38,18 +37,17 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           if [ "$EVENT" != pull_request ]; then
-            for job in python backend status_bot frontend; do echo "$job=true" >> "$GITHUB_OUTPUT"; done
+            for job in python backend frontend; do echo "$job=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
           changed=$(git diff --name-only HEAD^1 HEAD)
           echo "$changed"
           # Each job's own files, plus this workflow. The backend tests also read
-          # supabase/migrations and .env.cloud; ruff reads pyproject.toml.
+          # supabase/migrations; ruff reads pyproject.toml.
           match() { echo "$changed" | grep -qE "$1" && echo true || echo false; }
           workflow='^\.github/workflows/ci\.yml$'
           echo "python=$(match "^(backend|services)/|^pyproject\.toml$|$workflow")" >> "$GITHUB_OUTPUT"
-          echo "backend=$(match "^(backend|services/colbert|services/colpali|supabase)/|^(\.env\.cloud|pyproject\.toml)$|$workflow")" >> "$GITHUB_OUTPUT"
-          echo "status_bot=$(match "^services/status-bot/|$workflow")" >> "$GITHUB_OUTPUT"
+          echo "backend=$(match "^(backend|services/colbert|services/colpali|supabase)/|^pyproject\.toml$|$workflow")" >> "$GITHUB_OUTPUT"
           echo "frontend=$(match "^frontend/|$workflow")" >> "$GITHUB_OUTPUT"
 
   python:
@@ -140,36 +138,6 @@ jobs:
             --cov=app.main --cov-branch --cov-report=term-missing:skip-covered --cov-fail-under=100
           (cd ../services/colbert && "$VENV/bin/python" -m pytest -q test_server*.py test_store.py)
           (cd ../services/colpali && "$VENV/bin/python" -m pytest -q test_server*.py test_store.py)
-
-  status-bot-tests:
-    needs: changes
-    if: needs.changes.outputs.status_bot == 'true'
-    runs-on: [self-hosted, ci]
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: services/status-bot
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      # No network in the tests: Grafana's answers are recorded fixtures, and Discord is faked.
-      # The venv is reused the same way as backend-tests'.
-      - name: Test
-        env:
-          RECIPE: status-bot-1
-        run: |
-          key=$({ cat requirements.txt requirements-dev.txt; python -VV; echo "$RECIPE"; date +%G-%V; } | sha256sum | cut -c1-16)
-          venv="$HOME/ci-venvs/status-bot-$key"
-          if [ ! -f "$venv/.complete" ]; then
-            rm -rf "$venv"
-            python -m venv "$venv"
-            "$venv/bin/pip" install -r requirements-dev.txt
-            touch "$venv/.complete"
-          fi
-          ls -dt "$HOME"/ci-venvs/status-bot-* | tail -n +3 | xargs -r rm -rf
-          "$venv/bin/python" -m pytest -q
 
   frontend:
     needs: changes

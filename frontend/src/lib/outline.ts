@@ -6,23 +6,24 @@ import { standingOf } from './claims'
 export type ContentsRow = OutlineEntry & {
   depth: number // 0 for "3", 1 for "3.1", 2 for "4.1.3"
   claims: number // claims whose sentence is in this section itself, not in its subsections
-  contradicted: boolean // one of those claims is contradicted by a source
+  contradicted: number // how many of those claims a source contradicts
 }
 
 /** Every top-level section, and a subsection only when a claim comes from it, so a long paper
- * keeps a short table of contents. */
-export function contentsRows(outline: OutlineEntry[], claims: Claim[]): ContentsRow[] {
+ * keeps a short table of contents. `counted` are the claims a filter leaves: the rows stay those
+ * of all `claims`, and each counts only its `counted` ones. */
+export function contentsRows(outline: OutlineEntry[], claims: Claim[], counted: Claim[] = claims): ContentsRow[] {
   return outline
+    .filter((entry) => !entry.n.includes('.') || claims.some((claim) => claim.section === entry.n))
     .map((entry) => {
-      const own = claims.filter((claim) => claim.section === entry.n)
+      const own = counted.filter((claim) => claim.section === entry.n)
       return {
         ...entry,
         depth: entry.n.split('.').length - 1,
         claims: own.length,
-        contradicted: own.some((claim) => standingOf(claim) === 'refutes'),
+        contradicted: own.filter((claim) => standingOf(claim) === 'refutes').length,
       }
     })
-    .filter((row) => row.depth === 0 || row.claims > 0)
 }
 
 /** The row to mark for a section: the section itself, or the nearest shown section it is

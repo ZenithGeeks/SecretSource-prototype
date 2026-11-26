@@ -16,9 +16,9 @@ export function ClassWorkspaceHeader({
     <>
       <div className="space-y-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">{workspace.course.subject} · Section {workspace.course.section}</p>
-          <h1 className="mt-1 font-serif text-[32px] font-semibold leading-[40px] text-ink">{workspace.course.name} · {workspace.course.section}</h1>
-          <p className="mt-1 text-[13px] text-ink-muted">{workspace.course.studentCount} students · {workspace.course.assignmentCount} assignments · {synced} from Google Classroom</p>
+          <p className="text-micro font-semibold uppercase tracking-widest text-accent">{workspace.course.subject} · Section {workspace.course.section}</p>
+          <h1 className="mt-1 font-serif text-[32px]/10 font-semibold text-ink">{workspace.course.name} · {workspace.course.section}</h1>
+          <p className="mt-1 text-ui text-ink-muted">{workspace.course.studentCount} students · {workspace.course.assignmentCount} assignments · {synced} from Google Classroom</p>
         </div>
       </div>
       <WorkspaceTabs active={activeTab} onChange={onTabChange} />

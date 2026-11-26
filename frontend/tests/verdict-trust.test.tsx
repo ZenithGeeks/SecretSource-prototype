@@ -67,7 +67,9 @@ test('a quote that is not on its passage page is looked for in the whole paper',
 
   fireEvent.click(screen.getByRole('button', { name: /Show in cited paper/ }))
 
-  await waitFor(() => expect(onShow).toHaveBeenCalled())
+  // The viewer opens at once, still looking; the second call carries where the quote was found.
+  await waitFor(() => expect(onShow).toHaveBeenCalledTimes(2))
   expect(fetch).toHaveBeenCalledTimes(2)
-  expect(onShow.mock.calls[0][0]).toMatchObject({ page: 5, source: { page: 5 } })
+  expect(onShow.mock.calls[0][0]).toMatchObject({ source: null, locating: true })
+  expect(onShow.mock.calls[1][0]).toMatchObject({ page: 5, source: { page: 5 } })
 })

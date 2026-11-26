@@ -1,6 +1,7 @@
 /** One name for the silent verdict, one place for the check counts, and "Cited work" for any
  * citation (#479). */
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
@@ -28,26 +29,30 @@ const stages = [
 ] as Stage[]
 
 describe('the analysis page wording', () => {
-  it('says "silent" in the summary line, as the tiles and badges do', () => {
+  it('keeps jargon out of the summary line', () => {
     render(<AnalysisProgress stages={stages} claims={[claim]} status="done" />)
 
-    expect(screen.getByText(/1 silent/)).toBeInTheDocument()
+    expect(screen.getByText(/citations? checked/)).toBeInTheDocument()
     expect(screen.queryByText(/not enough evidence/)).not.toBeInTheDocument()
   })
 
   it('leaves the check count to the summary line', () => {
     const analysis = { id: 'a1', paper: 'p.pdf', status: 'done', stages, claims: [claim] } as unknown as Analysis
 
-    render(<AnalysisHeader analysis={analysis} />)
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AnalysisHeader analysis={analysis} />
+      </QueryClientProvider>,
+    )
 
-    expect(screen.getByText('1 claim')).toBeInTheDocument()
+    expect(screen.queryByText('1 claim')).not.toBeInTheDocument()
     expect(screen.queryByText(/citations? checked/)).not.toBeInTheDocument()
   })
 
   it('calls a web page a cited work, not a cited paper', () => {
     render(<ClaimCard claim={claim} index={0} standing="unchecked" />)
 
-    expect(screen.getAllByText('Cited work').length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: 'Cited works' })).toBeInTheDocument()
     expect(screen.queryByText('Cited paper')).not.toBeInTheDocument()
   })
 })

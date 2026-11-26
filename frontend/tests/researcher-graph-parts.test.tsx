@@ -70,7 +70,7 @@ const COLORS: LegendColors = {
 describe('graph legends', () => {
   test('the claims legend names claim colours and edge styles', () => {
     render(<GraphClaimsLegend colors={COLORS} notIndexed={0} />)
-    for (const text of ['Claim', 'contradicted', 'silent', 'backed', 'Edge', 'backs it', 'contradicts', 'origin']) {
+    for (const text of ['Claim', 'Source contradicts', 'Source is silent', 'Not checked', 'Source backs it', 'Edge', 'backs it', 'contradicts', 'origin']) {
       expect(screen.getByText(text)).toBeInTheDocument()
     }
     expect(screen.queryByText(/not in a public index/)).toBeNull()

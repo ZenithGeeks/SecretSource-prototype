@@ -314,7 +314,7 @@ function InsightTile({ insight, active, onToggle }: { insight: Insight; active: 
       )}
     >
       <Icon className={cn('size-4 shrink-0', tone)} />
-      <span className={cn('font-mono text-[15px] leading-5 tracking-[-0.01em]', tone)}>{count}</span>
+      <span className={cn('font-mono text-reading leading-5 tracking-[-0.01em]', tone)}>{count}</span>
       <span className="min-w-0 text-xs leading-4 text-ink-muted">{label}</span>
     </button>
   )
@@ -530,7 +530,7 @@ function GraphCanvas({
     askPanel ? (
       <div className="flex min-w-0 flex-col gap-4 lg:flex-row">
         <div className="min-w-0 flex-1">{content}</div>
-        <div className="overflow-hidden lg:h-[calc(100dvh-14rem)] lg:w-[400px] lg:shrink-0 lg:rounded-2xl lg:border lg:border-border-subtle">
+        <div className="overflow-hidden lg:h-[calc(100dvh-14rem)] lg:w-100 lg:shrink-0 lg:rounded-2xl lg:border lg:border-border-subtle">
           {askPanel}
         </div>
       </div>
@@ -576,7 +576,7 @@ function GraphCanvas({
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="flex flex-col gap-1.5">
           <h1 className="type-display text-ink">{title}</h1>
-          <p className="max-w-3xl text-[15px] leading-6 text-ink-muted">{subtitle}</p>
+          <p className="max-w-3xl text-reading leading-6 text-ink-muted">{subtitle}</p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-3 sm:justify-end">
           <GraphSegmented
@@ -607,7 +607,7 @@ function GraphCanvas({
             onChange={setPFilter}
           />
           {pFilter === 'strong' && (
-            <p className="mt-2 text-[13px] text-ink-muted">
+            <p className="mt-2 text-ui text-ink-muted">
               Strong links join two papers when at least half of all the works they cite are cited by both.
             </p>
           )}
@@ -618,7 +618,7 @@ function GraphCanvas({
         // The findings are filters on the canvas, opened on demand so the first view is the graph.
         // The summary names the pressed one, so a closed disclosure still says why claims are dimmed.
         <details className="rounded-xl border border-border-subtle bg-surface">
-          <summary className="cursor-pointer rounded-xl px-4 py-3 text-[13px] font-medium text-ink pointer-coarse:min-h-11">
+          <summary className="cursor-pointer rounded-xl px-4 py-3 text-ui font-medium text-ink pointer-coarse:min-h-11">
             {activeInsight ? `Findings · showing ${activeInsight.label}` : `Findings · ${insights.filter((i) => i.count > 0).length} to look at`}
           </summary>
           <div className="flex flex-wrap gap-2 border-t border-border-subtle p-3">
@@ -631,7 +631,7 @@ function GraphCanvas({
               />
             ))}
             {activeInsight && (
-              <p className="basis-full text-[13px] text-ink-muted">
+              <p className="basis-full text-ui text-ink-muted">
                 {activeInsight.hint} The other claims are dimmed on the graph.
               </p>
             )}
@@ -645,10 +645,10 @@ function GraphCanvas({
             short window. The role shell is `wide` for Graph, so it also uses the screen width. */}
         <div
           ref={setCanvas}
-          className="relative min-h-[420px] min-w-0 flex-1 sm:min-h-[560px] overflow-hidden rounded-[14px] border border-border-subtle bg-canvas lg:h-[calc(100dvh-22rem)]"
+          className="relative min-h-105 min-w-0 flex-1 sm:min-h-140 overflow-hidden rounded-xl border border-border-subtle bg-canvas lg:h-[calc(100dvh-22rem)]"
         >
           {/* Zoom and fit, so a dense library can be opened up and re-framed. */}
-          <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-[10px] border border-border-subtle bg-surface">
+          <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface">
             {[
               { icon: ZoomIn, label: 'Zoom in', factor: 1.3 },
               { icon: ZoomOut, label: 'Zoom out', factor: 1 / 1.3 },
@@ -673,7 +673,7 @@ function GraphCanvas({
           </div>
           {view === 'claims' && (
             // On a phone the zoom column takes the right edge, so the filter shrinks to fit beside it.
-            <div className="absolute left-3 top-3 z-10 flex w-[min(220px,calc(100%-6rem))] items-center gap-2 rounded-[9px] border border-border-subtle bg-surface px-2.5 py-[7px] focus-within:ring-2 focus-within:ring-accent/40">
+            <div className="absolute left-3 top-3 z-10 flex w-[min(220px,calc(100%-6rem))] items-center gap-2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.75 focus-within:ring-2 focus-within:ring-accent/40">
               <Search className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
               <input
                 ref={filterInput}
@@ -682,7 +682,7 @@ function GraphCanvas({
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Filter claims (press /)"
                 aria-label="Filter claims"
-                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-muted"
+                className="min-w-0 flex-1 bg-transparent text-ui text-ink outline-none placeholder:text-ink-muted"
               />
             </div>
           )}
@@ -794,7 +794,7 @@ function GraphCanvas({
         </div>
 
         {askPanel ? (
-          <div className="flex w-full flex-col gap-2 lg:w-[400px] lg:shrink-0">
+          <div className="flex w-full flex-col gap-2 lg:w-100 lg:shrink-0">
             {detail && (
               <GraphSegmented
                 label="Side panel"
@@ -809,7 +809,7 @@ function GraphCanvas({
             {detail && side === 'details' ? (
               detail
             ) : (
-              <div className="overflow-hidden lg:h-[calc(100dvh-22rem)] lg:min-h-[560px] lg:rounded-2xl lg:border lg:border-border-subtle">
+              <div className="overflow-hidden lg:h-[calc(100dvh-22rem)] lg:min-h-140 lg:rounded-2xl lg:border lg:border-border-subtle">
                 {askPanel}
               </div>
             )}
@@ -877,7 +877,7 @@ export function Graph({
             <FieldConsensus onOpenAnalysis={onOpenAnalysis} />
           </div>
           {askPanel && (
-            <div className="overflow-hidden lg:sticky lg:top-[68px] lg:h-[calc(100dvh-6rem)] lg:w-[400px] lg:shrink-0 lg:rounded-2xl lg:border lg:border-border-subtle">
+            <div className="overflow-hidden lg:sticky lg:top-17 lg:h-[calc(100dvh-6rem)] lg:w-100 lg:shrink-0 lg:rounded-2xl lg:border lg:border-border-subtle">
               {askPanel}
             </div>
           )}

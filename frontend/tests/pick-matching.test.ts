@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { pickMatching } from '../src/lib/utils.ts'
+import { cn, pickMatching } from '../src/lib/utils.ts'
 
 const defaults = { theme: 'Match system', weeklyDigest: true, digestDay: 'Monday' }
 
@@ -24,4 +24,12 @@ test('pickMatching returns nothing for non-object input', () => {
   assert.deepEqual(pickMatching(defaults, null), {})
   assert.deepEqual(pickMatching(defaults, ['not', 'an', 'object']), {})
   assert.deepEqual(pickMatching(defaults, 'nope'), {})
+})
+
+test('cn keeps a text colour next to one of the theme type sizes', () => {
+  assert.equal(cn('text-accent', 'text-ui'), 'text-accent text-ui')
+})
+
+test('cn lets a later size replace an earlier one', () => {
+  assert.equal(cn('text-ui', 'text-caption'), 'text-caption')
 })

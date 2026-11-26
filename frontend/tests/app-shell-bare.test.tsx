@@ -54,7 +54,7 @@ test('the default shell has the sidebar, the phone top bar and the toolbar, with
   expect(screen.getByRole('button', { name: 'Ask AI' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument()
   expect(screen.getByRole('main')).toHaveClass('mx-auto', 'max-w-6xl', 'px-4', 'py-6')
-  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-[52px]', 'lg:h-[calc(100vh-52px)]', 'lg:w-[400px]')
+  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-13', 'lg:h-[calc(100vh-var(--spacing)*13)]', 'lg:w-100')
 })
 
 test('a bare shell has none of them: the content fills the window and the panel runs its full height', () => {
@@ -67,7 +67,7 @@ test('a bare shell has none of them: the content fills the window and the panel 
   expect(screen.getByText('content')).toBeInTheDocument()
   expect(screen.getByRole('main')).toHaveClass('h-screen', 'overflow-hidden')
   expect(screen.getByRole('main')).not.toHaveClass('max-w-6xl')
-  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-0', 'lg:h-screen', 'lg:w-[400px]')
+  expect(screen.getByLabelText('Panel field').parentElement).toHaveClass('lg:top-0', 'lg:h-screen', 'lg:w-100')
 })
 
 test('moving between the default shell and a bare one keeps the panel mounted', () => {
@@ -117,6 +117,27 @@ test('a full-width shell is locked to the window and is the containing block for
       <p>content</p>
     </AppShell>,
   )
-  expect(container.firstElementChild).toHaveClass('xl:relative', 'xl:h-dvh', 'xl:min-h-0', 'xl:overflow-hidden')
-  expect(screen.getByRole('complementary', { name: 'Sidebar' })).toHaveClass('xl:h-dvh')
+  expect(container.firstElementChild).toHaveClass('lg:relative', 'lg:h-dvh', 'lg:min-h-0', 'lg:overflow-clip')
+  expect(screen.getByRole('complementary', { name: 'Sidebar' })).toHaveClass('lg:h-dvh')
+})
+
+test('a full-width screen can put a header row in the top bar, and draws it in place with no bar', () => {
+  const header = (
+    <ToolbarActions orInline>
+      <span>Claim strip</span>
+    </ToolbarActions>
+  )
+  const { unmount } = render(
+    <AppShell nav={NAV} active="home" onNavigate={() => {}} role="Labeler" roleIcon={Home} breadcrumb={['Papers', 'A paper']} wide="full">
+      {header}
+    </AppShell>,
+  )
+  expect(screen.getByText('Claim strip').closest('main')).toBeNull()
+  const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' }).parentElement
+  expect(breadcrumb).toHaveClass('max-w-md', 'lg:shrink-0')
+  expect(breadcrumb).not.toHaveClass('shrink-0')
+  expect(breadcrumb?.nextElementSibling).toHaveClass('shrink-0', 'lg:flex-1', 'lg:shrink')
+  unmount()
+  render(header)
+  expect(screen.getByText('Claim strip')).toBeInTheDocument()
 })

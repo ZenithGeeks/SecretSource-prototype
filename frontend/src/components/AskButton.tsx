@@ -56,7 +56,9 @@ export function AskButton({
   useEffect(() => {
     if (!showIntro) return
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') dismiss()
+      if (event.key !== 'Escape') return
+      event.preventDefault() // the intro takes the key, not the page viewer under it
+      dismiss()
     }
     document.addEventListener('keydown', escape)
     return () => document.removeEventListener('keydown', escape)
@@ -133,7 +135,7 @@ export function AskButton({
         aria-label="Ask AI"
         title="Ask a question: the answer comes from your papers, and each sentence is checked against the passage it cites."
         className={cn(
-          'inline-flex shrink-0 min-h-11 items-center gap-2 rounded-full border py-1 pr-3.5 pl-1 text-[13px] font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-9',
+          'inline-flex shrink-0 min-h-11 items-center gap-2 rounded-full border py-1 pr-3.5 pl-1 text-ui font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:min-h-9',
           open
             ? 'border-accent bg-accent text-canvas'
             : 'border-accent bg-accent-soft text-ink hover:bg-surface',

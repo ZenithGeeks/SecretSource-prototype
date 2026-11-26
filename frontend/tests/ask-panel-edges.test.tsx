@@ -164,7 +164,7 @@ describe('a checked statement', () => {
 
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Copy' })))
 
-    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('Why?\n\n- BN uses batch statistics. [Can’t check]\n- Second. (group-norm) [Can’t check]')
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('Why?\n\n- BN uses batch statistics. [Not checked]\n- Second. (group-norm) [Not checked]')
   })
 
   it('counts a single contradicted check in the summary of a finished answer', () => {

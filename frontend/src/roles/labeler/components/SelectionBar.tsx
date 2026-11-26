@@ -40,7 +40,7 @@ export function SelectionBar({
             Selected in {where}
             {picked.page ? `, page ${picked.page}` : ''}
           </span>
-          <span className="block break-words">{quote}</span>
+          <span className="block wrap-break-word">{quote}</span>
         </span>
       </p>
       <div className="flex flex-wrap items-center gap-2">
