@@ -1139,7 +1139,7 @@ def test_acl_metadata_rejects_duplicate_matching_papers(monkeypatch):
 
 @pytest.mark.parametrize("pdf_first", [False, True])
 @pytest.mark.parametrize("same_id", [False, True])
-def test_acl_pdf_requires_a_unique_matching_paper_id(monkeypatch, pdf_first, same_id):
+def test_acl_mixed_pdf_records_keep_no_open_copy_outcome(monkeypatch, pdf_first, same_id):
     monkeypatch.setattr(sources, "_acl_venue", lambda venue, year: ("acl", {}))
     no_pdf = '<paper id="1"><title>Expected paper</title></paper>'
     pdf = f'<paper id="{1 if same_id else 2}"><title>Expected paper</title><pdf/></paper>'
@@ -1148,12 +1148,44 @@ def test_acl_pdf_requires_a_unique_matching_paper_id(monkeypatch, pdf_first, sam
         f'<collection id="2022.acl"><volume id="1">{records}</volume></collection>'
     ))
     expected = {"title": "Expected paper", "venue": "ACL", "year": 2022}
-    if same_id:
-        [candidate] = sources._acl_anthology_candidates("Expected paper", expected)
-        assert candidate.url == "https://aclanthology.org/2022.acl-1.1.pdf"
-    else:
-        with pytest.raises(sources.AmbiguousMatch):
-            sources._acl_anthology_candidates("Expected paper", expected)
+    with pytest.raises(sources.NoOpenAccessCopy) as failure:
+        sources._acl_anthology_candidates("Expected paper", expected)
+    assert getattr(failure.value, "source_attempts", []) == (
+        [{"provider": "acl_anthology", "result": "matched"}] if same_id else []
+    )
+
+
+@pytest.mark.parametrize("conflict_first", [False, True])
+def test_acl_doi_title_conflict_with_a_no_pdf_match_preserves_no_copy(monkeypatch, conflict_first):
+    monkeypatch.setattr(sources, "_acl_venue", lambda venue, year: ("acl", {}))
+    no_pdf = '<paper id="1"><title>Expected paper</title><doi>10.1000/wanted</doi></paper>'
+    conflict = '<paper id="2"><title>Other paper</title><doi>10.1000/wanted</doi><pdf/></paper>'
+    records = conflict + no_pdf if conflict_first else no_pdf + conflict
+    monkeypatch.setattr(sources, "_acl_resource", lambda *args: (
+        f'<collection id="2022.acl"><volume id="1">{records}</volume></collection>'
+    ))
+    with pytest.raises(sources.NoOpenAccessCopy) as failure:
+        sources._acl_anthology_candidates("10.1000/wanted", {
+            "title": "Expected paper", "venue": "ACL", "year": 2022,
+        })
+    assert not getattr(failure.value, "source_attempts", None)
+
+
+@pytest.mark.parametrize("bad_pdf_first", [False, True])
+def test_acl_no_copy_preserves_legacy_precedence_with_a_malformed_id(monkeypatch, bad_pdf_first):
+    monkeypatch.setattr(sources, "_acl_venue", lambda venue, year: ("acl", {}))
+    no_pdf = '<paper id="1"><title>Expected paper</title></paper>'
+    bad_pdf = '<paper id="?"><title>Expected paper</title><pdf/></paper>'
+    records = bad_pdf + no_pdf if bad_pdf_first else no_pdf + bad_pdf
+    monkeypatch.setattr(sources, "_acl_resource", lambda *args: (
+        f'<collection id="P19"><volume id="1">{records}</volume></collection>'
+    ))
+    expected_error = sources.LookupUnavailable if bad_pdf_first else sources.NoOpenAccessCopy
+    with pytest.raises(expected_error) as failure:
+        sources._acl_anthology_candidates("Expected paper", {
+            "title": "Expected paper", "venue": "ACL", "year": 2019,
+        })
+    assert not getattr(failure.value, "source_attempts", None)
 
 
 def test_source_cache_rejects_a_cached_title_identity_conflict(monkeypatch, store_in_tmp):

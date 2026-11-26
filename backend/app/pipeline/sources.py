@@ -961,7 +961,9 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
 
     fits = _expected_fits(expected)
     matches = []
-    no_pdf_matches: set[str] = set()
+    no_open_copy = False
+    incomplete_identity = False
+    matching_ids: set[str] = set()
     mismatched_doi_titles = []
     for volume in root.findall("./volume"):
         for paper in volume.findall("./paper"):
@@ -982,11 +984,19 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
             ))) if authors else ""
             if not fits(year, first_author):
                 continue
-            anthology_id = _acl_paper_id(root, volume, paper)
+            # The first matching row without a PDF determines the lookup outcome.
+            # Continue scanning only to decide whether identity was confirmed.
             if paper.find("pdf") is None:
-                # Keep scanning instead of raising here: a later paper could be this same
-                # work with a PDF after all, or a second match that makes this ambiguous.
-                no_pdf_matches.add(anthology_id)
+                no_open_copy = True
+            try:
+                anthology_id = _acl_paper_id(root, volume, paper)
+            except LookupUnavailable:
+                if not no_open_copy:
+                    raise
+                incomplete_identity = True
+                continue
+            matching_ids.add(anthology_id)
+            if no_open_copy:
                 continue
             ids = {"ACL": anthology_id}
             if found_doi:
@@ -996,22 +1006,19 @@ def _acl_anthology_candidates(identifier: str, expected: dict | None = None) -> 
                 "acl_anthology", ids, year, first_author,
             ))
 
+    if no_open_copy:
+        error = NoOpenAccessCopy("ACL Anthology metadata has no PDF for this paper")
+        if len(matching_ids) == 1 and not incomplete_identity and not mismatched_doi_titles:
+            error.source_attempts = [_attempt("acl_anthology", "matched")]
+        raise error
     if mismatched_doi_titles:
         raise IdentityMismatch("the ACL Anthology DOI matches a paper with a different title")
     unique = {item.ids.get("ACL"): item for item in matches}
-    if unique:
-        if len(unique.keys() | no_pdf_matches) > 1:
-            raise AmbiguousMatch(f"more than one ACL Anthology paper matches '{title}'")
-        return list(unique.values())
-    if no_pdf_matches:
-        error = NoOpenAccessCopy("ACL Anthology metadata has no PDF for this paper")
-        if len(no_pdf_matches) == 1:
-            # Exactly one candidate matched title/DOI and year/author; keep that
-            # confirmation so the caller does not log it as unmatched. With more than
-            # one, identity is not uniquely established, so leave the attempt untagged.
-            error.source_attempts = [_attempt("acl_anthology", "matched")]
-        raise error
-    raise Unresolvable(f"ACL Anthology has no paper matching '{title}'")
+    if len(unique) > 1:
+        raise AmbiguousMatch(f"more than one ACL Anthology paper matches '{title}'")
+    if not unique:
+        raise Unresolvable(f"ACL Anthology has no paper matching '{title}'")
+    return list(unique.values())
 
 
 def _fallback_resolutions(
