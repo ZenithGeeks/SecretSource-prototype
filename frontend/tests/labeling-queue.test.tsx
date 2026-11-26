@@ -422,7 +422,12 @@ describe('the labeler queue', () => {
     })
     renderQueue()
     fireEvent.click(await screen.findByRole('button', { name: 'Downloads' }))
-    for (const name of ['Download labels CSV', 'Download DSPy claims (JSONL)', 'Download DSPy verdicts (JSONL)']) {
+    for (const name of [
+      'Download labels CSV',
+      'Download claims CSV',
+      'Download DSPy claims (JSONL)',
+      'Download DSPy verdicts (JSONL)',
+    ]) {
       const button = await screen.findByRole('button', { name })
       await waitFor(() => expect(button).toBeEnabled())
       fireEvent.click(button)
@@ -431,10 +436,11 @@ describe('the labeler queue', () => {
     }
     expect(gateway.fetched.map((u) => u.split('tab=')[1])).toEqual([
       'labels&scope=mine',
+      'claims&scope=mine',
       'dspy_claims&scope=mine',
       'dspy_verdicts&scope=mine',
     ])
-    expect(saved).toEqual(['evidence_labels.csv', 'dspy_claims.jsonl', 'dspy_verdicts.jsonl'])
+    expect(saved).toEqual(['evidence_labels.csv', 'claims.csv', 'dspy_claims.jsonl', 'dspy_verdicts.jsonl'])
   })
 
   it('downloads the whole team only when asked, under its own file name', async () => {
