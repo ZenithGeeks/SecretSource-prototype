@@ -76,6 +76,33 @@ def test_a_paywalled_record_does_not_hide_an_open_one_with_the_same_title(monkey
     assert sources._openalex_by_title("Frontier: Exploring Exascale").url == preprint
 
 
+def test_a_uniquely_matched_no_pdf_work_is_reported_as_matched(monkeypatch):
+    answer(monkeypatch, work(pdfs=(None,)))
+    with pytest.raises(sources.NoOpenAccessCopy) as failure:
+        sources._openalex_by_title(
+            "Frontier: Exploring Exascale", expected_doi="10.1145/3581784.3607089"
+        )
+    assert failure.value.source_attempts == [{"provider": "openalex", "result": "matched"}]
+
+
+def test_two_distinct_no_pdf_works_are_ambiguous_not_matched(monkeypatch):
+    first = work(pdfs=(None,))
+    second = {**work(pdfs=(None,)), "doi": "https://doi.org/10.1145/other-work"}
+    answer(monkeypatch, first, second)
+    with pytest.raises(sources.NoOpenAccessCopy) as failure:
+        sources._openalex_by_title("Frontier: Exploring Exascale")
+    assert not getattr(failure.value, "source_attempts", None)
+
+
+def test_a_no_pdf_work_with_a_conflicting_doi_is_not_matched(monkeypatch):
+    answer(monkeypatch, work(pdfs=(None,)))
+    with pytest.raises(sources.NoOpenAccessCopy) as failure:
+        sources._openalex_by_title(
+            "Frontier: Exploring Exascale", expected_doi="10.1000/different-work"
+        )
+    assert not getattr(failure.value, "source_attempts", None)
+
+
 def test_openalex_not_answering_is_unavailable_not_unknown(monkeypatch):
     refuse(monkeypatch)
     with pytest.raises(sources.LookupUnavailable):

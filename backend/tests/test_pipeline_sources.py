@@ -105,6 +105,27 @@ def test_unpaywall_knowing_a_work_without_a_pdf_has_no_open_access_copy(monkeypa
         sources._unpaywall_pdf(DOI)
 
 
+def test_unpaywall_no_locations_with_a_conflicting_title_is_not_matched(monkeypatch, web):
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "me@example.org")
+    web[0].append(Reply(payload={"title": "An unrelated paper", "best_oa_location": {}}))
+
+    with pytest.raises(sources.NoOpenAccessCopy) as failure:
+        sources._unpaywall_resolutions(DOI, {"title": "Expected paper"})
+    assert not getattr(failure.value, "source_attempts", None)
+
+
+def test_unpaywall_unusable_locations_with_a_conflicting_title_is_not_matched(monkeypatch, web):
+    monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "me@example.org")
+    web[0].append(Reply(payload={
+        "title": "An unrelated paper",
+        "best_oa_location": {"host_type": "repository"},
+    }))
+
+    with pytest.raises(sources.NoOpenAccessCopy) as failure:
+        sources._unpaywall_resolutions(DOI, {"title": "Expected paper"})
+    assert not getattr(failure.value, "source_attempts", None)
+
+
 def test_unpaywall_gives_the_best_pdf_and_an_arxiv_copy_among_the_other_locations(monkeypatch, web):
     monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "me@example.org")
     web[0].append(
@@ -830,7 +851,7 @@ def test_conflicting_doi_candidate_is_rejected_before_download(monkeypatch, stor
     )
     downloaded = []
     monkeypatch.setattr(sources, "_semantic_scholar_pdf", lambda paper_id: candidate)
-    monkeypatch.setattr(sources, "_unpaywall_pdf", lambda doi: candidate)
+    monkeypatch.setattr(sources, "_unpaywall_pdf", lambda doi, expected=None: candidate)
     monkeypatch.setattr(sources, "_download", lambda *args: downloaded.append(args))
 
     with pytest.raises(sources.IdentityMismatch) as failure:
@@ -1070,6 +1091,21 @@ def test_acl_metadata_reports_missing_pdf_and_missing_title_match(monkeypatch):
         })
 
 
+def test_acl_two_matching_papers_with_no_pdf_are_ambiguous_not_matched(monkeypatch):
+    monkeypatch.setattr(sources, "_acl_venue", lambda venue, year: ("acl", {}))
+    monkeypatch.setattr(sources, "_acl_resource", lambda *args, **kwargs: (
+        '<collection id="2022.acl"><volume id="1">'
+        '<paper id="2"><title>Expected paper</title></paper>'
+        '<paper id="3"><title>Expected paper</title></paper>'
+        '</volume></collection>'
+    ))
+    with pytest.raises(sources.NoOpenAccessCopy) as failure:
+        sources._acl_anthology_candidates("Expected paper", {
+            "venue": "ACL", "year": 2022, "title": "Expected paper",
+        })
+    assert not getattr(failure.value, "source_attempts", None)
+
+
 def test_acl_metadata_skips_wrong_dois_and_author_mismatches(monkeypatch):
     monkeypatch.setattr(sources, "_acl_venue", lambda venue, year: ("acl", {}))
     monkeypatch.setattr(sources, "_acl_resource", lambda *args: (
@@ -1228,7 +1264,8 @@ def test_fallbacks_skip_prior_providers_and_accept_other_index_results(monkeypat
     )
     asked = []
     monkeypatch.setattr(
-        sources, "_unpaywall_resolutions", lambda doi: asked.append("unpaywall") or [unpaywall]
+        sources, "_unpaywall_resolutions",
+        lambda doi, expected=None: asked.append("unpaywall") or [unpaywall],
     )
     monkeypatch.setattr(sources, "_openalex_candidates", lambda *args: asked.append("openalex") or [openalex])
     acl_doi = "10.18653/v1/2022.acl-main.1"
@@ -1249,7 +1286,7 @@ def test_fallbacks_record_provider_request_and_index_errors(monkeypatch):
     monkeypatch.setattr(sources, "UNPAYWALL_EMAIL", "contact@example.org")
     monkeypatch.setattr(
         sources, "_unpaywall_resolutions",
-        lambda doi: (_ for _ in ()).throw(requests.Timeout("down")),
+        lambda doi, expected=None: (_ for _ in ()).throw(requests.Timeout("down")),
     )
     monkeypatch.setattr(sources, "_acl_anthology_candidate", lambda *args: None)
     monkeypatch.setattr(

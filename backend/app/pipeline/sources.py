@@ -514,7 +514,7 @@ def _semantic_scholar_by_title(title: str, fits: Fits = _any_work) -> Resolution
     raise Unresolvable(f"no paper found matching the title: {title}")
 
 
-def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
+def _openalex_by_title(title: str, fits: Fits = _any_work, expected_doi: str = "") -> Resolution:
     """Resolve title-only citations through OpenAlex after arXiv and Semantic Scholar."""
     from app.pipeline.indexes import _IndexError, openalex_works
 
@@ -529,7 +529,8 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
         raise LookupUnavailable(f"OpenAlex did not answer: {error}") from error
 
     others = []
-    paywalled = False
+    no_pdf_works: set = set()
+    no_pdf_doi_conflict = False
     for work in works:
         found_title = work.get("title") or ""
         if not titles_match(title, found_title):
@@ -545,16 +546,25 @@ def _openalex_by_title(title: str, fits: Fits = _any_work) -> Resolution:
             continue
         pdf = next((loc.get("pdf_url") for loc in work.get("locations") or [] if loc.get("pdf_url")), "")
         if not pdf:
-            paywalled = True
+            candidate_doi = doi_in(str(work.get("doi") or ""))
+            if expected_doi and candidate_doi and candidate_doi.lower() != expected_doi.lower():
+                # `_validate_resolution` would reject this candidate if it had a PDF, so a
+                # no-PDF candidate with a conflicting DOI must not be reported as a match.
+                no_pdf_doi_conflict = True
+                continue
+            no_pdf_works.add(candidate_doi or (found_title, year, first_author))
             continue
         doi = doi_in(str(work.get("doi") or ""))
         ids = {"DOI": doi} if doi else {}
         return Resolution(pdf, found_title, "openalex", ids, year, first_author)
-    if paywalled:
+    if no_pdf_works or no_pdf_doi_conflict:
         error = NoOpenAccessCopy(f"no open-access PDF known for '{title}'", "openalex")
-        # The title + fits(year, first_author) check above already confirmed this is the
-        # cited work; keep that so the caller does not log it as unmatched.
-        error.source_attempts = [_attempt("openalex", "matched")]
+        if len(no_pdf_works) == 1 and not no_pdf_doi_conflict:
+            # Exactly one candidate matched title/fits(year, first_author) and its DOI (when
+            # known) does not conflict; keep that confirmation so the caller does not log it
+            # as unmatched. With more than one, or a DOI conflict, identity is not uniquely
+            # established, so leave the attempt untagged.
+            error.source_attempts = [_attempt("openalex", "matched")]
         raise error
     if others:
         raise OnlyOtherWorks(f"OpenAlex has only other works titled '{title}': {'; '.join(others)}")
@@ -614,7 +624,8 @@ def _unpaywall_resolutions(doi: str, expected: dict | None = None) -> list[Resol
     # not conflict with the citation's; `_validate_resolution` makes the same check when a
     # location is found below, so a title conflict here must not be reported as a match either.
     expected_title = " ".join(str((expected or {}).get("title") or "").split())
-    title_confirmed = not expected_title or titles_match(expected_title, work.get("title") or "")
+    found_title = work.get("title") or ""
+    title_confirmed = not expected_title or not found_title or titles_match(expected_title, found_title)
 
     locations = []
     if best := work.get("best_oa_location"):
@@ -1091,10 +1102,11 @@ def _first_answer(resolvers, argument: str, expected: dict | None = None) -> Res
 
 
 def _by_title(title: str, expected: dict | None = None) -> Resolution:
+    expected_doi = doi_in(str((expected or {}).get("doi") or "")) or ""
     return _first_answer((
         ("arxiv", lambda query: _arxiv_by_title(query, _expected_fits(expected))),
         ("semantic_scholar", lambda query: _semantic_scholar_by_title(query, _expected_fits(expected))),
-        ("openalex", lambda query: _openalex_by_title(query, _expected_fits(expected))),
+        ("openalex", lambda query: _openalex_by_title(query, _expected_fits(expected), expected_doi)),
     ), title, expected)
 
 
